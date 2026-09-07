@@ -99,12 +99,10 @@ import {
 } from "./readerTextInclusion";
 import {
   resolveInitialPanelItemState,
-  resolveActiveLibraryID,
+  resolveShortcutMode,
   resolveConversationSystemForItem,
   resolveDisplayConversationKind,
-  resolveShortcutMode,
 } from "./portalScope";
-import { getLockedGlobalConversationKey } from "./prefHelpers";
 import { getEditableSelectionFromDocument } from "./noteSelection";
 import {
   clearCompletedPanelLifecycleSignature,
@@ -114,6 +112,7 @@ import {
 } from "./panelLifecycleSignature";
 import {
   hasPanelContextOwnerChanged,
+  shouldKeepDisplayedConversationWithoutRebuild,
   shouldRefreshContextSourceWithoutPanelRebuild,
 } from "./panelContextLifecycle";
 import {
@@ -265,11 +264,13 @@ export function registerReaderContextPanel() {
       icon: `chrome://${config.addonRef}/content/icons/icon-sidebar.svg`,
     },
     onInit: ({ setEnabled, tabType }) => {
-      setEnabled(true);
+      // The library tab hosts the bottom library chat panel instead of the
+      // item pane section; reader/note tabs keep the sidebar section.
+      setEnabled(tabType !== "library");
       ztoolkit.log(`LLM: panel init tabType=${tabType}`);
     },
     onItemChange: ({ setEnabled, tabType, item }) => {
-      setEnabled(true);
+      setEnabled(tabType !== "library");
       const selectedTabId = refreshLastKnownSelectedTabId();
       const itemChangeSignature = [
         tabType || "",
@@ -313,25 +314,13 @@ export function registerReaderContextPanel() {
           !panelRoot ||
           !isPanelRootInitialized(panelRoot);
 
-        const resolvedState = resolveInitialPanelItemState(item);
+        const resolvedState = resolveInitialPanelItemState(item, {
+          conversationMode: "paper",
+        });
         const expectedSystem =
           resolveConversationSystemForItem(resolvedState.item) || "upstream";
 
-        // Also check if a global lock requires switching to open chat
-        const libraryID =
-          resolveActiveLibraryID() ||
-          (resolvedState.item
-            ? Number(resolvedState.item.libraryID || 0)
-            : 0) ||
-          (item ? Number(item.libraryID || 0) : 0);
-        const lockedKey =
-          expectedSystem === "claude_code" || expectedSystem === "codex"
-            ? null
-            : libraryID > 0
-              ? getLockedGlobalConversationKey(libraryID)
-              : null;
         const currentKind = panelRoot?.dataset?.conversationKind;
-        const currentItemKey = panelRoot?.dataset?.itemId;
         const currentSystem = panelRoot?.dataset?.conversationSystem || "";
         const currentContextItemKey = panelRoot?.dataset?.contextItemId || "";
         const currentRawContextItemKey =
@@ -340,17 +329,6 @@ export function registerReaderContextPanel() {
           panelRoot?.dataset?.contextOwnerItemId || "";
         const currentContextSourceStateKey =
           panelRoot?.dataset?.contextSourceStateKey || "";
-        // Lock is stale if:
-        // - lock active + panel in paper mode (need to switch to global)
-        // - lock active + panel shows different global conversation
-        // - lock cleared + panel still in global mode (need to switch back to paper)
-        const lockStale =
-          (lockedKey !== null &&
-            (currentKind === "paper" ||
-              (currentItemKey !== undefined &&
-                currentItemKey !== String(lockedKey)))) ||
-          (lockedKey === null && currentKind === "global" && !needsFullRender);
-
         // Detect if the active item has changed (e.g. user switched reader tabs).
         // If so, the panel must fully re-render to switch conversations.
         const storedItemKey = panelRoot?.dataset?.itemId;
@@ -388,12 +366,22 @@ export function registerReaderContextPanel() {
           shouldRefreshContextSourceWithoutPanelRebuild(contextDecision);
         const systemChanged =
           !needsFullRender && currentSystem !== expectedSystem;
+        // Anchored-conversation guard: the resolved conversation key drifted
+        // but the raw anchor item did not change — keep the displayed
+        // conversation instead of rebuilding.
+        const keepDisplayedConversation =
+          shouldKeepDisplayedConversationWithoutRebuild({
+            needsFullRender,
+            storedItemKey,
+            newItemKey,
+            currentRawContextItemKey,
+            rawContextItemKey,
+          });
 
         if (
           needsFullRender ||
-          lockStale ||
-          itemChanged ||
-          contextOwnerChanged ||
+          (!keepDisplayedConversation &&
+            (itemChanged || contextOwnerChanged)) ||
           systemChanged
         ) {
           clearCompletedPanelLifecycleSignature(body);
@@ -439,12 +427,17 @@ export function registerReaderContextPanel() {
           })();
         } else {
           // Same item — keep item reference current so delegated handlers
-          // (e.g. Add Text) always resolve the active item.
-          activeContextPanels.set(body, () => resolvedState.item);
+          // (e.g. Add Text) always resolve the active item. When the
+          // anchored-conversation guard kept the displayed conversation, keep
+          // pointing at it instead of the drifted resolution.
+          const effectiveItem = keepDisplayedConversation
+            ? (activeContextPanels.get(body)?.() ?? resolvedState.item)
+            : resolvedState.item;
+          activeContextPanels.set(body, () => effectiveItem);
           activeContextPanelRawItems.set(body, item || null);
           writePanelContextDataset(panelRoot, rawContextItem);
-          void retainClaudeRuntimeForBody(body, resolvedState.item);
-          if (sameOwnerContextSourceChanged) {
+          void retainClaudeRuntimeForBody(body, effectiveItem);
+          if (sameOwnerContextSourceChanged || keepDisplayedConversation) {
             persistPendingChatScrollRestoreFromBody(body);
             setPanelRenderClaim(body, {
               kind: "context-refresh",
@@ -468,7 +461,9 @@ export function registerReaderContextPanel() {
       // Skip full render when standalone window is active
       if (isStandaloneWindowActive()) return;
 
-      const resolvedInitialState = resolveInitialPanelItemState(item);
+      const resolvedInitialState = resolveInitialPanelItemState(item, {
+        conversationMode: "paper",
+      });
       const resolvedItem = resolvedInitialState.item;
       const lifecycleSignature = buildPanelLifecycleSignature(
         item || null,
@@ -511,7 +506,9 @@ export function registerReaderContextPanel() {
         renderClaim.outcome === "context-refresh" &&
         Boolean(body.querySelector("#llm-main"));
       if (contextRefreshOnly) {
-        activeContextPanels.set(body, () => resolvedItem);
+        // Keep the conversation anchor as-is: for a context-refresh claim the
+        // panel is already displaying the right conversation (onRender set it,
+        // or the anchored-conversation guard deliberately kept it).
         activeContextPanelRawItems.set(body, item || null);
       } else if (!syncAlreadyRendered) {
         persistPendingChatScrollRestoreFromBody(body);

@@ -81,6 +81,14 @@ Documentation:
 - **Skills** let you customize how Agent Mode handles research workflows. The
   plugin ships with 8 built-in skills and a portal for creating your own.
 - **General Web Search** lets the in-plugin Agent search the current public web with Tavily, read relevant pages, and attach source links to its answers.
+- **Library Chat Panel** adds a toolbar button in the library tab that opens
+  a resizable chat panel below the item list. It anchors the library-wide
+  conversation — selecting items only refreshes the attached context, never
+  the conversation — and is available without selecting any item.
+- **Surface-scoped conversations**: the reader sidebar hosts paper chat, the
+  library panel hosts library chat, and each keeps its conversation until you
+  switch explicitly via history or "new chat" (the old mode-toggle chip is
+  gone).
 - **Standalone Window Mode** opens the assistant in a dedicated window with
   paper chat, library chat, and conversation history.
 - **File-Based Notes** save Markdown notes to local folders, including Obsidian,

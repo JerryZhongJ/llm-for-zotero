@@ -13,6 +13,11 @@ import {
   openStandaloneChat,
 } from "./modules/contextPanel";
 import { resolveActiveLibraryID } from "./modules/contextPanel/portalScope";
+import {
+  registerLibraryChatPanel,
+  unregisterLibraryChatPanel,
+  unregisterAllLibraryChatPanels,
+} from "./modules/contextPanel/libraryPanel";
 import { zoteroChangeDispatcher } from "./services/zoteroChangeDispatcher";
 import { registerZoteroItemContextMenu } from "./modules/contextPanel/zoteroItemContextMenu";
 import { initChatStore } from "./utils/chatStore";
@@ -431,6 +436,9 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     });
     keyset.appendChild(key);
   }
+
+  // Library-tab bottom chat panel (independent of item selection).
+  registerLibraryChatPanel(win);
 }
 
 function registerPrefsPane() {
@@ -444,6 +452,7 @@ function registerPrefsPane() {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+  unregisterLibraryChatPanel(win);
   unregisterNoteEditingSelectionTracking(win);
   ztoolkit.unregisterAll();
   closeAllAddonDialogs();
@@ -455,6 +464,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 async function onShutdown(): Promise<void> {
   unregisterPaperConversationRestoreNotifications();
   await shutdownPaperRestoreSelections();
+  unregisterAllLibraryChatPanels();
   ztoolkit.unregisterAll();
   unregisterReaderSelectionTracking();
   unregisterAllNoteEditingSelectionTracking();

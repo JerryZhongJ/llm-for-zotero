@@ -471,10 +471,6 @@ export const selectedPaperPreviewExpandedCache = new Map<
 >();
 export const selectedPaperContextListExpandedCache = new Map<number, boolean>();
 export const activeGlobalConversationByLibrary = new Map<number, number>();
-export const activeConversationModeByLibrary = new Map<
-  number,
-  "paper" | "global"
->();
 // Draft text per conversation — capped to prevent unbounded growth (24h TTL, max 100).
 export const draftInputCache = new TTLMap<number, string>(
   24 * 60 * 60 * 1000,
@@ -601,7 +597,6 @@ export function clearAllState(): void {
   selectedPaperPreviewExpandedCache.clear();
   selectedPaperContextListExpandedCache.clear();
   activeGlobalConversationByLibrary.clear();
-  activeConversationModeByLibrary.clear();
   draftInputCache.clear();
   webChatDraftInputCache.clear();
   selectedTextCache.clear();

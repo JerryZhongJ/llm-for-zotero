@@ -8,13 +8,11 @@ import { isSupportedContextAttachment } from "./contextAttachmentSupport";
 import { normalizePositiveInt } from "./normalizers";
 import {
   buildPaperStateKey,
-  getLastUsedUpstreamConversationMode,
   getLastUsedUpstreamGlobalConversationKey,
   getLastUsedPaperConversationKey,
   getLockedGlobalConversationKey,
 } from "./prefHelpers";
 import {
-  activeConversationModeByLibrary,
   activeGlobalConversationByLibrary,
   activePaperConversationByPaper,
 } from "./state";
@@ -397,35 +395,9 @@ export function resolveNoteFocusSystemSwitch(params: {
   });
 }
 
-function resolvePreferredConversationMode(
-  libraryID: number,
-  system: ConversationSystem,
-): "global" | "paper" {
-  if (system === "claude_code") {
-    const rememberedMode =
-      activeClaudeConversationModeByLibrary.get(
-        buildClaudeLibraryStateKey(libraryID),
-      ) || getLastUsedClaudeConversationMode(libraryID);
-    return rememberedMode === "global" ? "global" : "paper";
-  }
-  if (system === "codex") {
-    const rememberedMode =
-      activeCodexConversationModeByLibrary.get(
-        buildCodexLibraryStateKey(libraryID),
-      ) || getLastUsedCodexConversationMode(libraryID);
-    return rememberedMode === "global" ? "global" : "paper";
-  }
-  const rememberedMode =
-    activeConversationModeByLibrary.get(libraryID) ||
-    getLastUsedUpstreamConversationMode(libraryID);
-  if (rememberedMode === "paper") {
-    return "paper";
-  }
-  if (getLockedGlobalConversationKey(libraryID) !== null) {
-    return "global";
-  }
-  return rememberedMode === "global" ? "global" : "paper";
-}
+// The conversation mode is no longer derived from remembered state: each
+// surface fixes its kind (reader sidebar = paper, library panel = global,
+// standalone passes its own). Only the conversation keys are remembered.
 
 function resolveGlobalConversationKey(
   libraryID: number,
@@ -598,9 +570,7 @@ export function resolveInitialPanelItemState(
     item,
     preferredSystem: options?.conversationSystem,
   });
-  const preferredMode =
-    options?.conversationMode ||
-    resolvePreferredConversationMode(libraryID, conversationSystem);
+  const preferredMode = options?.conversationMode || "paper";
 
   if (preferredMode === "global") {
     item = resolveRememberedGlobalPanelItem(libraryID, conversationSystem);

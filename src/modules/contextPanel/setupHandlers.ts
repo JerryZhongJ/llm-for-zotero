@@ -2,6 +2,8 @@
 import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
 import { revealLocalPath } from "../../utils/revealLocalPath";
+import { setAgentLibraryWriteMode } from "../../agent/libraryWriteMode";
+import { normalizeAgentLibraryWriteMode } from "../../shared/agentLibraryWriteMode";
 import { getAllSkills } from "../../agent/skills";
 import type { AgentSkill } from "../../agent/skills/skillLoader";
 import type { RuntimeModelEntry } from "../../utils/modelProviders";
@@ -90,7 +92,6 @@ import {
   consumeWebChatConversationForceNewChat,
   resetWebChatConversationSessionState,
   currentRequestId,
-  activeConversationModeByLibrary,
   activeGlobalConversationByLibrary,
   activePaperConversationByPaper,
   draftInputCache,
@@ -147,7 +148,6 @@ import {
   setLastUsedReasoningLevel,
   setLastUsedReasoningLevelForProvider,
   setLastUsedRuntimeMode,
-  setLastUsedUpstreamConversationMode,
   setLastUsedUpstreamGlobalConversationKey,
   getLastUsedPaperConversationKey,
   setLastUsedPaperConversationKey,
@@ -681,8 +681,6 @@ export function setupHandlers(
     historyToggleBtn,
     historyModeIndicator,
     historyMenu,
-    modeCapsule,
-    modeChipBtn,
     historyRowMenu,
     historyRowRenameBtn,
     historyUndo,
@@ -749,6 +747,19 @@ export function setupHandlers(
   if (!panelRoot) {
     ztoolkit.log("LLM: Could not find panel root");
     return;
+  }
+
+  // Library write mode selector (next to the reasoning level). Persisted
+  // immediately; the registry reads it live, so no restart is needed.
+  const writeModeSelect = body.querySelector(
+    "#llm-write-mode",
+  ) as HTMLSelectElement | null;
+  if (writeModeSelect) {
+    writeModeSelect.addEventListener("change", () => {
+      setAgentLibraryWriteMode(
+        normalizeAgentLibraryWriteMode(writeModeSelect.value),
+      );
+    });
   }
 
   const isStandalonePanel = panelRoot.dataset.standalone === "true";
@@ -1624,8 +1635,8 @@ export function setupHandlers(
           );
         }
       } else {
-        activeConversationModeByLibrary.set(libraryID, mode);
-        setLastUsedUpstreamConversationMode(libraryID, mode);
+        // Upstream surfaces no longer persist a conversation mode — the kind
+        // is fixed by the surface — only the conversation keys are remembered.
         if (mode === "global") {
           activeGlobalConversationByLibrary.set(libraryID, item.id);
           setLastUsedUpstreamGlobalConversationKey(libraryID, item.id);
@@ -1663,36 +1674,6 @@ export function setupHandlers(
     if (historyModeIndicator) {
       // Keep historyModeIndicator (which is the clock history button) accessible.
       // Its label is static "Conversation history" — no text update needed.
-    }
-    // Update mode capsule data-active state
-    if (modeCapsule) {
-      modeCapsule.dataset.mode = mode || "";
-    }
-    if (modeChipBtn) {
-      // [webchat] Don't overwrite — applyWebChatModeUI manages the chip in webchat mode
-      if (!modeChipBtn.querySelector(".llm-webchat-dot")) {
-        const currentLabel = noteSession
-          ? noteSession.conversationKind === "global"
-            ? t("Library chat")
-            : t("Paper chat")
-          : mode === "global"
-            ? t("Library chat")
-            : t("Paper chat");
-        modeChipBtn.textContent = currentLabel;
-        modeChipBtn.title = noteSession
-          ? currentLabel
-          : mode === "global"
-            ? "Switch to paper chat"
-            : "Switch to library chat";
-        modeChipBtn.setAttribute(
-          "aria-label",
-          noteSession
-            ? currentLabel
-            : mode === "global"
-              ? "Switch to paper chat"
-              : "Switch to library chat",
-        );
-      }
     }
     if (inputBox && !noteSession) {
       inputBox.placeholder =
@@ -4608,7 +4589,6 @@ export function setupHandlers(
     historyUndoText,
     historyUndoBtn,
     topToast,
-    modeChipBtn,
     getItem: () => item,
     setItem: (nextItem) => {
       item = nextItem as any;
@@ -5670,26 +5650,6 @@ export function setupHandlers(
       getSelectedModelInfo().currentModel || null;
   }
 
-  const startWebChatConnectionCheck = (dot: HTMLElement) => {
-    stopWebChatConnectionCheck();
-    const check = async () => {
-      try {
-        // Always use dynamic port — saved apiBase may be stale
-        const { getRelayBaseUrl } = await import("../../webchat/relayServer");
-        const host = getRelayBaseUrl();
-        const { testConnection } = await import("../../webchat/client");
-        const alive = await testConnection(host);
-        dot.className = alive
-          ? "llm-webchat-dot llm-webchat-dot-connected"
-          : "llm-webchat-dot llm-webchat-dot-disconnected";
-      } catch {
-        dot.className = "llm-webchat-dot llm-webchat-dot-disconnected";
-      }
-    };
-    void check(); // immediate first check
-    webchatConnectionTimer = setInterval(check, 5000);
-  };
-
   const stopWebChatConnectionCheck = () => {
     if (webchatConnectionTimer !== null) {
       clearInterval(webchatConnectionTimer);
@@ -6133,62 +6093,10 @@ export function setupHandlers(
     panelRoot.dataset.webchatMode = isWebChat ? "true" : "false";
     syncQueuedFollowUpRegistration();
 
-    // Mode chip: show target site name with connection dot, or restore original
-    if (modeChipBtn) {
-      if (isWebChat) {
-        // Resolve the target label from the current model name
-        let webchatChipLabel = "chatgpt";
-        let webchatChipTitle = "WebChat Sync";
-        try {
-          const { currentModel } = getSelectedModelInfo();
-          const { getWebChatTargetByModelName } =
-            require("../../webchat/types") as typeof import("../../webchat/types");
-          const entry = getWebChatTargetByModelName(currentModel || "");
-          if (entry) {
-            webchatChipLabel = entry.displayName;
-            webchatChipTitle = `${entry.label} Web Sync (${entry.modelName})`;
-          }
-        } catch {
-          /* fallback to defaults */
-        }
-
-        let dot = modeChipBtn.querySelector(
-          ".llm-webchat-dot",
-        ) as HTMLElement | null;
-        if (!dot) {
-          dot = (modeChipBtn.ownerDocument as Document).createElement("span");
-          dot.className = "llm-webchat-dot llm-webchat-dot-disconnected";
-        }
-        modeChipBtn.textContent = "";
-        modeChipBtn.appendChild(dot);
-        modeChipBtn.appendChild(
-          (modeChipBtn.ownerDocument as Document).createTextNode(
-            ` ${webchatChipLabel}`,
-          ),
-        );
-        modeChipBtn.title = webchatChipTitle;
-        modeChipBtn.disabled = true;
-        modeChipBtn.setAttribute("aria-disabled", "true");
-        modeChipBtn.dataset.webchatStatic = "true";
-        modeChipBtn.style.cursor = "default";
-        startWebChatConnectionCheck(dot);
-      } else {
-        const oldDot = modeChipBtn.querySelector(".llm-webchat-dot");
-        if (oldDot) {
-          oldDot.remove();
-          // Restore mode chip text — the normal render sync skips it while the dot is present
-          const chipLabel = isGlobalMode() ? "Library chat" : "Paper chat";
-          modeChipBtn.textContent = chipLabel;
-          modeChipBtn.title = isGlobalMode()
-            ? "Switch to paper chat"
-            : "Switch to library chat";
-        }
-        stopWebChatConnectionCheck();
-        modeChipBtn.disabled = false;
-        modeChipBtn.removeAttribute("aria-disabled");
-        delete modeChipBtn.dataset.webchatStatic;
-        modeChipBtn.style.cursor = "";
-      }
+    // The mode chip was removed (conversation kind is fixed by surface), but
+    // exiting webchat must still stop the connection checker it used to host.
+    if (!isWebChat) {
+      stopWebChatConnectionCheck();
     }
 
     // Model dropdown: fully disabled in webchat (model is ChatGPT, use Exit to change)

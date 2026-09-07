@@ -16,7 +16,7 @@ describe("webchat isolation", function () {
     clearAllState();
   });
 
-  it("does not let the webchat mode chip switch paper/library modes", function () {
+  it("removes the mode chip so webchat cannot switch paper/library modes from it", function () {
     const source = readFileSync(
       resolve(
         here,
@@ -24,24 +24,14 @@ describe("webchat isolation", function () {
       ),
       "utf8",
     );
-    const handlerStart = source.indexOf("// --- Mode chip handler ---");
-    const webchatGuard = source.indexOf(
-      "if (!item || isNoteSession() || isWebChatMode()) return;",
-      handlerStart,
+    // The chip is gone entirely: conversation kind is fixed by the surface
+    // (reader = paper, library panel = global), so no click-driven mode
+    // switch exists for webchat to hijack.
+    assert.isBelow(
+      source.indexOf("llm-mode-chip"),
+      0,
+      "the mode chip click handler must not exist anymore",
     );
-    const paperSwitch = source.indexOf(
-      "void switchPaperConversation();",
-      handlerStart,
-    );
-    const globalSwitch = source.indexOf(
-      "void switchGlobalConversation",
-      handlerStart,
-    );
-
-    assert.isAtLeast(handlerStart, 0);
-    assert.isAtLeast(webchatGuard, handlerStart);
-    assert.isBelow(webchatGuard, paperSwitch);
-    assert.isBelow(webchatGuard, globalSwitch);
   });
 
   it("marks fresh webchat paper switches as new remote chats without clearing existing history", function () {

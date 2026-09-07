@@ -16,7 +16,7 @@ function extractCssRule(css: string, selector: string): string {
 }
 
 describe("runtime system control layout", function () {
-  it("keeps the static mode chip and runtime icons in the same left flow", function () {
+  it("keeps the history controls and runtime icons in the same left flow", function () {
     const css = source("addon/content/zoteroPane.css");
     const buildUi = source("src/modules/contextPanel/buildUI.ts");
     const headerRule = extractCssRule(css, ".llm-header-top");
@@ -24,8 +24,6 @@ describe("runtime system control layout", function () {
     const headerActionsRule = extractCssRule(css, ".llm-header-actions");
     const historyRule = extractCssRule(css, ".llm-history-bar");
     const runtimeRule = extractCssRule(css, ".llm-header-runtime-controls");
-    const modeSwitchRule = extractCssRule(css, ".llm-mode-switch");
-    const modeChipRule = extractCssRule(css, ".llm-mode-chip");
 
     assert.include(headerRule, "display: grid");
     assert.include(headerRule, "grid-template-columns: minmax(0, 1fr) auto");
@@ -34,37 +32,15 @@ describe("runtime system control layout", function () {
     assert.notInclude(headerActionsRule, "position: absolute");
     assert.include(historyRule, "min-width: 0");
     assert.include(runtimeRule, "min-width: max-content");
-    assert.include(modeSwitchRule, "flex: 0 0 auto");
-    assert.include(modeSwitchRule, "width: auto");
-    assert.include(modeChipRule, "flex: 0 0 auto");
-    assert.notInclude(modeChipRule, "overflow: hidden");
-    assert.notInclude(modeChipRule, "text-overflow: ellipsis");
-    assert.include(
+    assert.notInclude(
       buildUi,
-      "headerRuntimeControls.append(\n    modeSwitchWrap,\n    runtimeSystemControls.group,",
+      "llm-mode-chip",
+      "the mode chip is removed: conversation kind is fixed by surface",
     );
     assert.include(
       buildUi,
       "historyBar.append(historyNewBtn, historyToggle, headerRuntimeControls)",
     );
-  });
-
-  it("scales the mode chip label with the plugin font setting at every width", function () {
-    const css = source("addon/content/zoteroPane.css");
-    const modeChipRule = extractCssRule(css, ".llm-mode-chip");
-
-    // The label follows --llm-font-scale like the rest of the plugin's text.
-    // A static chip, or one frozen behind a width breakpoint, is a downgrade at
-    // the sidebar widths people actually use — it stops responding to the font
-    // size shortcuts.
-    assert.include(modeChipRule, "font-size: var(--llm-fs-12)");
-
-    // No width breakpoint may pin it either: the compact header shrinks buttons
-    // to icons, but the chip keeps scaling.
-    const compactBlock =
-      css.match(/@container \(max-width: 380px\) \{[\s\S]*?\n\}/)?.[0] || "";
-    assert.notEqual(compactBlock, "", "compact header block must still exist");
-    assert.notInclude(compactBlock, ".llm-mode-chip");
   });
 
   it("tightens the leading gaps in the compact header without resizing the icons", function () {

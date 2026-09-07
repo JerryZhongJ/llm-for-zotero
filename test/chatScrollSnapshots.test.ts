@@ -574,7 +574,9 @@ describe("chat scroll snapshots", function () {
       resolve(here, "../src/modules/contextPanel/index.ts"),
       "utf8",
     );
-    const branch = source.indexOf("if (sameOwnerContextSourceChanged)");
+    const branch = source.indexOf(
+      "if (sameOwnerContextSourceChanged || keepDisplayedConversation)",
+    );
     const capture = source.indexOf(
       "persistPendingChatScrollRestoreFromBody(body)",
       branch,

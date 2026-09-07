@@ -34,7 +34,6 @@ import {
   getLastUsedUpstreamGlobalConversationKey,
   getStandaloneSidebarWidthPref,
   getLockedGlobalConversationKey,
-  setLastUsedUpstreamConversationMode,
   setLastUsedUpstreamGlobalConversationKey,
   setLockedGlobalConversationKey,
   setStandaloneSidebarWidthPref,
@@ -93,6 +92,7 @@ import {
 import { createHistorySearchPopupController } from "./setupHandlers/controllers/historySearchPopupController";
 import { primeHistoryNavigationMode } from "./historyNavigationModeSync";
 import { resolveStandalonePaperTabLabel } from "./standaloneTabLabel";
+import { isLibraryPanelBody, remountLibraryPanelBody } from "./libraryPanel";
 import { resolveFreshConversationDraft } from "./freshConversationDraft";
 import { collapseDuplicateReusableConversationDrafts } from "./standaloneConversationResolution";
 import {
@@ -327,6 +327,13 @@ function restoreEmbeddedPanelsAfterStandaloneClose(
       continue;
     }
     const rawItem = activeContextPanelRawItems.get(body as Element) || null;
+    // The library chat panel anchors a global conversation, not the raw
+    // selected item — restoring it through the paper-item path would swap
+    // it to a paper conversation.
+    if (isLibraryPanelBody(body as Element)) {
+      remountLibraryPanelBody(body as Element);
+      continue;
+    }
     const resolved = resolveInitialPanelItemState(rawItem, {
       conversationSystem: resolveConversationSystemForItem(rawItem),
     });
@@ -4036,6 +4043,9 @@ export function openStandaloneChat(options?: {
 
       const commitStandaloneMode = (mode: "open" | "paper") => {
         standaloneMode = mode;
+        // Upstream has no remembered conversation mode anymore (kind is fixed
+        // by surface); the standalone tabs persist mode only for the runtime
+        // systems that resolve their initial tab from it.
         if (isClaudeConversationSystem()) {
           setLastUsedClaudeConversationMode(
             getCurrentLibraryScopeID(),
@@ -4043,11 +4053,6 @@ export function openStandaloneChat(options?: {
           );
         } else if (isCodexConversationSystem()) {
           setLastUsedCodexConversationMode(
-            getCurrentLibraryScopeID(),
-            mode === "open" ? "global" : "paper",
-          );
-        } else {
-          setLastUsedUpstreamConversationMode(
             getCurrentLibraryScopeID(),
             mode === "open" ? "global" : "paper",
           );

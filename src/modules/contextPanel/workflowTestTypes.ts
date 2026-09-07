@@ -352,8 +352,13 @@ export type WorkflowTestApi = {
     panelId: string,
     options?: { allowReusedDraft?: boolean },
   ) => Promise<WorkflowTestDiagnostics>;
-  togglePanelConversationMode: (
+  mountLibraryPanelForTest: (
+    itemId?: number,
+    options?: { startup?: boolean },
+  ) => Promise<WorkflowTestPanel>;
+  simulateLibraryPanelSelectionChange: (
     panelId: string,
+    itemId: number,
   ) => Promise<WorkflowTestDiagnostics>;
   exerciseDuplicatePanelSetup: (
     panelId: string,

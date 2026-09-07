@@ -6,6 +6,7 @@ import { describe, it } from "mocha";
 
 import {
   hasPanelContextOwnerChanged,
+  shouldKeepDisplayedConversationWithoutRebuild,
   shouldRefreshContextSourceWithoutPanelRebuild,
 } from "../src/modules/contextPanel/panelContextLifecycle";
 
@@ -174,5 +175,67 @@ describe("panelContextLifecycle", function () {
     assert.strictEqual(firstFlush, lastFlush);
     assert.isBelow(applyWebChat, firstFlush);
     assert.isBelow(resetPreview, firstFlush);
+  });
+
+  describe("shouldKeepDisplayedConversationWithoutRebuild", function () {
+    it("keeps the displayed conversation when the key drifts on the same raw anchor", function () {
+      assert.isTrue(
+        shouldKeepDisplayedConversationWithoutRebuild({
+          needsFullRender: false,
+          storedItemKey: "42",
+          newItemKey: "1042",
+          currentRawContextItemKey: "42",
+          rawContextItemKey: "42",
+        }),
+      );
+    });
+
+    it("rebuilds when the raw anchor moved to another item", function () {
+      assert.isFalse(
+        shouldKeepDisplayedConversationWithoutRebuild({
+          needsFullRender: false,
+          storedItemKey: "42",
+          newItemKey: "1042",
+          currentRawContextItemKey: "42",
+          rawContextItemKey: "99",
+        }),
+      );
+    });
+
+    it("rebuilds when an uninitialized shell needs a full render", function () {
+      assert.isFalse(
+        shouldKeepDisplayedConversationWithoutRebuild({
+          needsFullRender: true,
+          storedItemKey: "42",
+          newItemKey: "1042",
+          currentRawContextItemKey: "42",
+          rawContextItemKey: "42",
+        }),
+      );
+    });
+
+    it("does not apply when the conversation key has not drifted", function () {
+      assert.isFalse(
+        shouldKeepDisplayedConversationWithoutRebuild({
+          needsFullRender: false,
+          storedItemKey: "42",
+          newItemKey: "42",
+          currentRawContextItemKey: "42",
+          rawContextItemKey: "42",
+        }),
+      );
+    });
+
+    it("does not apply before the panel recorded an identity", function () {
+      assert.isFalse(
+        shouldKeepDisplayedConversationWithoutRebuild({
+          needsFullRender: false,
+          storedItemKey: undefined,
+          newItemKey: "42",
+          currentRawContextItemKey: "",
+          rawContextItemKey: "42",
+        }),
+      );
+    });
   });
 });

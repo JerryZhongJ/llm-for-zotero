@@ -22,11 +22,22 @@ const zhCN: Record<string, string> = {
   // ── Chat panel UI ───────────────────────────────────────────────────────
   "LLM-for-Zotero": "LLM-for-Zotero",
   "Start a new chat": "开始新对话",
+  // ── Library write mode selector (beside the reasoning level) ────────────
+  // "auto" already maps to 自动 via the reasoning-level entries above.
+  manual: "手动",
+  "semi-auto": "半自动",
+  "Undo this change": "撤销此更改",
+  "Remove only this item": "仅移除这一条",
+  "Working…": "进行中…",
+  "How much the agent may change the library without asking (manual / semi-auto / auto)":
+    "Agent 修改文献库前需要询问的程度（手动 / 半自动 / 自动）",
   "Conversation history": "对话历史",
   "Item note": "条目笔记",
   "Standalone note": "独立笔记",
   "Library chat": "文献库对话",
   "Paper chat": "论文对话",
+  "Library chat panel": "文献库聊天面板",
+  "Show or hide the library chat panel": "显示或隐藏文献库聊天面板",
   Orphan: "孤立对话",
   "Switch to paper chat": "切换到论文对话",
   "Switch to library chat": "切换到文献库对话",
@@ -380,6 +391,10 @@ const zhCN: Record<string, string> = {
     "已达到 Tavily 按量付费上限。",
   "Tavily is temporarily unavailable. Try again later.":
     "Tavily 暂时不可用。请稍后重试。",
+  "Semantic Scholar API Key": "Semantic Scholar API 密钥",
+  "Optional. Literature search uses the Semantic Scholar API by default without a key, sharing its public rate pool. Adding a free API key gives your requests a dedicated quota. The key stays in your local Zotero preferences.":
+    "可选。文献搜索默认在不使用密钥的情况下调用 Semantic Scholar API，与其他用户共享公共限流额度。添加免费 API 密钥可获得专属额度。密钥仅保存在本机的 Zotero 偏好设置中。",
+  "Request a free API key": "申请免费 API 密钥",
   "View web sources": "查看网页来源",
   "Web sources": "网页来源",
   "Open web source": "打开网页来源",

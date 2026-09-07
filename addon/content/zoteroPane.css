@@ -519,72 +519,6 @@
   align-self: center;
 }
 
-.llm-mode-switch {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center !important;
-  justify-content: flex-start;
-  gap: 5px;
-  margin: 0 !important;
-  padding: 0 !important;
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 0;
-  height: 22px;
-}
-
-.llm-mode-chip {
-  appearance: none;
-  -moz-appearance: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 !important;
-  width: auto;
-  flex: 0 0 auto;
-  border: 1px solid var(--stroke-secondary);
-  background: var(--fill-quinary);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--llm-fs-12);
-  font-weight: 600;
-  color: var(--fill-primary);
-  padding: 2px 9px;
-  border-radius: 999px;
-  white-space: nowrap;
-  line-height: normal;
-  height: 22px;
-  min-height: 22px;
-  vertical-align: middle;
-  align-self: center;
-  transition:
-    background 0.15s,
-    border-color 0.15s;
-}
-
-/* Hover only in standalone window where the chip is interactive */
-[data-standalone="true"] .llm-mode-chip:hover {
-  background: var(--fill-secondary);
-  border-color: var(--stroke-secondary);
-}
-
-.llm-mode-chip:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.llm-mode-chip[data-webchat-static="true"],
-.llm-mode-chip:disabled[data-webchat-static="true"] {
-  cursor: default;
-  opacity: 1;
-}
-
-[data-standalone="true"] .llm-mode-chip[data-webchat-static="true"]:hover {
-  background: var(--fill-quinary);
-  border-color: var(--stroke-secondary);
-}
-
 .llm-runtime-system-controls {
   display: inline-flex;
   align-items: center;
@@ -707,25 +641,6 @@
 .llm-runtime-system-toggle--codex[data-active="true"]
   .llm-runtime-system-toggle-icon--codex::after {
   opacity: 1;
-}
-
-/* ---- Webchat connection dot ---- */
-.llm-webchat-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  margin-right: 4px;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-.llm-webchat-dot-connected {
-  background: #4ade80;
-  box-shadow: 0 0 3px #4ade8066;
-}
-.llm-webchat-dot-disconnected {
-  background: #f87171;
-  box-shadow: 0 0 3px #f8717166;
 }
 
 /* ---- Webchat preload overlay ---- */
@@ -5324,6 +5239,22 @@ label.llm-search-results-item:hover {
 
 .llm-agent-hitl-page-input:disabled {
   opacity: 0.7;
+}
+
+.llm-agent-hitl-text-multiline {
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--llm-fs-12);
+  line-height: 1.4;
+  padding: 10px 12px;
+  border-radius: var(--llm-action-surface-radius);
+  border: var(--llm-action-surface-border);
+  background: var(--llm-action-surface-bg);
+  color: var(--fill-primary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 .llm-agent-hitl-paged-top-controls:empty {
@@ -11378,4 +11309,145 @@ label.llm-search-results-item:hover {
 .llm-remove-img-btn:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: 1px;
+}
+
+/* Library write mode selector, placed beside the reasoning dropdown. */
+.llm-write-mode-select {
+  height: 24px;
+  padding: 0 4px;
+  font-size: var(--llm-fs-11);
+  border: 1px solid var(--stroke-secondary, #c8c8c8);
+  border-radius: 6px;
+  background: var(--fill-quinary, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Inline Undo glyph on journalled write rows in the agent trace. */
+.llm-at-undo-btn {
+  /* `all: unset` is the only reliable way to strip Gecko's native button
+     chrome (box, focus ring, min-size) in every theme; re-add the glyph's
+     own properties below. */
+  all: unset;
+  display: inline;
+  margin-left: 4px;
+  color: var(--fill-tertiary);
+  font-size: var(--llm-fs-11);
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.llm-at-undo-btn svg {
+  display: block;
+}
+
+.llm-at-undo-btn:hover {
+  color: var(--fill-primary);
+}
+
+.llm-at-undo-btn:disabled {
+  cursor: default;
+}
+
+.llm-at-undo-busy {
+  opacity: 0.5;
+}
+
+.llm-at-undo-done {
+  color: var(--color-accent, #4a90d9);
+  cursor: default;
+}
+
+.llm-at-undo-failed {
+  color: #e74c3c;
+}
+
+/* Live "Working…" row closing the always-visible activity tail. */
+.llm-at-row-working {
+  color: var(--fill-tertiary);
+}
+
+.llm-at-row-working .llm-at-icon {
+  animation: llm-working-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes llm-working-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Write OUTCOME rows: highlighted, persistent, visually distinct from
+   routine activity. A left accent bar plus a tinted background. */
+.llm-at-row-write {
+  padding: 3px 6px;
+  margin: 2px 0;
+  border-left: 3px solid var(--color-accent, #4a90d9);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-accent, #4a90d9) 8%, transparent);
+  font-weight: 500;
+}
+
+.llm-at-row-write .llm-at-text {
+  color: var(--fill-primary);
+}
+
+/* Visible undo outcome message beside the glyph. */
+.llm-at-undo-msg {
+  margin-left: 4px;
+  font-size: var(--llm-fs-11);
+  color: var(--fill-secondary);
+}
+
+.llm-at-undo-msg:empty {
+  display: none;
+}
+
+/* ── Library chat panel (bottom of the item list in the library tab) ────── */
+
+#llmforzotero-library-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  flex: 0 0 auto;
+  min-width: 0;
+  border-top: 1px solid var(--fill-quinary);
+  background: var(--material-background);
+  box-sizing: border-box;
+}
+
+.llm-library-panel-resizer {
+  height: 4px;
+  width: 100%;
+  flex: 0 0 auto;
+  cursor: ns-resize;
+  background: transparent;
+}
+
+.llm-library-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+[data-library-panel="true"].llm-panel {
+  height: 100%;
+}
+
+/* Override viewport-relative chat shell height: the panel owns its height,
+   so the chat fills it and scrolling stays inside the panel. */
+[data-library-panel="true"] .llm-chat-shell {
+  height: auto;
+  flex: 1 1 0;
+  min-height: 120px;
+  resize: none;
+  overscroll-behavior: contain;
 }

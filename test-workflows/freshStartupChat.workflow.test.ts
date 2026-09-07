@@ -159,7 +159,7 @@ describe("workflow: startup chat restoration", function () {
     assert.deepEqual(followUp.pdfPaperContexts || [], []);
   });
 
-  it("restores library mode and its last conversation on startup", async function () {
+  it("restores the paper conversation on startup and keeps the library conversation on its own surface", async function () {
     const fixture = await api.createPaperWithPdfFixture({
       title: "Workflow Library Startup Paper",
       pdfTitle: "Workflow Library Startup PDF",
@@ -167,28 +167,29 @@ describe("workflow: startup chat restoration", function () {
     fixtures.push(fixture);
 
     const initialPanel = await api.renderPanelForItem(fixture.parentItemId);
-    await api.seedPanelStoredUserMessage(
+    const paperDiagnostics = await api.seedPanelStoredUserMessage(
       initialPanel.panelId,
-      "workflow original paper before library mode",
-    );
-    const libraryMode = await api.togglePanelConversationMode(
-      initialPanel.panelId,
+      "workflow original paper conversation marker",
     );
     assert.equal(
-      libraryMode.conversationKind,
-      "global",
-      diagnosticsMessage(libraryMode),
+      paperDiagnostics.conversationKind,
+      "paper",
+      diagnosticsMessage(paperDiagnostics),
+    );
+
+    const libraryPanel = await api.mountLibraryPanelForTest(
+      fixture.parentItemId,
     );
     await api.seedPanelStoredUserMessage(
-      initialPanel.panelId,
+      libraryPanel.panelId,
       "workflow original library conversation marker",
     );
     const newConversation = await api.startNewPanelConversation(
-      initialPanel.panelId,
+      libraryPanel.panelId,
     );
     const startupMarker = "workflow restored library startup marker";
     const lastDiagnostics = await api.seedPanelStoredUserMessage(
-      initialPanel.panelId,
+      libraryPanel.panelId,
       startupMarker,
     );
     const lastKey = lastDiagnostics.conversationKey;
@@ -205,17 +206,12 @@ describe("workflow: startup chat restoration", function () {
     const startupDiagnostics = await api.getDiagnostics(startupPanel.panelId);
     assert.equal(
       startupDiagnostics.conversationKind,
-      "global",
+      "paper",
       diagnosticsMessage(startupDiagnostics),
     );
     assert.equal(
       startupDiagnostics.conversationKey,
-      lastKey,
-      diagnosticsMessage(startupDiagnostics),
-    );
-    assert.include(
-      startupDiagnostics.messageText || "",
-      startupMarker,
+      paperDiagnostics.conversationKey,
       diagnosticsMessage(startupDiagnostics),
     );
 
@@ -244,8 +240,8 @@ describe("workflow: startup chat restoration", function () {
     });
     fixtures.push(active, selected);
 
-    const panel = await api.renderPanelForItem(active.parentItemId);
-    const libraryMode = await api.togglePanelConversationMode(panel.panelId);
+    const panel = await api.mountLibraryPanelForTest(active.parentItemId);
+    const libraryMode = await api.getDiagnostics(panel.panelId);
     assert.equal(
       libraryMode.conversationKind,
       "global",
@@ -282,8 +278,9 @@ describe("workflow: startup chat restoration", function () {
       },
     );
 
-    const startupPanel = await api.renderStartupPanelForItem(
+    const startupPanel = await api.mountLibraryPanelForTest(
       active.parentItemId,
+      { startup: true },
     );
     const restored = await api.getDiagnostics(startupPanel.panelId);
 
@@ -401,16 +398,17 @@ describe("workflow: startup chat restoration", function () {
       diagnosticsMessage(newPaper),
     );
 
-    const library = await api.togglePanelConversationMode(
-      restoredPanel.panelId,
+    const libraryPanel = await api.mountLibraryPanelForTest(
+      fixture.pdfAttachmentId,
     );
+    const library = await api.getDiagnostics(libraryPanel.panelId);
     assert.equal(
       library.conversationKind,
       "global",
       diagnosticsMessage(library),
     );
     const newLibrary = await api.startNewPanelConversation(
-      restoredPanel.panelId,
+      libraryPanel.panelId,
       { allowReusedDraft: true },
     );
     assert.deepEqual(

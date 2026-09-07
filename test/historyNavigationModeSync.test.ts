@@ -28,15 +28,12 @@ import { buildDefaultUpstreamGlobalConversationKey } from "../src/modules/contex
 import { primeHistoryNavigationMode } from "../src/modules/contextPanel/historyNavigationModeSync";
 import {
   buildPaperStateKey,
-  getLastUsedUpstreamConversationMode,
   getLastUsedUpstreamGlobalConversationKey,
   getLastUsedPaperConversationKey,
-  setLastUsedUpstreamConversationMode,
   setLastUsedUpstreamGlobalConversationKey,
   setLastUsedPaperConversationKey,
 } from "../src/modules/contextPanel/prefHelpers";
 import {
-  activeConversationModeByLibrary,
   activeGlobalConversationByLibrary,
   activePaperConversationByPaper,
 } from "../src/modules/contextPanel/state";
@@ -49,7 +46,6 @@ describe("historyNavigationModeSync", function () {
 
   beforeEach(function () {
     prefStore.clear();
-    activeConversationModeByLibrary.clear();
     activeGlobalConversationByLibrary.clear();
     activePaperConversationByPaper.clear();
     activeClaudeConversationModeByLibrary.clear();
@@ -83,20 +79,15 @@ describe("historyNavigationModeSync", function () {
       paperItemID: 42,
     });
 
-    assert.equal(activeConversationModeByLibrary.get(7), "paper");
     assert.equal(
       activePaperConversationByPaper.get(buildPaperStateKey(7, 42)),
       2201,
     );
-    assert.equal(getLastUsedUpstreamConversationMode(7), "paper");
-    assert.isNull(getLastUsedPaperConversationKey(7, 42));
 
     snapshot.restore();
-    assert.isFalse(activeConversationModeByLibrary.has(7));
     assert.isFalse(
       activePaperConversationByPaper.has(buildPaperStateKey(7, 42)),
     );
-    assert.isNull(getLastUsedUpstreamConversationMode(7));
     assert.isNull(getLastUsedPaperConversationKey(7, 42));
   });
 
@@ -110,22 +101,16 @@ describe("historyNavigationModeSync", function () {
       conversationKey,
     });
 
-    assert.equal(activeConversationModeByLibrary.get(7), "global");
     assert.equal(activeGlobalConversationByLibrary.get(7), conversationKey);
-    assert.equal(getLastUsedUpstreamConversationMode(7), "global");
     assert.equal(getLastUsedUpstreamGlobalConversationKey(7), conversationKey);
 
     snapshot.restore();
-    assert.isFalse(activeConversationModeByLibrary.has(7));
     assert.isFalse(activeGlobalConversationByLibrary.has(7));
-    assert.isNull(getLastUsedUpstreamConversationMode(7));
     assert.isNull(getLastUsedUpstreamGlobalConversationKey(7));
   });
 
   it("restores the previous mode state after failed history navigation", function () {
-    activeConversationModeByLibrary.set(7, "global");
     activePaperConversationByPaper.set(buildPaperStateKey(7, 42), 1101);
-    setLastUsedUpstreamConversationMode(7, "global");
     setLastUsedUpstreamGlobalConversationKey(
       7,
       buildDefaultUpstreamGlobalConversationKey(7),
@@ -140,7 +125,6 @@ describe("historyNavigationModeSync", function () {
       paperItemID: 42,
     });
 
-    assert.equal(activeConversationModeByLibrary.get(7), "paper");
     assert.equal(
       activePaperConversationByPaper.get(buildPaperStateKey(7, 42)),
       2201,
@@ -149,8 +133,6 @@ describe("historyNavigationModeSync", function () {
 
     snapshot.restore();
 
-    assert.equal(activeConversationModeByLibrary.get(7), "global");
-    assert.equal(getLastUsedUpstreamConversationMode(7), "global");
     assert.equal(
       getLastUsedUpstreamGlobalConversationKey(7),
       buildDefaultUpstreamGlobalConversationKey(7),

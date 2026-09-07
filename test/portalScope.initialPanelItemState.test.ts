@@ -17,7 +17,6 @@ import {
   isCodexPaperPortalItem,
 } from "../src/codexAppServer/portal";
 import {
-  activeConversationModeByLibrary,
   activeGlobalConversationByLibrary,
   activePaperConversationByPaper,
 } from "../src/modules/contextPanel/state";
@@ -61,7 +60,6 @@ describe("portalScope resolveInitialPanelItemState", function () {
 
   beforeEach(function () {
     installBaseZotero();
-    activeConversationModeByLibrary.clear();
     activeGlobalConversationByLibrary.clear();
     activePaperConversationByPaper.clear();
     activeCodexGlobalConversationByLibrary.clear();
@@ -69,7 +67,7 @@ describe("portalScope resolveInitialPanelItemState", function () {
     itemsById.clear();
   });
 
-  it("restores the remembered global chat when library mode is global", function () {
+  it("restores the remembered global chat when the surface asks for global mode", function () {
     const paperItem = {
       id: 42,
       libraryID: 7,
@@ -78,17 +76,18 @@ describe("portalScope resolveInitialPanelItemState", function () {
       isRegularItem: () => true,
     } as unknown as Zotero.Item;
 
-    activeConversationModeByLibrary.set(7, "global");
     activeGlobalConversationByLibrary.set(7, 2_000_009_001);
 
-    const resolved = resolveInitialPanelItemState(paperItem);
+    const resolved = resolveInitialPanelItemState(paperItem, {
+      conversationMode: "global",
+    });
 
     assert.equal(resolved.basePaperItem, paperItem);
     assert.equal(resolved.item?.id, 2_000_009_001);
     assert.equal(resolved.item?.libraryID, 7);
   });
 
-  it("restores the persisted upstream library mode and conversation after restart", function () {
+  it("restores the persisted upstream global conversation after restart", function () {
     const paperItem = {
       id: 42,
       libraryID: 7,
@@ -115,7 +114,9 @@ describe("portalScope resolveInitialPanelItemState", function () {
       },
     } as typeof Zotero;
 
-    const resolved = resolveInitialPanelItemState(paperItem);
+    const resolved = resolveInitialPanelItemState(paperItem, {
+      conversationMode: "global",
+    });
 
     assert.equal(resolved.basePaperItem, paperItem);
     assert.isTrue(isGlobalPortalItem(resolved.item));
@@ -123,7 +124,7 @@ describe("portalScope resolveInitialPanelItemState", function () {
     assert.equal(resolved.item?.libraryID, 7);
   });
 
-  it("restores the locked upstream library chat when no explicit paper mode is active", function () {
+  it("resolves the paper conversation by default even when a stale global lock exists", function () {
     const paperItem = {
       id: 42,
       libraryID: 7,
@@ -150,9 +151,7 @@ describe("portalScope resolveInitialPanelItemState", function () {
     const resolved = resolveInitialPanelItemState(paperItem);
 
     assert.equal(resolved.basePaperItem, paperItem);
-    assert.isTrue(isGlobalPortalItem(resolved.item));
-    assert.equal(resolved.item?.id, 2_000_009_001);
-    assert.equal(resolved.item?.libraryID, 7);
+    assert.equal(resolved.item, paperItem);
   });
 
   it("restores the remembered paper chat session for the selected paper", function () {
@@ -183,7 +182,6 @@ describe("portalScope resolveInitialPanelItemState", function () {
       isRegularItem: () => true,
     } as unknown as Zotero.Item;
 
-    activeConversationModeByLibrary.set(7, "global");
     activeGlobalConversationByLibrary.set(7, 2_000_009_001);
     activePaperConversationByPaper.set("7:42", 4207);
 
@@ -363,7 +361,6 @@ describe("portalScope resolveInitialPanelItemState", function () {
         },
       },
     } as typeof Zotero;
-    activeConversationModeByLibrary.set(7, "paper");
     activePaperConversationByPaper.set("7:42", 4207);
 
     const resolved = resolveInitialPanelItemState(paperItem);

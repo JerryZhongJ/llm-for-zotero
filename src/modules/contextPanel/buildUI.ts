@@ -1,5 +1,7 @@
 import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
+import { config } from "../../../package.json";
+import { normalizeAgentLibraryWriteMode } from "../../shared/agentLibraryWriteMode";
 import {
   PREFERENCES_PANE_ID,
   getSelectTextExpandedLabel,
@@ -168,29 +170,6 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     },
   );
 
-  // Mode chip: single pill showing current mode
-  const modeSwitchWrap = createElement(doc, "div", "llm-mode-switch", {
-    id: "llm-mode-capsule",
-  });
-  modeSwitchWrap.dataset.mode = hasItem && isGlobalMode ? "global" : "paper";
-
-  const modeChipLabel = activeNoteSession
-    ? activeNoteSession.conversationKind === "global"
-      ? t("Library chat")
-      : t("Paper chat")
-    : isGlobalMode
-      ? t("Library chat")
-      : t("Paper chat");
-  const modeChipBtn = createElement(doc, "button", "llm-mode-chip", {
-    id: "llm-mode-chip",
-    type: "button",
-    textContent: modeChipLabel,
-    title: modeChipLabel,
-  });
-  modeChipBtn.setAttribute("aria-label", modeChipLabel);
-
-  modeSwitchWrap.append(modeChipBtn);
-
   const runtimeSystemControls = createRuntimeSystemControls(doc, {
     groupId: "llm-runtime-system-controls",
     groupClassName: "llm-panel-runtime-system-controls",
@@ -212,11 +191,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   claudeContextGauge.style.display = "none";
   claudeContextGauge.setAttribute("aria-hidden", "true");
 
-  headerRuntimeControls.append(
-    modeSwitchWrap,
-    runtimeSystemControls.group,
-    claudeContextGauge,
-  );
+  headerRuntimeControls.append(runtimeSystemControls.group, claudeContextGauge);
   historyBar.append(historyNewBtn, historyToggle, headerRuntimeControls);
 
   headerInfo.append(title, historyBar);
@@ -931,6 +906,43 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     disabled: !hasItem,
   });
 
+  // Library write mode selector, placed next to the reasoning level. A plain
+  // select: no floating-menu plumbing, and the current mode is always
+  // visible — the permission state must never be a hidden badge.
+  const writeModeLabels: Record<string, string> = {
+    manual: t("manual"),
+    semi_auto: t("semi-auto"),
+    auto: t("auto"),
+  };
+  const currentWriteMode = normalizeAgentLibraryWriteMode(
+    (
+      globalThis as typeof globalThis & {
+        Zotero?: { Prefs?: { get?: (k: string, g?: boolean) => unknown } };
+      }
+    ).Zotero?.Prefs?.get?.(`${config.prefsPrefix}.agentLibraryWriteMode`, true),
+  );
+  const writeModeSelect = createElement(
+    doc,
+    "select",
+    "llm-shortcut-btn llm-action-btn llm-action-btn-secondary llm-write-mode-select",
+    {
+      id: "llm-write-mode",
+      title: t(
+        "How much the agent may change the library without asking (manual / semi-auto / auto)",
+      ),
+    },
+  ) as HTMLSelectElement;
+  for (const value of ["manual", "semi_auto", "auto"] as const) {
+    const option = createElement(doc, "option", "", {
+      value,
+      textContent: writeModeLabels[value],
+    });
+    if (value === currentWriteMode) option.setAttribute("selected", "true");
+    writeModeSelect.appendChild(option);
+  }
+  const writeModeSlot = createElement(doc, "div", "llm-action-slot");
+  writeModeSlot.appendChild(writeModeSelect);
+
   const sendBtn = createElement(
     doc,
     "button",
@@ -975,6 +987,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
     screenshotSlot,
     modelDropdown,
     reasoningDropdown,
+    writeModeSlot,
   );
   // Hide PDF-reader-specific buttons in standalone library chat
   if (isStandaloneBody && isGlobalMode) {

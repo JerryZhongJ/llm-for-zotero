@@ -36,19 +36,15 @@ import {
   buildCodexPaperStateKey,
 } from "../../codexAppServer/state";
 import {
-  activeConversationModeByLibrary,
   activeGlobalConversationByLibrary,
   activePaperConversationByPaper,
 } from "./state";
 import {
   buildPaperStateKey,
-  getLastUsedUpstreamConversationMode,
   getLastUsedUpstreamGlobalConversationKey,
   getLastUsedPaperConversationKey,
-  removeLastUsedUpstreamConversationMode,
   removeLastUsedUpstreamGlobalConversationKey,
   removeLastUsedPaperConversationKey,
-  setLastUsedUpstreamConversationMode,
   setLastUsedUpstreamGlobalConversationKey,
   setLastUsedPaperConversationKey,
 } from "./prefHelpers";
@@ -282,22 +278,9 @@ export function primeHistoryNavigationMode(
     };
   }
 
-  const modeSnapshot = snapshotMapEntry(
-    activeConversationModeByLibrary,
-    libraryID,
-  );
-  const previousMode = getLastUsedUpstreamConversationMode(libraryID);
-  activeConversationModeByLibrary.set(libraryID, mode);
-  setLastUsedUpstreamConversationMode(libraryID, mode);
-  restoreCallbacks.push(() => {
-    restoreMapEntry(modeSnapshot);
-    restoreOptionalMode(
-      previousMode,
-      (value) => setLastUsedUpstreamConversationMode(libraryID, value),
-      () => removeLastUsedUpstreamConversationMode(libraryID),
-    );
-  });
-
+  // Upstream surfaces no longer remember a conversation mode — the kind is
+  // fixed by the surface (reader = paper, library panel = global) — so only
+  // the conversation-key snapshots are primed here.
   if (mode === "global" && conversationKey) {
     const globalSnapshot = snapshotMapEntry(
       activeGlobalConversationByLibrary,

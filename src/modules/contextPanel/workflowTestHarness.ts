@@ -1,7 +1,6 @@
 import { buildUI } from "./buildUI";
 import { disposeSetupHandlers, setupHandlers } from "./setupHandlers";
 import {
-  activeConversationModeByLibrary,
   activeContextPanels,
   activeContextPanelRawItems,
   activeContextPanelStateSync,
@@ -71,7 +70,11 @@ import {
   getSelectedTextContextEntries,
   resolveContextSourceItemAsync,
 } from "./contextResolution";
-import { resolveInitialPanelItemState } from "./portalScope";
+import {
+  resolveInitialPanelItemState,
+  resolvePreferredConversationSystem,
+  resolveRememberedGlobalPanelItem,
+} from "./portalScope";
 import { syncNoteEditingSelectedText } from "./noteEditing/selectionController";
 import {
   decorateAssistantCitationLinks,
@@ -118,10 +121,7 @@ import {
   activeCodexGlobalConversationByLibrary,
   activeCodexPaperConversationByPaper,
 } from "../../codexAppServer/state";
-import {
-  removeLastUsedUpstreamConversationMode,
-  removeLastUsedUpstreamGlobalConversationKey,
-} from "./prefHelpers";
+import { removeLastUsedUpstreamGlobalConversationKey } from "./prefHelpers";
 
 async function appendWorkflowStoredMessage(
   system: ConversationSystem,
@@ -674,7 +674,6 @@ function clearWorkflowConversationRuntimeState(): void {
   chatHistory.clear();
   selectedRuntimeModeCache.clear();
   loadedConversationKeys.clear();
-  activeConversationModeByLibrary.clear();
   activeGlobalConversationByLibrary.clear();
   activePaperConversationByPaper.clear();
   activeClaudeConversationModeByLibrary.clear();
@@ -718,6 +717,79 @@ async function renderPanelForItemInternal(
   const panel = { id: panelId, body, item: mountedItem, contextSnapshot };
   panels.set(panelId, panel);
   return { panelId, itemId, contextSnapshot };
+}
+
+/**
+ * Mounts a library-panel surface (global conversation, selection-independent)
+ * in the workflow host. Mirrors mountLibraryPanelConversation in
+ * libraryPanel.ts: fixed conversation kind "global", raw context item tracked
+ * separately via activeContextPanelRawItems.
+ */
+async function mountLibraryPanelForTest(
+  itemId?: number,
+  options?: { startup?: boolean },
+): Promise<WorkflowTestPanel> {
+  assertWorkflowTestEnabled();
+  if (options?.startup) {
+    disposeWorkflowPanels();
+    clearWorkflowConversationRuntimeState();
+  }
+  const doc = getWorkflowDocument();
+  const body = appendHost(doc);
+  const panelId = `workflow-library-panel-${++panelCounter}`;
+  body.dataset.workflowPanelId = panelId;
+  body.classList.add("llm-library-panel-body");
+  const libraryID = Zotero.Libraries.userLibraryID;
+  const system =
+    resolvePreferredConversationSystem({ item: null }) || "upstream";
+  const globalItem = resolveRememberedGlobalPanelItem(libraryID, system);
+  if (!globalItem) {
+    throw new Error("Library panel test requires a global conversation item");
+  }
+  const rawItem = itemId ? Zotero.Items.get(itemId) || null : null;
+  buildUI(body, globalItem);
+  const llmMain = body.querySelector("#llm-main") as HTMLElement | null;
+  if (llmMain) llmMain.dataset.libraryPanel = "true";
+  activeContextPanels.set(body, () => globalItem);
+  activeContextPanelRawItems.set(body, rawItem);
+  setupHandlers(body, globalItem);
+  const mountedItem = activeContextPanels.get(body)?.() || globalItem;
+  await ensureConversationLoaded(mountedItem).catch(() => undefined);
+  refreshChat(body, mountedItem);
+  await Zotero.Promise.delay(50);
+  activeContextPanelStateSync.get(body)?.();
+  const contextSnapshot = await resolveContextSourceItemAsync(mountedItem);
+  panels.set(panelId, {
+    id: panelId,
+    body,
+    item: mountedItem,
+    contextSnapshot,
+  });
+  return { panelId, itemId: itemId ?? 0, contextSnapshot };
+}
+
+/**
+ * Simulates an item-tree selection change reaching a library panel: only the
+ * raw context item moves; the anchored conversation must stay untouched.
+ */
+async function simulateLibraryPanelSelectionChange(
+  panelId: string,
+  itemId: number,
+): Promise<WorkflowTestDiagnostics> {
+  assertWorkflowTestEnabled();
+  const panel = getPanel(panelId);
+  const rawItem = Zotero.Items.get(itemId);
+  if (!rawItem) throw new Error(`Unable to find Zotero item ${itemId}`);
+  activeContextPanelRawItems.set(panel.body, rawItem);
+  const refreshContextSource = (panel.body as any)
+    .__llmRefreshContextSourceForCurrentItem;
+  if (typeof refreshContextSource === "function") {
+    refreshContextSource();
+  } else {
+    activeContextPanelStateSync.get(panel.body)?.();
+  }
+  await Zotero.Promise.delay(100);
+  return getDiagnostics(panelId);
 }
 
 async function exerciseStaleAgentTracePanelIsolation(input: {
@@ -950,19 +1022,6 @@ async function startNewPanelConversation(
   });
 }
 
-async function togglePanelConversationMode(
-  panelId: string,
-): Promise<WorkflowTestDiagnostics> {
-  assertWorkflowTestEnabled();
-  const panel = getPanel(panelId);
-  const before = await getDiagnostics(panelId);
-  dispatchWorkflowClick(panel.body, "#llm-mode-chip", "Chat mode button");
-  return waitForPanelConversationChange({
-    panelId,
-    previousConversationKind: before.conversationKind,
-  });
-}
-
 async function exerciseDuplicatePanelSetup(
   panelId: string,
 ): Promise<WorkflowTestDuplicatePanelSetupDiagnostics> {
@@ -1187,8 +1246,8 @@ async function measurePanelRuntimeGeometry(
   const runtimeControls = panel.body.querySelector(
     ".llm-panel-runtime-system-controls",
   ) as HTMLElement | null;
-  const modeChip = panel.body.querySelector(
-    ".llm-mode-chip",
+  const leadingToggle = panel.body.querySelector(
+    "#llm-history-toggle",
   ) as HTMLElement | null;
   const headerActions = panel.body.querySelector(
     ".llm-header-actions",
@@ -1200,7 +1259,7 @@ async function measurePanelRuntimeGeometry(
     !panelRoot ||
     !header ||
     !runtimeControls ||
-    !modeChip ||
+    !leadingToggle ||
     !headerActions ||
     !clearButton
   ) {
@@ -1218,7 +1277,7 @@ async function measurePanelRuntimeGeometry(
     const runtimeButtonWidths = getVisibleRuntimeButtonRects(
       runtimeControls,
     ).map((rect) => rect.width);
-    const modeChipRect = modeChip.getBoundingClientRect();
+    const leadingRect = leadingToggle.getBoundingClientRect();
     const actionsRect = headerActions.getBoundingClientRect();
     const clearButtonRect = clearButton.getBoundingClientRect();
     const clearButtonStyle =
@@ -1228,10 +1287,7 @@ async function measurePanelRuntimeGeometry(
       fontScale: input.fontScale,
       runtimeWidth: runtimeRect.width,
       runtimeButtonWidths,
-      runtimeIntersectsLeadingContent: rectsIntersect(
-        runtimeRect,
-        modeChipRect,
-      ),
+      runtimeIntersectsLeadingContent: rectsIntersect(runtimeRect, leadingRect),
       runtimeIntersectsTrailingContent: rectsIntersect(
         runtimeRect,
         actionsRect,
@@ -3147,7 +3203,6 @@ async function reset(): Promise<void> {
     Number(Zotero.Libraries?.userLibraryID || 0),
   );
   if (userLibraryID > 0) {
-    removeLastUsedUpstreamConversationMode(userLibraryID);
     removeLastUsedUpstreamGlobalConversationKey(userLibraryID);
   }
   // Workflow cases use fresh Zotero items but the isolated runner can retain
@@ -3705,7 +3760,11 @@ export function installWorkflowTestHarness(targetAddon: {
     renderPanelForItem,
     renderStartupPanelForItem,
     startNewPanelConversation,
-    togglePanelConversationMode,
+    mountLibraryPanelForTest: (
+      itemId?: number,
+      options?: { startup?: boolean },
+    ) => mountLibraryPanelForTest(itemId, options),
+    simulateLibraryPanelSelectionChange,
     exerciseDuplicatePanelSetup,
     exercisePanelDraftStateRefresh,
     exerciseWebChatPdfToggleWorkflow,

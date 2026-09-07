@@ -346,33 +346,8 @@ function setLastGlobalConversationMap(value: Record<string, number>): void {
   );
 }
 
-export function getLastUsedUpstreamConversationMode(
-  libraryID: number,
-): "global" | "paper" | null {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return null;
-  return getLastConversationModeMap()[buildLibraryStateKey(libraryID)] || null;
-}
-
-export function setLastUsedUpstreamConversationMode(
-  libraryID: number,
-  mode: "global" | "paper",
-): void {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return;
-  const map = getLastConversationModeMap();
-  map[buildLibraryStateKey(libraryID)] = mode === "global" ? "global" : "paper";
-  setLastConversationModeMap(map);
-}
-
-export function removeLastUsedUpstreamConversationMode(
-  libraryID: number,
-): void {
-  if (!Number.isFinite(libraryID) || libraryID <= 0) return;
-  const map = getLastConversationModeMap();
-  const key = buildLibraryStateKey(libraryID);
-  if (!(key in map)) return;
-  delete map[key];
-  setLastConversationModeMap(map);
-}
+// Upstream surfaces no longer remember a conversation mode (the kind is
+// fixed by the surface); only the runtime systems (claude/codex) keep one.
 
 export function getLastUsedUpstreamGlobalConversationKey(
   libraryID: number,
@@ -556,6 +531,53 @@ export function setStandaloneSidebarWidthPref(value: number): void {
   getZoteroPrefs()?.set?.(
     `${config.prefsPrefix}.${STANDALONE_SIDEBAR_WIDTH_PREF_KEY}`,
     clampStandaloneSidebarPreferredWidth(value),
+    true,
+  );
+}
+
+// ── Library chat panel (item-list bottom panel) preferences ────────────────
+
+const LIBRARY_PANEL_HEIGHT_PREF_KEY = "libraryPanelHeight";
+const LIBRARY_PANEL_ENABLED_PREF_KEY = "libraryPanelEnabled";
+const LIBRARY_PANEL_DEFAULT_HEIGHT_PX = 320;
+const LIBRARY_PANEL_MIN_HEIGHT_PX = 200;
+const LIBRARY_PANEL_MAX_HEIGHT_PX = 2000;
+
+function clampLibraryPanelPreferredHeight(value: number): number {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return LIBRARY_PANEL_DEFAULT_HEIGHT_PX;
+  return Math.max(
+    LIBRARY_PANEL_MIN_HEIGHT_PX,
+    Math.min(parsed, LIBRARY_PANEL_MAX_HEIGHT_PX),
+  );
+}
+
+export function getLibraryPanelHeightPref(): number {
+  const raw = getZoteroPrefs()?.get?.(
+    `${config.prefsPrefix}.${LIBRARY_PANEL_HEIGHT_PREF_KEY}`,
+    true,
+  );
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return LIBRARY_PANEL_DEFAULT_HEIGHT_PX;
+  return clampLibraryPanelPreferredHeight(parsed);
+}
+
+export function setLibraryPanelHeightPref(value: number): void {
+  getZoteroPrefs()?.set?.(
+    `${config.prefsPrefix}.${LIBRARY_PANEL_HEIGHT_PREF_KEY}`,
+    clampLibraryPanelPreferredHeight(value),
+    true,
+  );
+}
+
+export function getLibraryPanelEnabledPref(): boolean {
+  return getBoolPref(LIBRARY_PANEL_ENABLED_PREF_KEY, false);
+}
+
+export function setLibraryPanelEnabledPref(value: boolean): void {
+  getZoteroPrefs()?.set?.(
+    `${config.prefsPrefix}.${LIBRARY_PANEL_ENABLED_PREF_KEY}`,
+    value === true,
     true,
   );
 }
@@ -1037,6 +1059,11 @@ const LOCKED_GLOBAL_CONVERSATION_PREF_KEY = "lockedGlobalConversation";
 /**
  * Returns the conversation key that is locked as the default open-chat session
  * for the given library, or null if no lock is active.
+ *
+ * TODO: the lock no longer steers embedded/library-panel mode selection (the
+ * conversation kind is fixed per surface). Remaining readers are webchat's
+ * generation-time auto-lock and the standalone/deletion paths that resolve a
+ * library conversation to return to — re-evaluate whether those still need it.
  */
 export function getLockedGlobalConversationKey(
   libraryID: number,

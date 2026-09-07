@@ -17,12 +17,12 @@ describe("note focus header layout", function () {
     assert.include(
       buildUi,
       "historyBar.append(historyNewBtn, historyToggle, headerRuntimeControls)",
-      "note focus must keep the same +, history, mode-chip, runtime order as normal chat",
+      "note focus must keep the same +, history, runtime order as normal chat",
     );
     assert.include(
       buildUi,
-      "headerRuntimeControls.append(\n    modeSwitchWrap,\n    runtimeSystemControls.group,",
-      "runtime icons must remain immediately after the static mode chip",
+      "headerRuntimeControls.append(runtimeSystemControls.group,",
+      "runtime icons must remain in the header runtime controls",
     );
     assert.notInclude(
       setupHandlers,
