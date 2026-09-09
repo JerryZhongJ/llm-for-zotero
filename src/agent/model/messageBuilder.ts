@@ -510,7 +510,7 @@ function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
   if (detectExplicitFullReadIntent(request.userText || "")) {
     return (
       "TURN RULE: The user explicitly requested exhaustive full-text reading. " +
-      "Your very first action MUST be to call `paper_read({ mode:'full' })` targeting only the requested paper(s). " +
+      "Your very first action MUST be to call `paper_read({ mode:'full', readFullReason:'the user explicitly requested exhaustive full-text reading' })` targeting only the requested paper(s). " +
       "Overview and targeted retrieval do not satisfy this request. Preserve the coverage receipt and do not claim complete reading when it is partial or unreadable."
     );
   }

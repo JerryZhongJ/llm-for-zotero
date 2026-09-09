@@ -2139,6 +2139,7 @@ describe("Zotero MCP server", function () {
                 contextItemId: paperContext.contextItemId,
               },
               query: "Read the complete paper.",
+              readFullReason: "test the scope guard",
             },
           },
         },

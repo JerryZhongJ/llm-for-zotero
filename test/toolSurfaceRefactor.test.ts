@@ -2338,6 +2338,7 @@ describe("semantic tool surface", function () {
       mode: "full",
       target: { itemId: 51, contextItemId: 52 },
       query: "Read the complete text.",
+      readFullReason: "verify chunk coverage",
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -2462,6 +2463,7 @@ describe("semantic tool surface", function () {
         mode: "full",
         target: { paperContext },
         query: "Read the complete text.",
+        readFullReason: "verify chunk coverage",
       });
       assert.equal(validated.ok, true);
       if (!validated.ok) return;
@@ -2565,56 +2567,44 @@ describe("semantic tool surface", function () {
         relevantChunkIds: [0],
       }),
     );
-    const validated = tool.validate({ mode: "full" });
+    const missingReason = tool.validate({ mode: "full" });
+    assert.equal(missingReason.ok, false);
+    if (missingReason.ok) return;
+    assert.match(
+      missingReason.error,
+      /requires readFullReason/,
+      "mode:'full' must refuse to validate without an explicit reason",
+    );
+
+    const validated = tool.validate({
+      mode: "full",
+      readFullReason: "verify every reference entry against its DOI",
+    });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
 
-    const conflicting = tool.validate({
+    const explicit = tool.validate({
       mode: "full",
       target: { paperContext: activePaper },
-      query: "Read the complete paper.",
+      readFullReason: "the user named this exact paper",
     });
-    assert.equal(conflicting.ok, true);
-    if (!conflicting.ok) return;
-    try {
-      await tool.execute(conflicting.value, {
-        ...baseContext,
-        request: {
-          ...baseContext.request,
-          conversationKind: "paper",
-          activeItemId: activePaper.itemId,
-          selectedPaperContexts: [activePaper, firstPaper],
-          userText: "Read the complete first selected paper.",
-        },
-      });
-      assert.fail("Expected a conflicting model-supplied target to fail");
-    } catch (error) {
-      assert.match(
-        error instanceof Error ? error.message : String(error),
-        /target conflicts with the user's requested paper scope/,
-      );
-    }
-    assert.deepEqual(prepared, []);
-
-    try {
-      await tool.execute(conflicting.value, {
-        ...baseContext,
-        request: {
-          ...baseContext.request,
-          conversationKind: "paper",
-          activeItemId: activePaper.itemId,
-          selectedPaperContexts: [activePaper, firstPaper],
-          userText: "Rather than read the full paper, summarize the abstract.",
-        },
-      });
-      assert.fail("Expected a negated full-read request to fail");
-    } catch (error) {
-      assert.match(
-        error instanceof Error ? error.message : String(error),
-        /requires an explicit affirmative user request/,
-      );
-    }
-    assert.deepEqual(prepared, []);
+    assert.equal(explicit.ok, true);
+    if (!explicit.ok) return;
+    // An explicit model-supplied target is trusted (the readFullReason
+    // argument is the explicit gate now); it must read exactly that paper
+    // regardless of how the user phrased the request.
+    await tool.execute(explicit.value, {
+      ...baseContext,
+      request: {
+        ...baseContext.request,
+        conversationKind: "paper",
+        activeItemId: activePaper.itemId,
+        selectedPaperContexts: [activePaper, firstPaper],
+        userText: "Rather than read the full paper, summarize the abstract.",
+      },
+    });
+    assert.deepEqual(prepared, [activePaper.title]);
+    prepared.length = 0;
 
     await tool.execute(validated.value, {
       ...baseContext,

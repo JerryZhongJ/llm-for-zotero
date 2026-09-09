@@ -44,7 +44,6 @@ import {
 } from "../../../shared/exhaustiveDocumentReader";
 import { resolveFullReadPaperTargets } from "../../../shared/fullReadTargetResolver";
 import { getTurnPapersWithRoles } from "../../context/requestTurnPaperScope";
-import { detectExplicitFullReadIntent } from "../../../modules/contextPanel/retrievalQueryPlan";
 import { createCodexAppServerExhaustiveReaderSession } from "../../../codexAppServer/exhaustiveReader";
 import { createZoteroMetadataResolver } from "../../../services/zoteroMetadata/resolver";
 import { projectPaperMetadata } from "../../../services/zoteroMetadata/projections";
@@ -72,6 +71,7 @@ type PaperReadInput = {
   neighborPages?: number;
   maxChars?: number;
   topK?: number;
+  readFullReason?: string;
   visualInput?: unknown;
 };
 
@@ -155,6 +155,10 @@ function resolveFullReadTargets(params: {
   context: AgentToolContext;
   zoteroGateway: ZoteroGateway;
 }): NonNullable<PdfTarget["paperContext"]>[] {
+  // Full reads are no longer gated on implicit analysis of the user's
+  // phrasing. The model must state why the complete document is needed via
+  // the required readFullReason argument (validated in validate()), which
+  // makes the decision explicit and auditable instead of inferred.
   const explicitTargets =
     params.input.target || params.input.targets?.length
       ? resolveDefaultTargets(
@@ -165,14 +169,9 @@ function resolveFullReadTargets(params: {
           MAX_FULL_TARGETS,
         )
       : [];
-  const userText = (params.context.request.userText || "").trim();
-  if (userText && !detectExplicitFullReadIntent(userText)) {
-    throw new Error(
-      "paper_read mode:'full' requires an explicit affirmative user request to read the complete document.",
-    );
-  }
-  const requestText = userText || params.input.query || "";
-  if (!requestText && explicitTargets.length) return explicitTargets;
+  if (explicitTargets.length) return explicitTargets;
+  const requestText =
+    (params.context.request.userText || "").trim() || params.input.query || "";
   const selected = dedupePaperContexts([
     ...getTurnPapersWithRoles(params.context.request, ["selected"]),
   ]);
@@ -183,37 +182,13 @@ function resolveFullReadTargets(params: {
     ...params.zoteroGateway.listPaperContexts(params.context.request),
     ...(activePaper ? [activePaper] : []),
     ...selected,
-    ...explicitTargets,
   ]);
-  const intendedTargets = resolveFullReadPaperTargets({
+  return resolveFullReadPaperTargets({
     question: requestText,
     availablePapers: available,
     selectedPapers: selected,
     activePaper,
   }).papers;
-  if (explicitTargets.length) {
-    const intendedKeys = new Set(
-      intendedTargets.map(
-        (paperContext) =>
-          `${paperContext.libraryID || 0}:${paperContext.itemId}:${paperContext.contextItemId}`,
-      ),
-    );
-    const explicitKeys = new Set(
-      explicitTargets.map(
-        (paperContext) =>
-          `${paperContext.libraryID || 0}:${paperContext.itemId}:${paperContext.contextItemId}`,
-      ),
-    );
-    const targetsAgree =
-      intendedKeys.size === explicitKeys.size &&
-      [...intendedKeys].every((key) => explicitKeys.has(key));
-    if (!targetsAgree) {
-      throw new Error(
-        `The explicit paper_read full target conflicts with the user's requested paper scope. Requested: ${intendedTargets.map((paperContext) => paperContext.title).join("; ")}. Tool supplied: ${explicitTargets.map((paperContext) => paperContext.title).join("; ")}. Omit target/targets or retry with the requested papers.`,
-      );
-    }
-  }
-  return intendedTargets;
 }
 
 function readTextFile(filePath: string): Promise<string> {
@@ -886,7 +861,7 @@ export function createPaperReadTool(
     spec: {
       name: "paper_read",
       description:
-        "Read content from the active or targeted paper through one semantic tool. Use mode:'overview' for bounded summaries, mode:'targeted' for relevance-ranked textual evidence, mode:'full' only when the user explicitly requests exhaustive full-text reading, mode:'figures' for precise extracted figures from Zotero library PDFs, mode:'visual' for rendered PDF pages/layout, and mode:'capture' for the currently visible Zotero reader page.",
+        "Read content from the active or targeted paper through one semantic tool. Use mode:'overview' for bounded summaries, mode:'targeted' for relevance-ranked textual evidence, mode:'full' for exhaustive whole-document reading (requires readFullReason), mode:'figures' for precise extracted figures from Zotero library PDFs, mode:'visual' for rendered PDF pages/layout, and mode:'capture' for the currently visible Zotero reader page.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -909,7 +884,12 @@ export function createPaperReadTool(
               "capture",
             ],
             description:
-              "overview = bounded summary/main message; targeted = relevance-ranked text evidence; full = exhaustive processing of every extractable text chunk for an explicit full-read request; figures = precise extracted figures; visual = rendered pages/layout; capture = current reader page.",
+              "overview = bounded summary/main message; targeted = relevance-ranked text evidence; full = exhaustive processing of every extractable text chunk (requires readFullReason); figures = precise extracted figures; visual = rendered pages/layout; capture = current reader page.",
+          },
+          readFullReason: {
+            type: "string",
+            description:
+              "Required when mode is 'full': one short sentence explaining why the complete document must be read (e.g. 'verify every reference entry against its DOI'). Prefer mode:'targeted' with a specific query when a section or claim suffices.",
           },
           target: {
             type: "object",
@@ -990,7 +970,14 @@ export function createPaperReadTool(
             return "Extracting precise figures from the paper";
           if (mode === "capture") return "Capturing current paper page";
           if (mode === "targeted") return "Reading targeted paper content";
-          if (mode === "full") return "Reading the complete paper text";
+          if (mode === "full") {
+            const reason = normalizeString(
+              (args as Record<string, unknown> | undefined)?.readFullReason,
+            );
+            return reason
+              ? `Reading the complete paper text — ${reason}`
+              : "Reading the complete paper text";
+          }
           return "Reading paper overview";
         },
         onPending: "Waiting for your approval before sending document content",
@@ -1081,6 +1068,12 @@ export function createPaperReadTool(
               name: targetSyntax.selector.name,
             }
           : undefined;
+      const readFullReason = normalizeString(args.readFullReason);
+      if (mode === "full" && !readFullReason) {
+        return fail(
+          "paper_read mode:'full' requires readFullReason: one short sentence explaining why the complete document must be read. Use mode:'targeted' with a specific query when a section or claim suffices.",
+        );
+      }
       const input: PaperReadInput = {
         mode,
         target: explicitTarget,
@@ -1095,6 +1088,7 @@ export function createPaperReadTool(
         neighborPages: normalizePositiveInt(args.neighborPages),
         maxChars: normalizePositiveInt(args.maxChars),
         topK: normalizePositiveInt(args.topK),
+        readFullReason,
       };
       if (mode === "visual" || mode === "capture") {
         const visualValidation = visualTool.validate(targetForPageTool(input));
