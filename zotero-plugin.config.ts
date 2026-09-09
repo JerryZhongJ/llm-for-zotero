@@ -62,6 +62,13 @@ export default defineConfig({
         : workflowTestsEnabled
           ? "test-workflows"
           : "test",
+    // The workflow tests assert English UI labels (e.g. the reader popup
+    // "Add Text" button), so pin the locale regardless of the host OS
+    // language — a Chinese-locale machine otherwise localizes the plugin UI
+    // and breaks those assertions.
+    prefs: {
+      "intl.locale.requested": "en-US",
+    },
     ...(workflowTestsEnabled
       ? {
           abortOnFail: !agentLiveTestsEnabled,
