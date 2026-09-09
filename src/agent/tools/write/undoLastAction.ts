@@ -16,19 +16,6 @@ export function createUndoLastActionTool(
   zoteroGateway: ZoteroGateway,
 ): AgentWriteToolDefinition<UndoLastActionInput, unknown> {
   return {
-    describeAction: (input) => [
-      {
-        id: `undo:${input.actionId || "latest"}`,
-        proofDomain: "zotero_state",
-        capability: "zotero.undo",
-        operation: "undo",
-        source: "zotero_native",
-        requestedTargets: input.actionId
-          ? [`journal-action:${input.actionId}`]
-          : [],
-        destinationCollectionIds: [],
-      },
-    ],
     spec: {
       name: "undo_last_action",
       description:

@@ -64,6 +64,10 @@ describe("restore_from_trash", function () {
         return { savedSearchId: params.savedSearchId, status: "trashed" };
       },
       getItem: () => null,
+      // State capture for the collections/savedSearches sections reads
+      // through these; null = "not present" is all the plan needs.
+      getCollection: () => null,
+      getSavedSearch: () => null,
       ...overrides,
     };
     return { gateway, calls };
@@ -75,6 +79,9 @@ describe("restore_from_trash", function () {
     const { gateway, calls } = makeGateway();
     const service = new LibraryMutationService(gateway as never);
 
+    // The service layer still executes mixed operations: journal rows
+    // recorded before the tool interface became single-responsibility must
+    // stay replayable. New calls go through the split tool below.
     const outcome = await service.executeOperation(
       {
         type: "restore_from_trash",
@@ -163,5 +170,43 @@ describe("restore_from_trash", function () {
 
     const valid = tool.validate({ collectionIds: [42] });
     assert.isTrue(valid.ok);
+  });
+
+  it("accepts exactly one object kind per call", function () {
+    const { gateway } = makeGateway();
+    const tool = createRestoreFromTrashTool(gateway as never);
+
+    // Mixing kinds made the journalled action's undo rating an ambiguous
+    // "partial"; one kind per call keeps it cleanly reversible.
+    const mixed = tool.validate({ itemIds: [11], collectionIds: [42] });
+    assert.isFalse(mixed.ok);
+
+    const itemsOnly = tool.validate({ itemIds: [11] });
+    assert.isTrue(itemsOnly.ok);
+
+    const searchesOnly = tool.validate({ savedSearchIds: [7] });
+    assert.isTrue(searchesOnly.ok);
+  });
+
+  it("rates every single-kind restore as fully reversible", async function () {
+    const { gateway } = makeGateway();
+    const service = new LibraryMutationService(gateway as never);
+
+    // Items: the inverse (re-trash) is knowable before execution.
+    const itemsPlan = await service.planOperation(
+      { type: "restore_from_trash", itemIds: [11] },
+      context,
+    );
+    assert.equal(itemsPlan.reversibility, "full");
+
+    // Collections/searches: subcollections ride along with their parent, so
+    // the inverse is frozen from Zotero's actual result (deferred) — still
+    // a promised lossless undo, never a "partial".
+    const collectionsPlan = await service.planOperation(
+      { type: "restore_from_trash", collectionIds: [42] },
+      context,
+    );
+    assert.equal(collectionsPlan.reversibility, "full");
+    assert.isTrue(collectionsPlan.deferredInverse);
   });
 });

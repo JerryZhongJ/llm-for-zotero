@@ -1,9 +1,5 @@
 import { assert } from "chai";
 import {
-  ActionContractService,
-  type ActionContractGateway,
-} from "../src/agent/contracts/actionContract";
-import {
   inferActionIntentsFromRequest,
   parseClassifiedTurnIntent,
 } from "../src/agent/model/skillClassifier";
@@ -23,31 +19,6 @@ function request(
 }
 
 describe("Agent action intent", function () {
-  it("fails closed when required intent has no valid obligations", async function () {
-    const service = new ActionContractService({} as ActionContractGateway);
-    let message = "";
-    try {
-      await service.createContract(
-        request({
-          conversationKey: 1,
-          mode: "agent",
-          model: "test",
-          userText: "Apply the requested mutation.",
-          classifiedIntent: {
-            retrievalIntent: "none",
-            wantedSections: [],
-            writeDisposition: "required",
-            actionInterpretationSource: "classifier",
-            actionIntents: [],
-          },
-        }),
-      );
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-    assert.include(message, "no valid typed obligations");
-  });
-
   it("does not infer writes from questions, advice, hypotheticals, or negation", function () {
     const prompts = [
       "Which papers should I tag as reviewed?",
@@ -68,7 +39,6 @@ describe("Agent action intent", function () {
       JSON.stringify({
         retrievalIntent: "none",
         wantedSections: [],
-        writeDisposition: "required",
         actionIntents: [
           {
             operation: "remove_tags",
@@ -79,7 +49,6 @@ describe("Agent action intent", function () {
         ],
       }),
     );
-    assert.equal(parsed?.writeDisposition, "required");
     assert.deepEqual(
       parsed?.actionIntents.map((intent) => intent.operation),
       ["remove_tags"],

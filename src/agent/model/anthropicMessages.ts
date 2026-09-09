@@ -93,6 +93,33 @@ function buildAnthropicTools(
   }));
 }
 
+// Anthropic caches up to each cache_control breakpoint. System blocks and
+// tools carry the first two; this tail breakpoint lets a multi-step tool
+// loop read the accumulated conversation incrementally instead of re-paying
+// full input price for the message history on every step. Pure clone at
+// request-build time, so the retained conversation state stays reusable.
+function applyTailMessageCacheControl(
+  messages: AnthropicMessage[],
+  cacheControl: AnthropicPromptCacheControl | undefined,
+): AnthropicMessage[] {
+  if (!cacheControl || !messages.length) return messages;
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage.content.length) return messages;
+  const lastBlockIndex = lastMessage.content.length - 1;
+  return messages.map((message, messageIndex) =>
+    messageIndex === messages.length - 1
+      ? {
+          ...message,
+          content: message.content.map((block, blockIndex) =>
+            blockIndex === lastBlockIndex
+              ? { ...block, cache_control: cacheControl }
+              : block,
+          ),
+        }
+      : message,
+  );
+}
+
 function cloneAnthropicContentBlock(
   block: AnthropicContentBlock,
 ): AnthropicContentBlock {
@@ -736,11 +763,6 @@ export class AnthropicMessagesAgentAdapter implements AgentModelAdapter {
         request.contextCache.requestHints?.anthropicToolCacheControl
           ? request.contextCache.requestHints.anthropicToolCacheControl
           : undefined;
-      const requestCacheControl =
-        request.contextCache?.enabled &&
-        request.contextCache.requestHints?.anthropicRequestCacheControl
-          ? request.contextCache.requestHints.anthropicRequestCacheControl
-          : undefined;
       const system = buildAnthropicSystemPayload(
         this.systemBlocks,
         systemCacheControl,
@@ -749,11 +771,10 @@ export class AnthropicMessagesAgentAdapter implements AgentModelAdapter {
       return {
         model: request.model,
         max_tokens: maxTokens,
-        messages,
+        messages: applyTailMessageCacheControl(messages, systemCacheControl),
         system,
         tools: toolsPayload,
         tool_choice: { type: "auto" },
-        ...(requestCacheControl ? { cache_control: requestCacheControl } : {}),
         stream: true,
         ...reasoningPayload.extra,
         ...(reasoningPayload.omitTemperature

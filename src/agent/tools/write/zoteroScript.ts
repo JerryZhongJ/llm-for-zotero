@@ -23,7 +23,6 @@ import { zoteroChangeDispatcher } from "../../../services/zoteroChangeDispatcher
 import { LibraryMutationService } from "../../services/libraryMutationService";
 import { ZoteroGateway } from "../../services/zoteroGateway";
 import { parseInverseValue } from "../../services/changeReverter";
-import { fingerprintText } from "../../contracts/actionOperationEvidence";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -785,20 +784,6 @@ export function createZoteroScriptTool(
   runtimeOptions: ZoteroScriptRuntimeOptions = {},
 ): AgentWriteToolDefinition<ZoteroScriptInput, unknown> {
   return {
-    describeAction: (input) => [
-      {
-        id: `zotero_script_execute:${fingerprintText(input.script)}`,
-        proofDomain: "execution",
-        capability: "zotero.script",
-        operation: "zotero_script_execute",
-        source: "zotero_script",
-        parameters: {
-          commandFingerprint: fingerprintText(input.script),
-        },
-        requestedTargets: [],
-        destinationCollectionIds: [],
-      },
-    ],
     spec: {
       name: "zotero_script",
       description:
@@ -848,8 +833,30 @@ export function createZoteroScriptTool(
         ),
       instruction: ZOTERO_SCRIPT_GUIDANCE,
     },
-
     presentation: {
+      // The gate judges arbitrary code, so it must see the code itself — a
+      // JSON argument digest says nothing about what the script does.
+      buildWriteGateSummary: ({ input }) => {
+        const value = input as {
+          mode?: string;
+          description?: string;
+          script?: string;
+        };
+        const script = typeof value.script === "string" ? value.script : "";
+        return [
+          `Mode: ${value.mode || "read"}`,
+          value.description
+            ? `Stated purpose: ${value.description.slice(0, 300)}`
+            : "",
+          "Script source:",
+          script.slice(0, 2400),
+          script.length > 2400
+            ? `… [script truncated, ${script.length} chars total]`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      },
       label: "Zotero Script",
       summaries: {
         onCall: ({ args }) => {
@@ -941,21 +948,16 @@ export function createZoteroScriptTool(
     },
 
     planMutation(input) {
-      if (input.mode === "read") {
-        return {
-          effect: "write",
-          reversibility: "none",
-          requiresConfirmation: true,
-          reason:
-            "Read mode relaxes undo instrumentation but still exposes mutable privileged APIs, so effects cannot be proven absent or recovered.",
-        };
-      }
+      // No tool-level escape hatch: manual/semi_auto stop here via the
+      // normal irreversible rule, and auto mode routes the script to the
+      // write gate — which receives the full source, not just this summary.
       return {
         effect: "write",
-        reversibility: "partial",
-        requiresConfirmation: true,
+        reversibility: "none",
         reason:
-          "Only snapshotted, explicitly created, and declaratively inverted effects can be recovered.",
+          input.mode === "read"
+            ? "Read mode relaxes undo instrumentation but still exposes mutable privileged APIs, so effects cannot be proven absent or recovered."
+            : "Only snapshotted, explicitly created, and declaratively inverted effects can be recovered — an arbitrary script can never prove the absence of other side effects, so no lossless undo is promised.",
       };
     },
 
@@ -973,6 +975,7 @@ export function createZoteroScriptTool(
             id: "description",
             label: "What this does",
             value: input.description,
+            multiline: true,
           },
           {
             type: "code_preview" as const,
@@ -1006,10 +1009,10 @@ export function createZoteroScriptTool(
             libraryID,
             timeoutMs: input.timeoutMs,
           },
-          reversibility: isWrite ? "partial" : "none",
+          reversibility: "none",
           deferredInverse: isWrite,
           reason: isWrite
-            ? "Only snapshotted, explicitly created, and declaratively inverted effects are covered."
+            ? "Only snapshotted, explicitly created, and declaratively inverted effects are covered; raw DB writes emit no notifier events, so absence of other side effects cannot be proven."
             : "Read mode exposes mutable privileged APIs without undo instrumentation, so any effects are irreversible.",
         },
         execute: async () => {
@@ -1069,7 +1072,18 @@ export function createZoteroScriptTool(
                   ),
                 }
               : undefined;
-          const reversibility = inverse ? "partial" : "none";
+          // Binary: a recorded inverse whose coverage explains every
+          // notifier-observed effect promises a lossless restore — full. A
+          // script that errored mid-run is fine as long as its observed
+          // effects are snapshotted (the mutation predates the error); the
+          // error text rides along as audit reason. Any hole — an uncovered
+          // observed item, or no inverse at all — means none; the snapshot
+          // payload stays journalled for manual recovery either way.
+          const fullyCovered =
+            Boolean(inverse) && uncoveredObservedIds.length === 0;
+          const reversibility = fullyCovered
+            ? ("full" as const)
+            : ("none" as const);
           const recoveryLimits = [
             ...(uncoveredObservedIds.length
               ? [

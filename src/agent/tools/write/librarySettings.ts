@@ -24,24 +24,6 @@ export function createLibrarySettingsTool(
   zoteroGateway: ZoteroGateway,
 ): AgentWriteToolDefinition<LibrarySettingsInput, unknown> {
   return {
-    describeAction: (input) =>
-      input.action === "set"
-        ? [
-            {
-              id: `settings_update:${input.key}`,
-              proofDomain: "zotero_state",
-              capability: "zotero.settings",
-              operation: "settings_update",
-              source: "zotero_native",
-              parameters: {
-                settingsKey: input.key,
-                settingsValue: JSON.stringify(input.value),
-              },
-              requestedTargets: [`setting:${input.key}`],
-              destinationCollectionIds: [],
-            },
-          ]
-        : [],
     spec: {
       name: "library_settings",
       description:
@@ -120,7 +102,7 @@ export function createLibrarySettingsTool(
       return ok<LibrarySettingsInput>({ action });
     },
 
-    // The registry applies the global safe/auto/yolo policy to concrete
+    // The registry applies the global manual/semi-auto/auto policy to concrete
     // writes. This hook only keeps reads and already-satisfied sets out of the
     // confirmation path when their mutation plan reports no effect.
     shouldRequireConfirmation(input) {

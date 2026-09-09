@@ -35,16 +35,16 @@ export function createImportIdentifiersTool(
   return {
     spec: {
       name: "import_identifiers",
-      description: "Import papers into Zotero by DOI, ISBN, arXiv ID, or URL.",
+      description:
+        "Import ONE paper into Zotero by DOI, ISBN, arXiv ID, or URL. One call per paper: each import is its own journalled action with its own undo.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["identifiers"],
+        required: ["identifier"],
         properties: {
-          identifiers: {
-            type: "array",
-            items: { type: "string" },
-            description: "DOIs, ISBNs, arXiv IDs, or URLs to import.",
+          identifier: {
+            type: "string",
+            description: "DOI, ISBN, arXiv ID, or URL of the paper to import.",
           },
           targetCollectionId: {
             type: "number",
@@ -86,13 +86,6 @@ export function createImportIdentifiersTool(
       },
     },
 
-    acceptInheritedApproval: async (_input, approval) => {
-      // Accept review-mode approvals from search_literature_online review cards
-      return (
-        approval.sourceMode === "review" && approval.sourceActionId === "import"
-      );
-    },
-
     validate(args: unknown) {
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail(
@@ -100,17 +93,22 @@ export function createImportIdentifiersTool(
         );
       }
 
-      const identifiers = normalizeStringArray(args.identifiers);
-      if (!identifiers?.length) {
+      const identifier =
+        typeof args.identifier === "string" && args.identifier.trim()
+          ? args.identifier.trim()
+          : Array.isArray(args.identifiers) &&
+              typeof args.identifiers[0] === "string"
+            ? args.identifiers[0].trim()
+            : "";
+      if (!identifier) {
         return fail(
-          "identifiers must be a non-empty array of strings. " +
-            'Example: { identifiers: ["10.1234/example", "arxiv:2301.00001"] }',
+          'identifier is required. Example: { identifier: "10.1234/example" }',
         );
       }
 
       const operation: ImportIdentifiersOperation = {
         type: "import_identifiers",
-        identifiers,
+        identifiers: [identifier],
         targetCollectionId:
           normalizePositiveInt(args.targetCollectionId) ||
           normalizePositiveInt(args.collectionId),
@@ -122,6 +120,7 @@ export function createImportIdentifiersTool(
 
     createPendingAction(input) {
       const operation = input.operation;
+      const identifier = operation.identifiers[0] || "";
       const collection = operation.targetCollectionId
         ? zoteroGateway.getCollectionSummary(operation.targetCollectionId)
         : null;
@@ -129,8 +128,8 @@ export function createImportIdentifiersTool(
         ? collection.path || collection.name
         : null;
       const description = collectionLabel
-        ? `Import ${operation.identifiers.length} identifier${operation.identifiers.length === 1 ? "" : "s"} into "${collectionLabel}".`
-        : `Import ${operation.identifiers.length} identifier${operation.identifiers.length === 1 ? "" : "s"} into the library.`;
+        ? `Import into "${collectionLabel}".`
+        : `Import into the library.`;
 
       return {
         toolName: "import_identifiers",
@@ -142,12 +141,8 @@ export function createImportIdentifiersTool(
           {
             type: "checklist" as const,
             id: IDENTIFIERS_CHECKLIST_FIELD_ID,
-            label: "Identifiers to import",
-            items: operation.identifiers.map((identifier, index) => ({
-              id: `${index}`,
-              label: identifier,
-              checked: true,
-            })),
+            label: "Identifier to import",
+            items: [{ id: "0", label: identifier, checked: true }],
           },
         ],
       };

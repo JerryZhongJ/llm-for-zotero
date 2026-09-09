@@ -346,6 +346,8 @@ export type LibraryMutationExecution = {
 
 export type LibraryMutationPlan = {
   effect: "write";
+  /** Only "full" or "none" is produced; "partial" is deprecated and kept
+   * for legacy journal reads. */
   reversibility: "full" | "partial" | "none";
   reason?: string;
   description: string;

@@ -14,6 +14,7 @@ import { createReadAttachmentTool } from "./read/readAttachment";
 import { clearPdfToolCaches } from "./read/pdfToolUtils";
 import {
   createSearchLiteratureOnlineTool,
+  LITERATURE_SOURCE_SELECTION_GUIDANCE,
   matchesLiteratureSearchGuidance,
 } from "./read/searchLiteratureOnline";
 import { createToolResultReadTool } from "./read/toolResultRead";
@@ -33,7 +34,6 @@ import { createManageCollectionsTool } from "./write/manageCollections";
 import { createImportIdentifiersTool } from "./write/importIdentifiers";
 import { createTrashItemsTool } from "./write/trashItems";
 import { createRestoreFromTrashTool } from "./write/restoreFromTrash";
-import { createWriteNotesBatchTool } from "./write/writeNotesBatch";
 import { createSavedSearchTool } from "./write/savedSearches";
 import { createLibrarySettingsTool } from "./write/librarySettings";
 import {
@@ -55,8 +55,13 @@ import { PdfPageService } from "../services/pdfPageService";
 import { PdfFigureExtractionService } from "../services/pdfFigureExtractionService";
 import type { AgentToolDefinition } from "../types";
 import { inferNoteIntent, WRITE_NOTE_SKILL_ID } from "../skills/noteIntent";
-import { fail, ok, PAPER_CONTEXT_REF_SCHEMA, validateObject } from "./shared";
-import { ActionContractService } from "../contracts/actionContract";
+import {
+  fail,
+  ok,
+  PAPER_CONTEXT_REF_SCHEMA,
+  summarizeObjectList,
+  validateObject,
+} from "./shared";
 
 type BuiltInAgentToolDeps = {
   zoteroGateway: ZoteroGateway;
@@ -112,10 +117,8 @@ const LIBRARY_SEARCH_GUIDANCE: ToolGuidance = {
 const LITERATURE_SEARCH_GUIDANCE: ToolGuidance = {
   matches: matchesLiteratureSearchGuidance,
   instruction:
-    "When the request needs external scholarly evidence, call literature_search with workflow:'answer' by default, analyze the results, and answer with explicit source attribution. A mixed request may also use web_search for distinct general-web evidence. Use workflow:'review' only when the user wants to import/add papers to Zotero, save selected search results to a note, refine results inside the card, or review metadata changes. Do not use this tool for questions about the content of papers already in context (e.g. counting references, summarizing, explaining). Preserve the user's language by default." +
-    "\n\nSource selection:" +
-    "\n- recommendations, references, citations modes -> always use source:'openalex' (only OpenAlex supports these)." +
-    "\n- search mode -> source:'openalex' (default, broadest coverage), source:'arxiv' (preprints, CS/ML/physics), or source:'europepmc' (biomedical/life sciences)." +
+    "When the request needs external scholarly evidence, call literature_search, analyze the results, and answer with explicit source attribution. A mixed request may also use web_search for distinct general-web evidence. This tool is read-only: to import papers into Zotero, apply fetched metadata, or save results to a note, call library_import, library_update with kind:'metadata', or note_write directly — each shows its own confirmation card. Do not use this tool for questions about the content of papers already in context (e.g. counting references, summarizing, explaining). Preserve the user's language by default." +
+    `\n\n${LITERATURE_SOURCE_SELECTION_GUIDANCE}` +
     "\n\nAuthor search:" +
     "\n- When the user wants papers by a specific author, use the 'author' parameter (e.g. author:'Adrien Peyrache')." +
     "\n- You can combine 'author' with 'query' to find an author's papers on a specific topic." +
@@ -129,7 +132,7 @@ const LIBRARY_UPDATE_GUIDANCE: ToolGuidance = {
       request.userText || "",
     ),
   instruction:
-    "For library write operations, the confirmation card is the deliverable; call library_update directly instead of stopping with a prose summary. Use kind:'tags' for tag changes, kind:'collections' for collection membership, and kind:'metadata' for item metadata fields. Batch one uniform change across all applicable item IDs in a single call. For different per-item changes, use assignments when the schema supports them; use zotero_script only when the semantic tool cannot express the requested computation. When the user asks to fix, correct, or enrich metadata from external sources, use literature_search with workflow:'review' and mode:'metadata' first to fetch canonical data, then continue through the review/update flow. Only call library_update with kind:'metadata' directly when the user provides specific field values to set.",
+    "For library write operations, the confirmation card is the deliverable; call library_update directly instead of stopping with a prose summary. Use kind:'tags' for tag changes, kind:'collections' for collection membership, and kind:'metadata' for item metadata fields. Batch one uniform change across all applicable item IDs in a single call. For different per-item changes, use assignments when the schema supports them; use zotero_script only when the semantic tool cannot express the requested computation. When the user asks to fix, correct, or enrich metadata from external sources, use literature_search with mode:'metadata' first to fetch canonical data, then call library_update with kind:'metadata' using the returned patch — its diff confirmation card still reviews the change. Only call library_update with kind:'metadata' directly when the user provides specific field values to set.",
 };
 
 const NOTE_WRITE_GUIDANCE: ToolGuidance = {
@@ -137,10 +140,7 @@ const NOTE_WRITE_GUIDANCE: ToolGuidance = {
     Boolean(
       context?.matchedSkillIds.includes(WRITE_NOTE_SKILL_ID) ||
       request.forcedSkillIds?.includes(WRITE_NOTE_SKILL_ID) ||
-      inferNoteIntent(request) ||
-      request.actionContract?.obligations.some(
-        (obligation) => obligation.capability === "zotero.notes",
-      ),
+      inferNoteIntent(request),
     ),
   instruction:
     "For an open/current Zotero note, use mode:'edit' for revision and prefer patches over a full content replacement. Use mode:'append' for an existing destination note and mode:'create' only for a new child or standalone note. A named Zotero folder means a collection: resolve its ID, create a standalone note, and pass collections:[...]. Pass Markdown unless the user explicitly requests HTML. The requested note must be written with note_write rather than returned as note-ready prose in chat.",
@@ -152,7 +152,7 @@ const LIBRARY_IMPORT_GUIDANCE: ToolGuidance = {
       request.userText || "",
     ),
   instruction:
-    "Use library_import with kind:'files' to import local files from the user's filesystem into Zotero. First use run_command to list files when paths are unknown, then call library_import with kind:'files' and the selected paths. A bibliography file (.ris, .bib, .enw, .nbib, RDF) has its references imported as real items; other files are attached, and PDFs go through Zotero's metadata lookup so they arrive with a title and authors. Optionally specify a targetCollectionId to file the results into a collection." +
+    "Use library_import with kind:'files' to import local files from the user's filesystem into Zotero. First use run_command to list files when paths are unknown, then call library_import once per file with kind:'files' and filePath — each import is its own journalled action with its own undo, and multiple calls in one reply share a single batch confirmation. A bibliography file (.ris, .bib, .enw, .nbib, RDF) has its references imported as real items; other files are attached, and PDFs go through Zotero's metadata lookup so they arrive with a title and authors. Optionally specify a targetCollectionId to file the results into a collection." +
     "\n\nkind:'identifiers' resolves DOIs, ISBNs, PMIDs, arXiv IDs and ADS bibcodes. It cannot import from a page URL — Zotero has no translator path for that — so take the DOI or arXiv ID off the page instead.",
 };
 
@@ -163,7 +163,7 @@ const LIBRARY_DELETE_GUIDANCE: ToolGuidance = {
     ),
   instruction:
     "To merge duplicates: first use library_search({ entity:'items', mode:'duplicates' }) to find duplicate groups, then use library_read to compare metadata and decide which item is the best master, then call library_delete({ mode:'merge', ... }) with the master and the others. The master keeps all children (attachments, notes, tags, collections) from the merged items." +
-    "\n\nTo bring something back from the trash, call library_delete with mode:'restore' and itemIds, collectionIds, or savedSearchIds. Restoring a collection restores its subcollections too. Deleting a collection trashes it rather than erasing it, so a collection the user deleted earlier can still be restored this way.",
+    "\n\nTo bring something back from the trash, call library_delete with mode:'restore' and itemIds, collectionIds, or savedSearchIds — one kind of object per call; multiple calls in one reply share a single batch confirmation. Restoring a collection restores its subcollections too. Deleting a collection trashes it rather than erasing it, so a collection the user deleted earlier can still be restored this way.",
 };
 
 const ATTACHMENT_UPDATE_GUIDANCE: ToolGuidance = {
@@ -181,6 +181,82 @@ function markInternalTool<TInput, TResult>(
   tool.spec.exposure = "internal";
   tool.spec.description = `Legacy internal primitive. Prefer the semantic facade tools in model-visible workflows. ${tool.spec.description}`;
   return tool;
+}
+
+/**
+ * Trace row text for library_delete: the concrete operation and the names of
+ * what it touched, straight in the row — never raw IDs, never a generic
+ * "delete/restore/merge completed". Lives here (not in the renderer) so the
+ * operation owns its own summary.
+ */
+function buildLibraryDeleteTraceSummary(
+  args: unknown,
+  labels?: {
+    item?: (itemId: number) => string | null;
+    collection?: (collectionId: number) => string | null;
+  },
+): string | null {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return null;
+  const a = args as Record<string, unknown>;
+  const idList = (value: unknown): number[] =>
+    Array.isArray(value)
+      ? value.filter((id): id is number => Number.isFinite(id))
+      : [];
+  const itemName = (id: number) => labels?.item?.(id) || null;
+  const collectionLabel = (id: number) => labels?.collection?.(id) || null;
+
+  if (a.mode === "trash") {
+    const itemIds = idList(a.itemIds);
+    if (!itemIds.length) return null;
+    return `Trashed ${summarizeObjectList({ count: itemIds.length, noun: "item", ids: itemIds, resolveName: itemName })}`;
+  }
+  if (a.mode === "restore") {
+    const itemIds = idList(a.itemIds);
+    const collectionIds = idList(a.collectionIds);
+    const savedSearchIds = idList(a.savedSearchIds);
+    if (itemIds.length) {
+      return `Restored ${summarizeObjectList({ count: itemIds.length, noun: "item", ids: itemIds, resolveName: itemName })}`;
+    }
+    if (collectionIds.length) {
+      return `Restored ${summarizeObjectList({ count: collectionIds.length, noun: "collection", ids: collectionIds, resolveName: collectionLabel })}`;
+    }
+    if (savedSearchIds.length) {
+      return `Restored ${savedSearchIds.length} saved search${savedSearchIds.length === 1 ? "" : "es"}`;
+    }
+    return null;
+  }
+  if (a.mode === "merge") {
+    const others = idList(a.otherItemIds);
+    const master =
+      (Number.isFinite(a.masterItemId)
+        ? itemName(a.masterItemId as number)
+        : null) || "the master item";
+    return others.length
+      ? `Merged ${others.length} duplicate${others.length === 1 ? "" : "s"} into ${master}`
+      : `Merged duplicates into ${master}`;
+  }
+  return null;
+}
+
+/** Trace row text for library_import: name the one imported object. */
+function buildLibraryImportTraceSummary(content: unknown): string | null {
+  const record =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? ((content as { result?: unknown }).result as
+          | Record<string, unknown>
+          | undefined)
+      : undefined;
+  const items = Array.isArray(record?.items)
+    ? (record?.items as unknown[])
+    : [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object") continue;
+    const title = (raw as { title?: unknown }).title;
+    if (typeof title === "string" && title.trim()) {
+      return `Imported ${title.trim()}`;
+    }
+  }
+  return null;
 }
 
 function markToolTier<TInput, TResult>(
@@ -363,7 +439,7 @@ function createLibraryImportTool(tools: {
     name: "library_import",
     label: "Import to Library",
     description:
-      "Add items to Zotero. kind:'identifiers' for DOI/ISBN/arXiv lookups, kind:'files' for local files, kind:'manual' to create items from scratch when neither applies (a book with no DOI, a thesis, a dataset).",
+      "Add ONE item to Zotero per call. kind:'identifiers' with identifier:'<DOI/ISBN/arXiv/URL>' for lookups (one paper per call — each import is separately undoable), kind:'files' for local files, kind:'manual' to create items from scratch when neither applies (a book with no DOI, a thesis, a dataset).",
     mutability: "write",
     requiresConfirmation: true,
     inputSchema: {
@@ -375,14 +451,15 @@ function createLibraryImportTool(tools: {
           type: "string",
           enum: ["identifiers", "files", "manual"],
         },
-        identifiers: {
-          ...STRING_ARRAY_SCHEMA,
+        identifier: {
+          type: "string",
           description:
-            "DOIs, ISBNs, arXiv IDs, or URLs to import when kind:'identifiers'.",
+            "The DOI, ISBN, arXiv ID, or URL to import when kind:'identifiers'. One paper per call.",
         },
-        filePaths: {
-          ...STRING_ARRAY_SCHEMA,
-          description: "Absolute local file paths to import when kind:'files'.",
+        filePath: {
+          type: "string",
+          description:
+            "Absolute path of the ONE local file to import when kind:'files'. One file per call — each import is its own journalled action with its own undo.",
         },
         items: {
           type: "array",
@@ -411,6 +488,7 @@ function createLibraryImportTool(tools: {
       onDenied: "Import cancelled",
       onSuccess: "Import completed",
     },
+    buildTraceSummary: ({ content }) => buildLibraryImportTraceSummary(content),
     guidance: LIBRARY_IMPORT_GUIDANCE,
     chooseDelegate(args) {
       if (!validateObject<Record<string, unknown>>(args)) {
@@ -441,7 +519,7 @@ function createLibraryDeleteTool(tools: {
     name: "library_delete",
     label: "Delete / Restore / Merge Library Items",
     description:
-      "Trash, restore, or merge Zotero objects. Use mode:'trash' to move items to the trash, mode:'restore' to bring trashed items, collections, or saved searches back, or mode:'merge' to merge duplicates into a master item.",
+      "Trash, restore, or merge Zotero objects. Use mode:'trash' to move items to the trash, mode:'restore' to bring trashed items, collections, or saved searches back — ONE kind of object per call — or mode:'merge' to merge duplicates into a master item.",
     mutability: "write",
     requiresConfirmation: true,
     inputSchema: {
@@ -485,6 +563,8 @@ function createLibraryDeleteTool(tools: {
       onDenied: "Library delete/restore/merge cancelled",
       onSuccess: "Library delete/restore/merge completed",
     },
+    buildTraceSummary: ({ args, labels }) =>
+      buildLibraryDeleteTraceSummary(args, labels),
     guidance: LIBRARY_DELETE_GUIDANCE,
     chooseDelegate(args) {
       if (!validateObject<Record<string, unknown>>(args)) {
@@ -496,6 +576,18 @@ function createLibraryDeleteTool(tools: {
         return ok({ tool: tools.trashItems, args: delegateArgs });
       }
       if (args.mode === "restore") {
+        // The restore tool is single-responsibility: one object kind per
+        // journalled action, so its undo rating is unambiguous.
+        const kinds = [
+          Array.isArray(args.itemIds) && args.itemIds.length,
+          Array.isArray(args.collectionIds) && args.collectionIds.length,
+          Array.isArray(args.savedSearchIds) && args.savedSearchIds.length,
+        ].filter(Boolean).length;
+        if (kinds > 1) {
+          return fail(
+            "Restore one kind of object per call — itemIds, collectionIds, or savedSearchIds, never a combination.",
+          );
+        }
         return ok({ tool: tools.restoreFromTrash, args: delegateArgs });
       }
       if (args.mode === "merge") {
@@ -509,9 +601,7 @@ function createLibraryDeleteTool(tools: {
 export function createBuiltInToolRegistry(
   deps: BuiltInAgentToolDeps,
 ): AgentToolRegistry {
-  const registry = new AgentToolRegistry(
-    new ActionContractService(deps.zoteroGateway),
-  );
+  const registry = new AgentToolRegistry();
   const queryLibrary = createQueryLibraryTool(deps.zoteroGateway);
   const readLibrary = createReadLibraryTool(deps.zoteroGateway);
   const libraryRetrieve = createLibraryRetrieveTool(
@@ -545,7 +635,6 @@ export function createBuiltInToolRegistry(
   const createItems = createCreateItemsTool(deps.zoteroGateway);
   const reparentItems = createReparentItemsTool(deps.zoteroGateway);
   const relateItems = createRelateItemsTool(deps.zoteroGateway);
-  const writeNotesBatch = createWriteNotesBatchTool(deps.zoteroGateway);
   const updateLibraryTag = createUpdateLibraryTagTool(deps.zoteroGateway);
   const setItemTags = createSetItemTagsTool(deps.zoteroGateway);
   const savedSearchUpdate = createSavedSearchTool(deps.zoteroGateway);
@@ -595,7 +684,7 @@ export function createBuiltInToolRegistry(
       name: "literature_search",
       label: "Search Literature",
       description:
-        "Search scholarly sources and fetch external scholarly metadata. Use workflow:'answer' for source-cited chat answers, or workflow:'review' for Zotero import/review-card workflows.",
+        "Search scholarly sources and fetch external scholarly metadata for source-cited chat answers. Read-only: chain library_import, library_update, or note_write to write results into Zotero.",
       guidance: LITERATURE_SEARCH_GUIDANCE,
     }),
   );
@@ -624,17 +713,8 @@ export function createBuiltInToolRegistry(
       name: "note_write",
       label: "Write Note",
       description:
-        "Create, append to, or edit a single Zotero note. Use this for note writing instead of returning note-ready text in chat. To write a note onto many items, use note_write_batch instead — one card for the whole set, rather than one approval per paper.",
+        "Create, append to, or edit a single Zotero note. Use this for note writing instead of returning note-ready text in chat. To write a note onto many items, call note_write once per note in the same reply — each note is its own journalled action with its own undo, and they share one batch confirmation.",
       guidance: NOTE_WRITE_GUIDANCE,
-    }),
-  );
-  registry.register(
-    createRenamedTool({
-      tool: writeNotesBatch,
-      name: "note_write_batch",
-      label: "Write Notes",
-      description:
-        "Write a note onto each of many items in one approved operation. Use this whenever the user asks for a note on several papers — calling note_write once per paper means one confirmation dialog per paper.",
     }),
   );
   registry.register(savedSearchUpdate);
@@ -685,7 +765,6 @@ export function createBuiltInToolRegistry(
     createItems,
     reparentItems,
     relateItems,
-    writeNotesBatch,
     updateLibraryTag,
     setItemTags,
     mergeItems,

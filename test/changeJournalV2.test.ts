@@ -1835,7 +1835,10 @@ describe("durable change journal v2", function () {
       if (!validated.ok) return;
       const plan = await tool.planMutation?.(validated.value, context);
       assert.equal(plan?.effect, "write");
-      assert.equal(plan?.reversibility, "partial");
+      // Redirect target is declarative but the command body is arbitrary
+      // shell — binary rating is none; the delete-file inverse is still
+      // journalled as recovery data.
+      assert.equal(plan?.reversibility, "none");
 
       await tool.execute(validated.value, context);
       const [action] = await listJournalActions({
@@ -1843,7 +1846,7 @@ describe("durable change journal v2", function () {
         limit: 1,
       });
 
-      assert.equal(action.status, "applied");
+      assert.equal(action.status, "irreversible");
       assert.equal(action.steps[0].operation, "run_command");
       assert.include(action.steps[0].inverseJson || "", '"operation":"delete"');
       assert.include(
@@ -2169,7 +2172,9 @@ describe("durable change journal v2", function () {
     });
 
     assert.equal(title, "After");
-    assert.equal(action.reversibility, "partial");
+    // The snapshot explains every observed effect, so the binary rating is
+    // full — the dropped malformed inverse costs nothing to restore.
+    assert.equal(action.reversibility, "full");
     assert.include(action.steps[0].inverseJson || "", "script_snapshots");
 
     const outcome = await revertActions({
@@ -2178,7 +2183,8 @@ describe("durable change journal v2", function () {
       context,
     });
 
-    assert.equal(outcome.partiallyReverted, 1);
+    assert.equal(outcome.reverted, 1);
+    assert.equal(outcome.partiallyReverted, 0);
     assert.equal(title, "Before");
   });
 
@@ -2676,9 +2682,12 @@ describe("durable change journal v2", function () {
       context,
     });
 
-    assert.equal(outcome.reverted, 0);
-    assert.equal(outcome.partiallyReverted, 1);
-    assert.equal(outcome.residuals[0]?.actionId, action.actionId);
+    // Binary: the inverse explains the whole effect (clear an originally
+    // absent preference), so replay is a clean full revert with no residual
+    // — the old "partial" forced a residual report out of nothing.
+    assert.equal(outcome.reverted, 1);
+    assert.equal(outcome.partiallyReverted, 0);
+    assert.lengthOf(outcome.residuals, 0);
     assert.isUndefined(preferenceValue);
     assert.equal(db.actions.get(action.actionId)?.status, "reverted");
   });
@@ -2748,9 +2757,11 @@ describe("durable change journal v2", function () {
       context,
     });
 
-    assert.equal(outcome.reverted, 0);
-    assert.equal(outcome.partiallyReverted, 1);
-    assert.equal(outcome.residuals[0]?.actionId, action.actionId);
+    // Binary: the snapshot replay restores the title AND the tag types, so
+    // the revert is clean — no residual.
+    assert.equal(outcome.reverted, 1);
+    assert.equal(outcome.partiallyReverted, 0);
+    assert.lengthOf(outcome.residuals, 0);
     assert.equal(title, "Before");
     assert.deepEqual(tags, [{ tag: "Imported", type: 1 }]);
   });
@@ -3148,7 +3159,6 @@ describe("durable change journal v2", function () {
     assert.deepInclude(plan, {
       effect: "write",
       reversibility: "none",
-      requiresConfirmation: true,
     });
 
     await tool.execute(validated.value, context);

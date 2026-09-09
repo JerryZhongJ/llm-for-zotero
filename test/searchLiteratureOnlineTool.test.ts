@@ -84,11 +84,9 @@ describe("search_literature_online tool", function () {
     });
     assert.isTrue(validated.ok);
     if (!validated.ok) return;
-    assert.equal(validated.value.workflow, "answer");
 
     const result = await tool.execute(validated.value, baseContext);
     assert.equal((result as { mode: string }).mode, "metadata");
-    assert.equal((result as { workflow: string }).workflow, "answer");
     assert.lengthOf((result as { results: unknown[] }).results, 2);
   });
 
@@ -151,7 +149,6 @@ describe("search_literature_online tool", function () {
     if (!validated.ok) return;
 
     const result = await tool.execute(validated.value, baseContext);
-    assert.equal((result as { workflow: string }).workflow, "answer");
     assert.equal((result as { mode: string }).mode, "metadata");
     assert.lengthOf((result as { results: unknown[] }).results, 2);
   });
@@ -200,7 +197,6 @@ describe("search_literature_online tool", function () {
     const result = await tool.execute(validated.value, baseContext);
     const results = (result as { results: Array<Record<string, unknown>> })
       .results;
-    assert.equal((result as { workflow: string }).workflow, "answer");
     assert.lengthOf(results, 1);
     assert.equal(results[0].title, "Related Paper");
     assert.equal(results[0].doi, "10.1000/related");
@@ -223,37 +219,117 @@ describe("search_literature_online tool", function () {
         },
       ],
     );
-    const reviewAction = await tool.createResultReviewAction?.(
-      validated.value,
-      {
-        callId: "call-search",
-        name: "search_literature_online",
-        ok: true,
-        content: result,
-      },
-      baseContext,
-    );
-    assert.isNull(reviewAction);
   });
 
-  it("opens the literature review card only for review workflow", async function () {
+  it("searches DBLP for computer science literature", async function () {
+    const dblpHit = (info: Record<string, unknown>) => ({ info });
+    (globalThis as Record<string, unknown>).Zotero = {
+      debug: () => undefined,
+      HTTP: {
+        request: async () => ({
+          status: 200,
+          responseText: JSON.stringify({
+            result: {
+              hits: {
+                "@total": "2",
+                hit: [
+                  dblpHit({
+                    title: "Attention Is All You Need",
+                    authors: {
+                      author: [
+                        { text: "Ashish Vaswani" },
+                        { text: "Noam Shazeer" },
+                      ],
+                    },
+                    venue: "NeurIPS",
+                    year: "2017",
+                    doi: "https://doi.org/10.5555/3295222.3295349",
+                    ee: [
+                      "https://arxiv.org/abs/1706.03762",
+                      "https://doi.org/10.5555/3295222.3295349",
+                    ],
+                    url: "https://dblp.org/rec/conf/nips/VaswaniSPUJGKP17",
+                  }),
+                  dblpHit({
+                    title:
+                      "Semi-Supervised Classification with Graph Convolutional Networks",
+                    authors: { author: { text: "Thomas N. Kipf" } },
+                    venue: ["ICLR", "OpenReview.net"],
+                    year: "2017",
+                    ee: "https://arxiv.org/abs/1609.02907",
+                    url: "https://dblp.org/rec/conf/iclr/KipfW17",
+                  }),
+                ],
+              },
+            },
+          }),
+        }),
+      },
+    };
+
+    try {
+      const tool = createSearchLiteratureOnlineTool({
+        resolveMetadataItem: () => null,
+        getEditableArticleMetadata: () => null,
+      } as never);
+      const validated = tool.validate({
+        mode: "search",
+        source: "dblp",
+        query: "graph neural networks",
+      });
+      assert.isTrue(validated.ok);
+      if (!validated.ok) return;
+
+      const result = await tool.execute(validated.value, baseContext);
+      const results = (result as { results: Array<Record<string, unknown>> })
+        .results;
+      assert.equal((result as { source: string }).source, "DBLP");
+      assert.lengthOf(results, 2);
+      assert.equal(results[0].title, "Attention Is All You Need");
+      assert.deepEqual(results[0].authors, ["Ashish Vaswani", "Noam Shazeer"]);
+      assert.equal(results[0].doi, "10.5555/3295222.3295349");
+      assert.equal(results[0].year, 2017);
+      assert.equal(
+        results[0].openAccessUrl,
+        "https://arxiv.org/abs/1706.03762",
+      );
+      // Single-author hits serialize the author as a bare object, not an array.
+      assert.deepEqual(results[1].authors, ["Thomas N. Kipf"]);
+      assert.equal(
+        results[1].openAccessUrl,
+        "https://arxiv.org/abs/1609.02907",
+      );
+    } finally {
+      delete (globalThis as Record<string, unknown>).Zotero;
+    }
+  });
+
+  it("searches Semantic Scholar for CS/ML literature", async function () {
+    (globalThis as Record<string, unknown>).Zotero = {
+      debug: () => undefined,
+    };
     (globalThis as typeof globalThis & { fetch?: typeof fetch }).fetch =
       (async (url: string | URL | Request) => {
         const href = String(url);
-        if (href.includes("api.openalex.org/works?search=")) {
+        if (
+          href.includes("api.semanticscholar.org/graph/v1/paper/search?query=")
+        ) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
-              results: [
+              data: [
                 {
-                  id: "https://openalex.org/W456",
-                  display_name: "Reviewable Paper",
-                  authorships: [{ author: { display_name: "Riley Example" } }],
-                  publication_year: 2024,
-                  cited_by_count: 8,
-                  doi: "https://doi.org/10.1000/reviewable",
-                  open_access: { oa_url: "https://example.com/reviewable.pdf" },
+                  title: "Attention Is All You Need",
+                  authors: [
+                    { name: "Ashish Vaswani" },
+                    { name: "Noam Shazeer" },
+                  ],
+                  year: 2017,
+                  abstract: "The dominant sequence transduction models...",
+                  externalIds: { DOI: "10.5555/3295222.3295349" },
+                  citationCount: 100000,
+                  openAccessPdf: { url: "https://arxiv.org/pdf/1706.03762" },
                 },
               ],
             }),
@@ -262,33 +338,210 @@ describe("search_literature_online tool", function () {
         throw new Error(`Unexpected URL: ${href}`);
       }) as typeof fetch;
 
+    try {
+      const tool = createSearchLiteratureOnlineTool({
+        resolveMetadataItem: () => null,
+        getEditableArticleMetadata: () => null,
+      } as never);
+      const validated = tool.validate({
+        mode: "search",
+        source: "semanticscholar",
+        query: "transformer attention",
+      });
+      assert.isTrue(validated.ok);
+      if (!validated.ok) return;
+
+      const result = await tool.execute(validated.value, baseContext);
+      assert.equal((result as { source: string }).source, "Semantic Scholar");
+      const results = (result as { results: Array<Record<string, unknown>> })
+        .results;
+      assert.lengthOf(results, 1);
+      assert.equal(results[0].title, "Attention Is All You Need");
+      assert.deepEqual(results[0].authors, ["Ashish Vaswani", "Noam Shazeer"]);
+      assert.equal(results[0].doi, "10.5555/3295222.3295349");
+      assert.equal(results[0].citationCount, 100000);
+      assert.equal(
+        results[0].openAccessUrl,
+        "https://arxiv.org/pdf/1706.03762",
+      );
+    } finally {
+      delete (globalThis as Record<string, unknown>).Zotero;
+    }
+  });
+
+  it("fetches citations from the Semantic Scholar graph by DOI", async function () {
+    (globalThis as Record<string, unknown>).Zotero = {
+      debug: () => undefined,
+    };
+    (globalThis as typeof globalThis & { fetch?: typeof fetch }).fetch =
+      (async (url: string | URL | Request) => {
+        const href = String(url);
+        if (
+          href.includes(
+            "api.semanticscholar.org/graph/v1/paper/DOI%3A10.1000%2Fexample/citations",
+          )
+        ) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  citingPaper: {
+                    title: "Citing Paper",
+                    authors: [{ name: "Riley Example" }],
+                    year: 2025,
+                    externalIds: { DOI: "10.1000/citing" },
+                    citationCount: 3,
+                  },
+                },
+              ],
+            }),
+          } as Response;
+        }
+        throw new Error(`Unexpected URL: ${href}`);
+      }) as typeof fetch;
+
+    try {
+      const tool = createSearchLiteratureOnlineTool({
+        resolveMetadataItem: () => null,
+        getEditableArticleMetadata: () => null,
+      } as never);
+      const validated = tool.validate({
+        mode: "citations",
+        source: "semanticscholar",
+        doi: "10.1000/example",
+      });
+      assert.isTrue(validated.ok);
+      if (!validated.ok) return;
+      // Graph modes accept openalex and semanticscholar as-is.
+      assert.equal(validated.value.source, "semanticscholar");
+
+      const result = await tool.execute(validated.value, baseContext);
+      assert.equal((result as { source: string }).source, "Semantic Scholar");
+      assert.equal((result as { doi: string }).doi, "10.1000/example");
+      const results = (result as { results: Array<Record<string, unknown>> })
+        .results;
+      assert.lengthOf(results, 1);
+      assert.equal(results[0].title, "Citing Paper");
+      assert.equal(results[0].doi, "10.1000/citing");
+    } finally {
+      delete (globalThis as Record<string, unknown>).Zotero;
+    }
+  });
+
+  it("retries via title match when Semantic Scholar does not index the DOI", async function () {
+    const s2PaperId = "204e3073870fae3d05bcbc2f6a8e263d9b72e776";
+    (globalThis as Record<string, unknown>).Zotero = {
+      debug: () => undefined,
+    };
+    (globalThis as typeof globalThis & { fetch?: typeof fetch }).fetch =
+      (async (url: string | URL | Request) => {
+        const href = String(url);
+        // Proceedings-only DOI that S2 does not index → 404.
+        if (
+          href.includes(
+            `api.semanticscholar.org/graph/v1/paper/DOI%3A10.5555%2F3295222.3295349/citations`,
+          )
+        ) {
+          return {
+            ok: false,
+            status: 404,
+            json: async () => ({}),
+          } as Response;
+        }
+        if (
+          href.includes("api.semanticscholar.org/graph/v1/paper/search/match")
+        ) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                { paperId: s2PaperId, title: "Attention is All you Need" },
+              ],
+            }),
+          } as Response;
+        }
+        if (
+          href.includes(
+            `api.semanticscholar.org/graph/v1/paper/${s2PaperId}/citations`,
+          )
+        ) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  citingPaper: {
+                    title:
+                      "BERT: Pre-training of Deep Bidirectional Transformers",
+                    authors: [{ name: "Jacob Devlin" }],
+                    year: 2019,
+                    externalIds: { DOI: "10.18653/v1/N19-1423" },
+                  },
+                },
+              ],
+            }),
+          } as Response;
+        }
+        throw new Error(`Unexpected URL: ${href}`);
+      }) as typeof fetch;
+
+    try {
+      const tool = createSearchLiteratureOnlineTool({
+        resolveMetadataItem: () => null,
+        getEditableArticleMetadata: () => null,
+      } as never);
+      const validated = tool.validate({
+        mode: "citations",
+        source: "semanticscholar",
+        doi: "10.5555/3295222.3295349",
+        title: "Attention is all you need",
+      });
+      assert.isTrue(validated.ok);
+      if (!validated.ok) return;
+
+      const result = await tool.execute(validated.value, baseContext);
+      assert.equal((result as { source: string }).source, "Semantic Scholar");
+      const results = (result as { results: Array<Record<string, unknown>> })
+        .results;
+      assert.lengthOf(results, 1);
+      assert.equal(
+        results[0].title,
+        "BERT: Pre-training of Deep Bidirectional Transformers",
+      );
+    } finally {
+      delete (globalThis as Record<string, unknown>).Zotero;
+    }
+  });
+
+  it("auto-corrects graph modes away from search-only sources", function () {
     const tool = createSearchLiteratureOnlineTool({
       resolveMetadataItem: () => null,
       getEditableArticleMetadata: () => null,
     } as never);
-    const validated = tool.validate({
-      workflow: "review",
-      mode: "search",
-      source: "openalex",
-      query: "reviewable papers",
-    });
-    assert.isTrue(validated.ok);
-    if (!validated.ok) return;
 
-    const result = await tool.execute(validated.value, baseContext);
-    assert.equal((result as { workflow: string }).workflow, "review");
-    const reviewAction = await tool.createResultReviewAction?.(
-      validated.value,
-      {
-        callId: "call-search",
-        name: "search_literature_online",
-        ok: true,
-        content: result,
-      },
-      baseContext,
-    );
-    assert.equal(reviewAction?.toolName, "literature_search");
-    assert.equal(reviewAction?.title, "Review online literature results");
+    const corrected = tool.validate({
+      mode: "references",
+      source: "arxiv",
+      doi: "10.1000/example",
+    });
+    assert.isTrue(corrected.ok);
+    if (corrected.ok) {
+      assert.equal(corrected.value.source, "semanticscholar");
+    }
+
+    const preserved = tool.validate({
+      mode: "recommendations",
+      source: "semanticscholar",
+      doi: "10.1000/example",
+    });
+    assert.isTrue(preserved.ok);
+    if (preserved.ok) {
+      assert.equal(preserved.value.source, "semanticscholar");
+    }
   });
 
   it("adds guidance for live paper discovery requests", function () {
@@ -303,8 +556,10 @@ describe("search_literature_online tool", function () {
         userText: "can you find related papers from internet to me",
       }) || false,
     );
-    assert.include(tool.guidance?.instruction || "", "workflow:'answer'");
-    assert.include(tool.guidance?.instruction || "", "workflow:'review'");
+    assert.include(
+      tool.guidance?.instruction || "",
+      "library_import, library_update (kind:'metadata'), or note_write directly",
+    );
     assert.isFalse(
       tool.guidance?.matches({
         conversationKey: 12,

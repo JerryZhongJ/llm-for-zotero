@@ -61,6 +61,5 @@ export type ProviderPromptCacheCapability = {
   supportsRetentionHint?: boolean;
   supportsAnthropicBlockCacheControl?: boolean;
   supportsAnthropicToolCacheControl?: boolean;
-  supportsAnthropicRequestCacheControl?: boolean;
   supportsAnthropicCacheTtl1h?: boolean;
 };

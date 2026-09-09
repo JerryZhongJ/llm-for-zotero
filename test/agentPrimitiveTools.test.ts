@@ -200,6 +200,12 @@ describe("primitive agent tools", function () {
       userText: "organize the library",
       activeItemId: 9,
       libraryID: 1,
+      classifiedIntent: {
+        retrievalIntent: "none",
+        wantedSections: [],
+        actionInterpretationSource: "classifier",
+        actionIntents: [],
+      },
     }),
     item: null,
     currentAnswerText: "",
@@ -702,7 +708,7 @@ describe("primitive agent tools", function () {
     assert.include(systemText, "library_retrieve");
     assert.include(systemText, "library_read");
     assert.include(systemText, "paper_read");
-    assert.include(systemText, "workflow:'answer'");
+    assert.include(systemText, "it is read-only");
     assert.include(systemText, "web_search");
     assert.include(systemText, "web_read");
     assert.include(systemText, "use the semantic tool");
@@ -2020,7 +2026,10 @@ describe("primitive agent tools", function () {
         context,
       );
       assert.equal(newRedirectPlan?.effect, "write");
-      assert.equal(newRedirectPlan?.reversibility, "partial");
+      // The redirect target is declarative, but the command body is arbitrary
+      // shell — no lossless undo can be promised, so the binary rating is
+      // none (the delete-file recovery payload is still journalled).
+      assert.equal(newRedirectPlan?.reversibility, "none");
       const newRedirectOutput = await tool.execute(newRedirect.value, context);
       assert.equal(newRedirectOutput.effect, "applied");
 
@@ -2583,7 +2592,9 @@ describe("primitive agent tools", function () {
       ...baseContext,
       request: noteRequest,
     });
-    assert.isTrue(mutationPlan?.requiresConfirmation);
+    // An edit of a plain-text note snapshots the HTML pre-image, so it is
+    // fully reversible; the write-mode gate alone decides about the card.
+    assert.equal(mutationPlan?.reversibility, "full");
     const patchOnly = tool.validate({
       mode: "edit",
       patches: [{ find: "Original", replace: "Rewritten" }],
@@ -2591,13 +2602,14 @@ describe("primitive agent tools", function () {
     assert.isTrue(patchOnly.ok);
     if (!patchOnly.ok) return;
     assert.equal(patchOnly.value.content, "");
-    assert.isTrue(
+    assert.equal(
       (
         await tool.planMutation?.(patchOnly.value, {
           ...baseContext,
           request: noteRequest,
         })
-      )?.requiresConfirmation,
+      )?.reversibility,
+      "full",
     );
 
     const pending = tool.createPendingAction?.(validated.value, {

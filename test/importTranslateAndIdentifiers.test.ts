@@ -256,6 +256,132 @@ describe("import translation and identifier parsing", function () {
   });
 });
 
+describe("PDF fetch after identifier import", function () {
+  function installSearchTranslate(
+    itemsByZoteroId: Record<number, Record<string, unknown>>,
+    overrides: Record<string, unknown> = {},
+  ) {
+    class FakeSearch {
+      setIdentifier() {}
+      async getTranslators() {
+        return [{}];
+      }
+      setTranslator() {}
+      async translate() {
+        return [{ id: 11 }];
+      }
+    }
+    (globalThis as Record<string, unknown>).Zotero = {
+      Translate: { Search: FakeSearch },
+      Items: {
+        get: (id: number) => itemsByZoteroId[id] ?? null,
+      },
+      Collections: { get: () => null },
+      Libraries: { userLibraryID: 1 },
+      debug: () => undefined,
+      ...overrides,
+    };
+  }
+
+  afterEach(function () {
+    delete (globalThis as Record<string, unknown>).Zotero;
+  });
+
+  it("asks Zotero's find-PDF machinery for imported items without a PDF", async function () {
+    const findCalls: number[] = [];
+    installSearchTranslate(
+      {
+        11: {
+          id: 11,
+          isRegularItem: () => true,
+          isAttachment: () => false,
+          getAttachments: () => [],
+        },
+      },
+      {
+        Attachments: {
+          addAvailableFile: async (item: { id: number }) => {
+            findCalls.push(item.id);
+            return { id: 500 };
+          },
+        },
+      },
+    );
+
+    const result = await new ZoteroGateway().importPapersByIdentifiers([
+      "10.1000/example",
+    ]);
+
+    assert.equal(result.succeeded, 1);
+    assert.deepEqual(findCalls, [11]);
+    assert.equal(result.pdfsFetched, 1);
+  });
+
+  it("skips items that already have a PDF attachment", async function () {
+    const findCalls: number[] = [];
+    installSearchTranslate(
+      {
+        11: {
+          id: 11,
+          isRegularItem: () => true,
+          isAttachment: () => false,
+          getAttachments: () => [21],
+        },
+        21: {
+          id: 21,
+          isRegularItem: () => false,
+          isAttachment: () => true,
+          attachmentContentType: "application/pdf",
+          attachmentFilename: "paper.pdf",
+        },
+      },
+      {
+        Attachments: {
+          addAvailableFile: async (item: { id: number }) => {
+            findCalls.push(item.id);
+            return { id: 500 };
+          },
+        },
+      },
+    );
+
+    const result = await new ZoteroGateway().importPapersByIdentifiers([
+      "10.1000/example",
+    ]);
+
+    assert.equal(result.succeeded, 1);
+    assert.deepEqual(findCalls, []);
+    assert.equal(result.pdfsFetched, 0);
+  });
+
+  it("survives a failed PDF lookup without failing the import", async function () {
+    installSearchTranslate(
+      {
+        11: {
+          id: 11,
+          isRegularItem: () => true,
+          isAttachment: () => false,
+          getAttachments: () => [],
+        },
+      },
+      {
+        Attachments: {
+          addAvailableFile: async () => {
+            throw new Error("offline");
+          },
+        },
+      },
+    );
+
+    const result = await new ZoteroGateway().importPapersByIdentifiers([
+      "10.1000/example",
+    ]);
+
+    assert.equal(result.succeeded, 1);
+    assert.equal(result.pdfsFetched, 0);
+  });
+});
+
 /**
  * `note_write mode:'edit'` resolved only the note the user happened to have
  * open, and `validate()` stripped `targetNoteId` for every mode except

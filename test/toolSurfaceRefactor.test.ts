@@ -229,11 +229,11 @@ describe("semantic tool surface", function () {
       "library_update",
       "literature_search",
       "note_write",
-      "note_write_batch",
       "paper_read",
       "revert_changes",
       "run_command",
       "saved_search_update",
+      "tool_result_read",
       "undo_last_action",
       "zotero_script",
     ]);
@@ -245,10 +245,8 @@ describe("semantic tool surface", function () {
         properties?: Record<string, { enum?: string[] }>;
       }
     )?.properties;
-    assert.deepEqual(literatureProperties?.workflow?.enum, [
-      "answer",
-      "review",
-    ]);
+    // The removed answer/review workflow switch must not reappear.
+    assert.isUndefined(literatureProperties?.workflow);
     for (const legacyName of [
       "query_library",
       "read_paper",
@@ -289,11 +287,39 @@ describe("semantic tool surface", function () {
     assert.deepEqual(looseTools, []);
   });
 
+  it("refuses a restore that mixes object kinds", async function () {
+    // One object kind per journalled action keeps the undo rating
+    // unambiguous (reversible or not — never "partial").
+    const registry = createTestBuiltInRegistry();
+    const prepared = await registry.prepareExecution(
+      {
+        id: "restore-mixed",
+        name: "library_delete",
+        arguments: {
+          mode: "restore",
+          itemIds: [11],
+          collectionIds: [42],
+        },
+      },
+      baseContext,
+    );
+    assert.equal(prepared.kind, "result");
+    if (prepared.kind === "result") {
+      assert.isFalse(prepared.execution.result.ok);
+      assert.include(
+        String(
+          (prepared.execution.result.content as { error?: string })?.error,
+        ),
+        "one kind of object per call",
+      );
+    }
+  });
+
   it("advertises delegate fields on semantic facade schemas", function () {
     assert.containsAllKeys(schemaProperties("library_import"), [
       "kind",
-      "identifiers",
-      "filePaths",
+      "identifier",
+      "filePath",
       "targetCollectionId",
       "collectionId",
       "libraryID",
@@ -328,50 +354,20 @@ describe("semantic tool surface", function () {
     ]);
   });
 
-  it("normalizes bracketed array strings for identifier imports", function () {
+  it("imports exactly one identifier per call", function () {
     const registry = createTestBuiltInRegistry();
     const tool = registry.getTool("library_import");
     assert.exists(tool);
     const validation = tool!.validate({
       kind: "identifiers",
-      identifiers: '["doi1","doi2",]',
+      identifier: "doi1",
     });
     assert.equal(validation.ok, true);
     if (!validation.ok) return;
     assert.equal(validation.value.delegateName, "import_identifiers");
     assert.deepEqual(validation.value.delegateInput.operation.identifiers, [
       "doi1",
-      "doi2",
     ]);
-  });
-
-  it("keeps real array identifier imports valid", function () {
-    const registry = createTestBuiltInRegistry();
-    const tool = registry.getTool("library_import");
-    assert.exists(tool);
-    const validation = tool!.validate({
-      kind: "identifiers",
-      identifiers: ["doi1", "doi2"],
-    });
-    assert.equal(validation.ok, true);
-    if (!validation.ok) return;
-    assert.deepEqual(validation.value.delegateInput.operation.identifiers, [
-      "doi1",
-      "doi2",
-    ]);
-  });
-
-  it("rejects non-bracketed string arrays for identifier imports", function () {
-    const registry = createTestBuiltInRegistry();
-    const tool = registry.getTool("library_import");
-    assert.exists(tool);
-    for (const identifiers of ["doi1", "doi1,doi2"]) {
-      const validation = tool!.validate({
-        kind: "identifiers",
-        identifiers,
-      });
-      assert.equal(validation.ok, false, identifiers);
-    }
   });
 
   it("normalizes bracketed array strings for library delete and update", function () {

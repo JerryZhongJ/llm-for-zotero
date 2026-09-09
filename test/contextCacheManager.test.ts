@@ -53,7 +53,6 @@ describe("context cache manager", function () {
         telemetry: "anthropic_read_write",
         supportsAnthropicBlockCacheControl: true,
         supportsAnthropicToolCacheControl: true,
-        supportsAnthropicRequestCacheControl: true,
       },
     );
     assert.deepInclude(
@@ -328,9 +327,6 @@ describe("context cache manager", function () {
     assert.deepEqual(coldPlan.requestHints?.anthropicToolCacheControl, {
       type: "ephemeral",
     });
-    assert.deepEqual(coldPlan.requestHints?.anthropicRequestCacheControl, {
-      type: "ephemeral",
-    });
 
     recordContextCacheTelemetry(coldPlan, {
       promptTokens: 22000,
@@ -353,10 +349,6 @@ describe("context cache manager", function () {
       ttl: "1h",
     });
     assert.deepEqual(warmPlan.requestHints?.anthropicToolCacheControl, {
-      type: "ephemeral",
-      ttl: "1h",
-    });
-    assert.deepEqual(warmPlan.requestHints?.anthropicRequestCacheControl, {
       type: "ephemeral",
       ttl: "1h",
     });

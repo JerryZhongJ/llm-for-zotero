@@ -431,21 +431,6 @@ export function createFileIOTool(): AgentWriteToolDefinition<
   unknown
 > {
   return {
-    describeAction: (input) =>
-      input.action === "write"
-        ? [
-            {
-              id: `file_write:${input.filePath}`,
-              proofDomain: "file_state",
-              capability: "file.write",
-              operation: "file_write",
-              source: "file_io",
-              parameters: { filePath: input.filePath },
-              requestedTargets: [`file:${input.filePath}`],
-              destinationCollectionIds: [],
-            },
-          ]
-        : [],
     spec: {
       name: "file_io",
       description:

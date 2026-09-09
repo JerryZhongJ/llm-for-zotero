@@ -130,6 +130,78 @@ describe("agent prompt budget", function () {
     assert.deepEqual(result.handleRecords, []);
   });
 
+  it("preserves a script's error and log excerpt when its output is compacted", function () {
+    // "It ran" without "what it printed or threw" is the failure mode seen in
+    // the wild: the model iterates on scripts and needs the error verbatim.
+    const log = Array.from(
+      { length: 3000 },
+      (_, index) => `log line ${index} ${"x".repeat(60)}`,
+    ).join("\n");
+    const messages: AgentModelMessage[] = [
+      { role: "system", content: "Use tools." },
+      { role: "user", content: "Inspect the library with a script." },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-script",
+            name: "zotero_script",
+            arguments: { mode: "read", script: "return 1;", description: "d" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call-script",
+        name: "zotero_script",
+        content: JSON.stringify({
+          mode: "read",
+          description: "d",
+          output: log,
+          error: "TypeError: x is not a function",
+          itemsAffected: 3,
+        }),
+      },
+      // A later tool round makes the script result "older", which is what
+      // the generic compaction path targets.
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-read",
+            name: "tool_result_read",
+            arguments: { handle: "trh_latest", path: "results" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call-read",
+        name: "tool_result_read",
+        content: JSON.stringify({ returnedCount: 0, items: [] }),
+      },
+    ];
+    const result = enforceAgentPromptBudget({
+      messages,
+      model: "claude-haiku-4-5",
+      inputTokenCap: 10_000,
+      conversationKey: 3,
+      resourceSignature: "scope-a",
+    });
+    assert.isTrue(result.changed);
+    const tool = result.messages.find((message) => message.role === "tool");
+    assert.equal(tool?.role, "tool");
+    const modelFacing = JSON.parse((tool as { content: string }).content);
+    assert.isTrue(modelFacing.modelContextCompacted);
+    assert.include(modelFacing.error, "TypeError: x is not a function");
+    assert.include(modelFacing.output, "log line 0");
+    assert.equal(modelFacing.itemsAffected, 3);
+    assert.match(modelFacing.toolResultHandle, /^trh_/);
+    assert.notInclude(modelFacing.output, `log line ${399}`);
+  });
+
   it("keeps a full large tool result when the complete prompt fits a 200k budget", function () {
     const messages: AgentModelMessage[] = [
       { role: "system", content: "Use tools." },

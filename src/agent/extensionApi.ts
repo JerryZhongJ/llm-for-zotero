@@ -70,10 +70,6 @@
  *   and implement `createPendingAction` to show a HITL confirmation card before
  *   executing.
  *
- * Read tools can also pause after execution by implementing
- * `createResultReviewAction` and `resolveResultReview`. This lets the tool
- * deliver results inside a review card before the model sees them.
- *
  * ## Guidance (optional)
  *
  * Add a `guidance` field to tell the agent *when* to prefer your tool:

@@ -21,6 +21,12 @@ export const JOURNAL_BLOB_CLEANUP_TABLE =
   "llm_for_zotero_agent_journal_blob_cleanup_v2";
 
 export type JournalEffect = "none" | "write";
+/**
+ * Reversibility is binary now: "full" promises a lossless undo, "none"
+ * refuses one. "partial" is deprecated — nothing writes it anymore; it
+ * stays in the union (and `normalizeReversibility` keeps accepting it)
+ * only so journal rows recorded before the binary rating still read back.
+ */
 export type JournalReversibility = "full" | "partial" | "none";
 export type JournalStatus =
   | "prepared"
@@ -393,8 +399,10 @@ export async function initAgentChangeJournal(): Promise<void> {
       [startupTime],
     );
     // Recompute from durable step outcomes, not the original plan. A planned
-    // partial/irreversible step that never started must not make a completely
-    // restored action report a residual after restart.
+    // irreversible step that never started must not make a completely
+    // restored action report a residual after restart. Reversibility is
+    // binary: every recovery-relevant step full, or the action is not
+    // undoable.
     await db.queryAsync(
       `UPDATE ${JOURNAL_ACTIONS_TABLE}
        SET status = 'partially_applied',
@@ -405,13 +413,7 @@ export async function initAgentChangeJournal(): Promise<void> {
                  AND s.status IN ('applied','irreversible')
                  AND s.reversibility <> 'full'
              ) THEN 'full'
-             WHEN NOT EXISTS (
-               SELECT 1 FROM ${JOURNAL_STEPS_TABLE} s
-               WHERE s.action_id = ${JOURNAL_ACTIONS_TABLE}.action_id
-                 AND s.status IN ('applied','irreversible')
-                 AND s.reversibility <> 'none'
-             ) THEN 'none'
-             ELSE 'partial' END,
+             ELSE 'none' END,
            recovery_text = (
              SELECT GROUP_CONCAT(s.error_text, ' ')
              FROM ${JOURNAL_STEPS_TABLE} s

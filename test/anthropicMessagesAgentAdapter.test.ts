@@ -248,7 +248,7 @@ describe("AnthropicMessagesAgentAdapter", function () {
     assert.equal(system[1]?.text, "Stable Zotero resource context");
   });
 
-  it("applies agent request and tool cache_control hints", async function () {
+  it("applies agent message-tail and tool cache_control hints", async function () {
     const adapter = new AnthropicMessagesAgentAdapter();
     let capturedBody: Record<string, unknown> | null = null;
     (
@@ -288,7 +288,6 @@ describe("AnthropicMessagesAgentAdapter", function () {
           requestHints: {
             anthropicBlockCacheControl: { type: "ephemeral", ttl: "1h" },
             anthropicToolCacheControl: { type: "ephemeral", ttl: "1h" },
-            anthropicRequestCacheControl: { type: "ephemeral", ttl: "1h" },
           },
         },
       }),
@@ -313,7 +312,25 @@ describe("AnthropicMessagesAgentAdapter", function () {
       ],
     });
 
-    assert.deepEqual(capturedBody?.cache_control, {
+    // No undocumented request-level cache_control: the message tail carries
+    // the incremental breakpoint instead, alongside the tool breakpoint.
+    assert.notProperty(capturedBody, "cache_control");
+    const bodyMessages = capturedBody?.messages as Array<{
+      role: string;
+      content: Array<Record<string, unknown>>;
+    }>;
+    assert.isAtLeast(bodyMessages.length, 1);
+    const lastMessage = bodyMessages[bodyMessages.length - 1];
+    const lastBlock = lastMessage.content[lastMessage.content.length - 1] || {};
+    for (const message of bodyMessages.slice(0, -1)) {
+      for (const block of message.content) {
+        assert.notProperty(block, "cache_control");
+      }
+    }
+    for (const block of lastMessage.content.slice(0, -1)) {
+      assert.notProperty(block, "cache_control");
+    }
+    assert.deepEqual(lastBlock.cache_control, {
       type: "ephemeral",
       ttl: "1h",
     });

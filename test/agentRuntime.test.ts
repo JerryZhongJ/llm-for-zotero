@@ -23,10 +23,6 @@ import {
   upsertAgentToolResultHandles,
 } from "../src/agent/store/toolResultHandles";
 import { AgentToolRegistry } from "../src/agent/tools/registry";
-import {
-  ActionContractService,
-  describeLibraryMutationActions,
-} from "../src/agent/contracts/actionContract";
 import { createToolResultReadTool } from "../src/agent/tools/read/toolResultRead";
 import { createFileIOTool } from "../src/agent/tools/write/fileIO";
 import { createWebSearchTool } from "../src/agent/tools/read/webSearch";
@@ -66,19 +62,6 @@ type InstalledMockDb = (() => void) & {
   transcriptWriteAttempts: () => number;
 };
 
-function createTestActionContractService(
-  getItem: (itemId: number) => Zotero.Item | null = () => null,
-): ActionContractService {
-  return new ActionContractService({
-    getCollectionSummary: () => null,
-    listCollectionSummaries: () => [],
-    listCollectionPaperTargets: async () => ({ papers: [] }),
-    listCollectionItemTargets: async () => ({ items: [] }),
-    getItem,
-    getEditableArticleMetadata: () => null,
-  });
-}
-
 function registerZeroEffectLibraryUpdate(registry: AgentToolRegistry): void {
   registry.register({
     spec: {
@@ -107,20 +90,6 @@ function registerZeroEffectLibraryUpdate(registry: AgentToolRegistry): void {
       };
     },
   } as never);
-}
-
-function commandActionDescriptor(id: string) {
-  return [
-    {
-      id,
-      proofDomain: "execution" as const,
-      capability: "command.execute" as const,
-      operation: "command_execute" as const,
-      source: "command" as const,
-      requestedTargets: [],
-      destinationCollectionIds: [],
-    },
-  ];
 }
 
 function installMockDb(): InstalledMockDb {
@@ -327,6 +296,34 @@ class MockAdapter implements AgentModelAdapter {
     this.stepIndex += 1;
     return step;
   }
+}
+
+/**
+ * The runtime no longer fabricates write authority from regex fallbacks:
+ * model-originated writes require an explicit classifiedIntent. These
+ * fixtures stand in for a successful classifier turn.
+ */
+function classifiedWriteIntent(
+  operation: "command_execute" | "note_create",
+): AgentRuntimeRequest["classifiedIntent"] {
+  const details =
+    operation === "command_execute"
+      ? {
+          operation,
+          capability: "command.execute" as const,
+          proofDomain: "execution" as const,
+        }
+      : {
+          operation,
+          capability: "zotero.notes" as const,
+          proofDomain: "zotero_state" as const,
+        };
+  return {
+    retrievalIntent: "none",
+    wantedSections: [],
+    actionInterpretationSource: "classifier",
+    actionIntents: [{ ...details, coverage: "one", targetKind: "items" }],
+  };
 }
 
 describe("AgentRuntime", function () {
@@ -623,20 +620,7 @@ describe("AgentRuntime", function () {
   it("executes tool calls and resumes after approval", async function () {
     const restoreDb = installMockDb();
     try {
-      const registry = new AgentToolRegistry(
-        createTestActionContractService((itemId) =>
-          itemId === 500
-            ? ({
-                id: 500,
-                parentID: false,
-                deleted: false,
-                isNote: () => true,
-                getNote: () => "edited hello",
-                getCollections: () => [],
-              } as unknown as Zotero.Item)
-            : null,
-        ),
-      );
+      const registry = new AgentToolRegistry();
       registry.register({
         spec: {
           name: "mutate_library",
@@ -646,21 +630,6 @@ describe("AgentRuntime", function () {
           requiresConfirmation: true,
         },
         validate: () => ({ ok: true, value: { content: "hello" } }),
-        describeAction: (input) => [
-          {
-            id: "note_create:approval-test",
-            proofDomain: "zotero_state",
-            capability: "zotero.notes",
-            operation: "note_create",
-            source: "zotero_native",
-            parameters: {
-              noteMode: "create",
-              expectedText: input.content,
-            },
-            requestedTargets: [],
-            destinationCollectionIds: [],
-          },
-        ],
         createPendingAction: () => ({
           toolName: "mutate_library",
           title: "Save hello",
@@ -770,6 +739,7 @@ describe("AgentRuntime", function () {
           model: "gpt-4o-mini",
           apiBase: "https://api.openai.com/v1/chat/completions",
           apiKey: "test",
+          classifiedIntent: classifiedWriteIntent("note_create"),
         },
         onEvent: async (event) => {
           events.push(event);
@@ -785,24 +755,16 @@ describe("AgentRuntime", function () {
 
       assert.equal(outcome.kind, "completed");
       if (outcome.kind !== "completed") return;
-      assert.equal(
-        outcome.text,
-        "Saved.\n\n[Action status: note_create — applied 1/1; verified; proof:zotero_state]",
-      );
+      // Turn-end reconciliation is retired; the write itself surfaced as a
+      // tool call/result pair rather than a receipt-status footer.
+      assert.equal(outcome.text, "Saved.");
       assert.isTrue(events.some((event) => event.type === "tool_call"));
       assert.isTrue(events.some((event) => event.type === "tool_result"));
       const toolResultIndex = events.findIndex(
         (event) => event.type === "tool_result",
       );
       const toolResultEvent = events[toolResultIndex];
-      const postToolContractIndex = events.findIndex(
-        (event, index) =>
-          index > toolResultIndex &&
-          event.type === "provider_event" &&
-          event.providerType === "agent_action_contract",
-      );
       assert.isAtLeast(toolResultIndex, 0);
-      assert.isAbove(postToolContractIndex, toolResultIndex);
       assert.deepEqual(
         toolResultEvent && toolResultEvent.type === "tool_result"
           ? toolResultEvent.content
@@ -1845,7 +1807,12 @@ describe("AgentRuntime", function () {
           requiresConfirmation: false,
         },
         validate: () => ({ ok: true, value: {} }),
-        execute: async () => ({ sourcePath: rawPath, text: "Evidence" }),
+        // Large enough to cross the compaction threshold at turn end, so the
+        // tool result folds into a durable handle instead of replaying raw.
+        execute: async () => ({
+          sourcePath: rawPath,
+          text: `Evidence. ${"supporting context ".repeat(1500)}`,
+        }),
       });
       let stepIndex = 0;
       const runtime = new AgentRuntime({
@@ -1893,6 +1860,7 @@ describe("AgentRuntime", function () {
           model: "gpt-5.4",
           apiBase: "https://api.openai.com/v1/responses",
           apiKey: "test",
+          advanced: { inputTokenCap: 8_000 },
           pdfPaperContexts: [
             {
               itemId: 20,
@@ -2136,7 +2104,7 @@ describe("AgentRuntime", function () {
     }
   });
 
-  it("issues one corrective continuation when an Obsidian note request finishes without a file write", async function () {
+  it("completes with the model's first final when an Obsidian note request skips the file write", async function () {
     const restoreDb = installMockDb();
     try {
       await initAgentChangeJournal();
@@ -2154,7 +2122,7 @@ describe("AgentRuntime", function () {
         true,
       );
 
-      const registry = new AgentToolRegistry(createTestActionContractService());
+      const registry = new AgentToolRegistry();
       const writes: unknown[] = [];
       registry.register({
         spec: {
@@ -2169,24 +2137,6 @@ describe("AgentRuntime", function () {
           effect: "write",
           reversibility: "full",
         }),
-        describeAction: (input) => [
-          {
-            id: `file_write:${String((input as { filePath?: unknown }).filePath || "")}`,
-            proofDomain: "file_state",
-            capability: "file.write",
-            operation: "file_write",
-            source: "file_io",
-            parameters: {
-              filePath: String(
-                (input as { filePath?: unknown }).filePath || "",
-              ),
-            },
-            requestedTargets: [
-              `file:${String((input as { filePath?: unknown }).filePath || "")}`,
-            ],
-            destinationCollectionIds: [],
-          },
-        ],
         execute: async (input) => {
           writes.push(input);
           return {
@@ -2289,16 +2239,12 @@ describe("AgentRuntime", function () {
 
       assert.equal(outcome.kind, "completed");
       if (outcome.kind !== "completed") return;
-      assert.include(outcome.text, "Saved.");
-      assert.include(outcome.text, "file_write — applied");
-      assert.isTrue(sawCorrectivePrompt);
-      assert.deepEqual(writes, [
-        {
-          action: "write",
-          filePath: "/tmp/obsidian-vault/Figure 2.md",
-          content: "## Figure 2\nGrounded note.",
-        },
-      ]);
+      // Turn-end reconciliation is retired: when the model skips the file
+      // write, its first final answer stands and no corrective continuation
+      // is issued. The user sees the turn had no write in the action feed.
+      assert.include(outcome.text, "Draft body in chat.");
+      assert.isFalse(sawCorrectivePrompt);
+      assert.deepEqual(writes, []);
     } finally {
       restoreDb();
     }
@@ -2364,7 +2310,7 @@ describe("AgentRuntime", function () {
     }
   });
 
-  it("requires paper_read full before completing an explicit Agent full-text request", async function () {
+  it("no longer forces paper_read full before completing an explicit full-text request", async function () {
     const restoreDb = installMockDb();
     try {
       const registry = new AgentToolRegistry();
@@ -2473,16 +2419,18 @@ describe("AgentRuntime", function () {
 
       assert.equal(outcome.kind, "completed");
       if (outcome.kind !== "completed") return;
-      assert.include(outcome.text, "Grounded full-text answer.");
-      assert.include(outcome.text, "read_full — observed; verified");
-      assert.isTrue(sawCorrection);
-      assert.deepEqual(reads, [{ mode: "full" }]);
+      // The read_full obligation guard was part of turn-end reconciliation
+      // and is retired with it: the model's premature answer stands, and
+      // grounding now depends on the model choosing to read first.
+      assert.include(outcome.text, "Here is a summary.");
+      assert.isFalse(sawCorrection);
+      assert.deepEqual(reads, []);
     } finally {
       restoreDb();
     }
   });
 
-  it("continues a rejected final without replaying the preceding tool result", async function () {
+  it("accepts a premature final without a corrective continuation round", async function () {
     const restoreDb = installMockDb();
     try {
       const registry = new AgentToolRegistry();
@@ -2605,32 +2553,10 @@ describe("AgentRuntime", function () {
 
       assert.equal(outcome.kind, "completed");
       if (outcome.kind !== "completed") return;
-      assert.include(outcome.text, "Grounded answer after the full read.");
-      assert.lengthOf(continuationDeltas, 4);
-      assert.deepEqual(
-        continuationDeltas[1].map((message) => message.role),
-        ["tool"],
-      );
-      assert.deepEqual(
-        continuationDeltas[2].map((message) => message.role),
-        ["user"],
-      );
-      assert.notInclude(
-        JSON.stringify(continuationDeltas[2]),
-        "call-overview-read",
-      );
-      assert.include(
-        JSON.stringify(continuationDeltas[2]),
-        "open typed obligation(s)",
-      );
-      assert.deepEqual(
-        continuationDeltas[3].map((message) => message.role),
-        ["tool"],
-      );
-      assert.include(
-        JSON.stringify(continuationDeltas[3]),
-        "call-full-read-after-correction",
-      );
+      // Turn-end reconciliation is retired: the premature final is accepted
+      // and no corrective continuation round is issued.
+      assert.include(outcome.text, "Premature answer from overview evidence.");
+      assert.lengthOf(continuationDeltas, 2);
     } finally {
       restoreDb();
     }
@@ -2668,26 +2594,7 @@ describe("AgentRuntime", function () {
       );
 
       let noteExists = false;
-      const registry = new AgentToolRegistry(
-        new ActionContractService({
-          getCollectionSummary: () => null,
-          listCollectionSummaries: () => [],
-          listCollectionPaperTargets: async () => ({ papers: [] }),
-          listCollectionItemTargets: async () => ({ items: [] }),
-          getItem: (itemId) =>
-            itemId === 500 && noteExists
-              ? ({
-                  id: 500,
-                  parentID: false,
-                  deleted: false,
-                  isNote: () => true,
-                  getNote: () => "<h2>Summary</h2><p>Zotero note body.</p>",
-                  getCollections: () => [],
-                } as unknown as Zotero.Item)
-              : null,
-          getEditableArticleMetadata: () => null,
-        }),
-      );
+      const registry = new AgentToolRegistry();
       const noteWrites: unknown[] = [];
       registry.register({
         spec: {
@@ -2707,21 +2614,6 @@ describe("AgentRuntime", function () {
             },
           },
         }),
-        describeAction: (input) => [
-          {
-            id: "note_create:standalone",
-            proofDomain: "zotero_state",
-            capability: "zotero.notes",
-            operation: "note_create",
-            source: "zotero_native",
-            parameters: {
-              noteMode: "create",
-              expectedText: String(input.operation.content || ""),
-            },
-            requestedTargets: [],
-            destinationCollectionIds: [],
-          },
-        ],
         planMutation: async () => ({
           effect: "write",
           reversibility: "full",
@@ -2831,7 +2723,8 @@ describe("AgentRuntime", function () {
       assert.equal(outcome.kind, "completed");
       if (outcome.kind !== "completed") return;
       assert.include(outcome.text, "Saved Zotero note.");
-      assert.include(outcome.text, "note_create — applied");
+      // Receipt-status footers were part of turn-end reconciliation and are
+      // retired; the note write itself shows in the action feed.
       assert.isTrue(sawInitialZoteroRule);
       assert.isFalse(sawInitialFileRule);
       assert.isFalse(sawCorrectivePrompt);
@@ -2911,7 +2804,7 @@ describe("AgentRuntime", function () {
           writtenBytes.get(path) || new Uint8Array(),
       };
 
-      const registry = new AgentToolRegistry(createTestActionContractService());
+      const registry = new AgentToolRegistry();
       registry.register(createFileIOTool());
       const runtime = new AgentRuntime({
         registry,
@@ -3696,20 +3589,12 @@ describe("AgentRuntime", function () {
             }
             const serialized = JSON.stringify(persisted);
             assert.include(serialized, "checkpoint-call");
-            assert.include(
+            // Below the compaction threshold the raw pair persists verbatim —
+            // crash recovery replays it directly instead of via a handle.
+            assert.include(serialized, "durable result");
+            assert.notInclude(
               serialized,
               "Agent semantic continuation checkpoint",
-            );
-            assert.notInclude(serialized, "durable result");
-            const handle = serialized.match(/handle=(trh_[a-z0-9]+)/i)?.[1];
-            assert.match(handle || "", /^trh_/);
-            const storedResult = await getAgentToolResultHandle({
-              conversationKey,
-              handle: handle || "",
-            });
-            assert.include(
-              JSON.stringify(storedResult?.content),
-              "durable result",
             );
             throw new Error("simulated process interruption");
           },
@@ -3744,7 +3629,7 @@ describe("AgentRuntime", function () {
     try {
       await initAgentChangeJournal();
       const conversationKey = 704;
-      const registry = new AgentToolRegistry(createTestActionContractService());
+      const registry = new AgentToolRegistry();
       registry.register({
         spec: {
           name: "confirmation_write",
@@ -3754,12 +3639,10 @@ describe("AgentRuntime", function () {
           requiresConfirmation: true,
         },
         validate: () => ({ ok: true, value: {} }),
-        describeAction: () =>
-          commandActionDescriptor("command_execute:pending-confirmation"),
         planMutation: () => ({
           effect: "write",
-          reversibility: "full",
-          requiresConfirmation: true,
+          reversibility: "none",
+          reason: "Test fixture: an irreversible write stops at a card.",
         }),
         createPendingAction: () => ({
           toolName: "confirmation_write",
@@ -3829,6 +3712,7 @@ describe("AgentRuntime", function () {
           model: "gpt-4o-mini",
           apiBase: "https://api.openai.com/v1/chat/completions",
           apiKey: "test",
+          classifiedIntent: classifiedWriteIntent("command_execute"),
         },
         onEvent: (event) => {
           if (event.type === "confirmation_required") {
@@ -3853,7 +3737,197 @@ describe("AgentRuntime", function () {
     }
   });
 
-  it("reuses the local append-only transcript across agent turns", async function () {
+  it("merges several pending writes from one reply into a single batch confirmation card", async function () {
+    const installed = installMockDb();
+    try {
+      await initAgentChangeJournal();
+      const conversationKey = 705;
+      const executions: string[] = [];
+      const registry = new AgentToolRegistry();
+      const batchWriteTool = (name: string) => ({
+        spec: {
+          name,
+          description: "write",
+          inputSchema: { type: "object" },
+          mutability: "write",
+          requiresConfirmation: true,
+        },
+        validate: () => ({ ok: true, value: {} }),
+        planMutation: () => ({
+          effect: "write" as const,
+          reversibility: "none" as const,
+          reason: "Test fixture: an irreversible write stops at a card.",
+        }),
+        createPendingAction: () => ({
+          toolName: name,
+          title: `Confirm ${name}`,
+          confirmLabel: "Apply",
+          cancelLabel: "Cancel",
+          fields: [],
+        }),
+        execute: async () => {
+          executions.push(name);
+          return { content: { status: "saved" }, effect: "applied" as const };
+        },
+      });
+      registry.register(batchWriteTool("batch_write_a"));
+      registry.register(batchWriteTool("batch_write_b"));
+      const call = (id: string, name: string) => ({
+        id,
+        name,
+        arguments: {},
+      });
+      const runtime = new AgentRuntime({
+        registry,
+        adapterFactory: () =>
+          new MockAdapter(
+            [
+              {
+                kind: "tool_calls",
+                calls: [
+                  call("call-a", "batch_write_a"),
+                  call("call-b", "batch_write_b"),
+                ],
+                assistantMessage: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    call("call-a", "batch_write_a"),
+                    call("call-b", "batch_write_b"),
+                  ],
+                },
+              },
+              {
+                kind: "final",
+                text: "Applied the selected write.",
+                assistantMessage: {
+                  role: "assistant",
+                  content: "Applied the selected write.",
+                },
+              },
+            ],
+            {
+              streaming: false,
+              toolCalls: true,
+              multimodal: false,
+              fileInputs: false,
+              reasoning: true,
+            },
+          ),
+      });
+      const confirmationEvents: Array<{
+        requestId: string;
+        action: { toolName: string; fields: unknown[] };
+      }> = [];
+      const firstConfirmation = new Promise<string>((resolve) => {
+        let settled = false;
+        runtime.runTurn({
+          request: {
+            conversationKey,
+            mode: "agent",
+            userText: "run both writes after asking once",
+            model: "gpt-4o-mini",
+            apiBase: "https://api.openai.com/v1/chat/completions",
+            apiKey: "test",
+            classifiedIntent: classifiedWriteIntent("batch_write_a"),
+          },
+          onEvent: (event) => {
+            if (event.type !== "confirmation_required") return;
+            confirmationEvents.push({
+              requestId: event.requestId,
+              action: event.action,
+            });
+            if (!settled) {
+              settled = true;
+              resolve(event.requestId);
+            }
+          },
+        });
+      });
+      const requestId = await firstConfirmation;
+      // Approve only call-a through the batch checklist.
+      assert.isTrue(
+        runtime.resolveConfirmation(requestId, true, {
+          batchSelection: ["call-a"],
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      assert.lengthOf(confirmationEvents, 1);
+      const batchAction = confirmationEvents[0].action;
+      assert.equal(batchAction.toolName, "batch_confirmation");
+      const checklist = batchAction.fields.find(
+        (field: { type?: string }) => field.type === "checklist",
+      );
+      assert.isOk(checklist);
+      assert.deepEqual(
+        (
+          checklist as { items: Array<{ id: string; checked: boolean }> }
+        ).items.map((item: { id: string }) => item.id),
+        ["call-a", "call-b"],
+      );
+
+      // The unchecked write was denied, not executed.
+      assert.deepEqual(executions, ["batch_write_a"]);
+    } finally {
+      installed();
+    }
+  });
+
+  it("keeps review cards out of the batch merge", async function () {
+    const installed = installMockDb();
+    try {
+      await initAgentChangeJournal();
+      const registry = new AgentToolRegistry();
+      const reviewWriteTool = (name: string) => ({
+        spec: {
+          name,
+          description: "write",
+          inputSchema: { type: "object" },
+          mutability: "write",
+          requiresConfirmation: true,
+        },
+        validate: () => ({ ok: true, value: {} }),
+        planMutation: () => ({
+          effect: "write" as const,
+          reversibility: "none" as const,
+          reason: "Test fixture: an irreversible write stops at a card.",
+        }),
+        createPendingAction: () => ({
+          toolName: name,
+          title: `Review ${name}`,
+          mode: "review" as const,
+          confirmLabel: "Apply",
+          cancelLabel: "Cancel",
+          fields: [
+            {
+              type: "textarea" as const,
+              id: "content",
+              label: "Content",
+              value: "editable",
+            },
+          ],
+        }),
+        execute: async () => ({ content: { status: "saved" } }),
+      });
+      registry.register(reviewWriteTool("review_write"));
+      // A review card must never merge — the checkbox row cannot carry the
+      // editable content, and a merged approval would run the unedited input.
+      assert.isNull(
+        await registry.previewWriteConfirmation(
+          { id: "call-r", name: "review_write", arguments: {} },
+          {
+            request: { conversationKey: 706 },
+            modelName: "test",
+          } as never,
+        ),
+      );
+    } finally {
+      installed();
+    }
+  });
+
+  it("replays the raw transcript verbatim across agent turns", async function () {
     const restoreDb = installMockDb();
     try {
       const request: AgentRuntimeRequest = {
@@ -3941,14 +4015,116 @@ describe("AgentRuntime", function () {
           typeof message.content === "string" &&
           message.content.includes("Agent semantic continuation checkpoint"),
       );
-      assert.lengthOf(priorSemanticCheckpoints, 1, serialized);
-      assert.notInclude(
-        secondMessages.map((message) => message.role),
-        "assistant",
+      // Below the compaction threshold the prior turn replays verbatim: the
+      // full assistant answer stays in the prompt instead of a 260-char
+      // summary line (the truncated-checklist bug this guards against).
+      assert.lengthOf(priorSemanticCheckpoints, 0, serialized);
+      const priorAnswer = secondMessages.find(
+        (message) => message.role === "assistant",
+      );
+      assert.equal(
+        typeof priorAnswer?.content === "string" ? priorAnswer.content : "",
+        "Alpha is preserved.",
       );
       assert.include(serialized, "remember alpha");
-      assert.include(serialized, "Alpha is preserved.");
       assert.include(secondToolNames, "tool_result_read");
+    } finally {
+      restoreDb();
+    }
+  });
+
+  it("keeps a byte-stable cached prefix across agent turns", async function () {
+    const restoreDb = installMockDb();
+    try {
+      const baseRequest: AgentRuntimeRequest = {
+        conversationKey: 12,
+        mode: "agent",
+        userText: "first turn",
+        model: "gpt-4o-mini",
+        apiBase: "https://api.openai.com/v1/chat/completions",
+        apiKey: "test",
+      };
+      const capabilities = {
+        streaming: false,
+        toolCalls: true,
+        multimodal: false,
+        fileInputs: false,
+        reasoning: true,
+      };
+      let firstMessages: AgentModelMessage[] = [];
+      const firstRuntime = new AgentRuntime({
+        registry: new AgentToolRegistry(),
+        adapterFactory: () => ({
+          getCapabilities: () => capabilities,
+          supportsTools: () => true,
+          async runStep(params: AgentStepParams): Promise<AgentModelStep> {
+            firstMessages = params.messages;
+            return {
+              kind: "final",
+              text: "First answer.",
+              assistantMessage: {
+                role: "assistant",
+                content: "First answer.",
+              },
+            };
+          },
+        }),
+      });
+      await firstRuntime.runTurn({ request: baseRequest });
+
+      let secondMessages: AgentModelMessage[] = [];
+      const secondRuntime = new AgentRuntime({
+        registry: new AgentToolRegistry(),
+        adapterFactory: () => ({
+          getCapabilities: () => capabilities,
+          supportsTools: () => true,
+          async runStep(params: AgentStepParams): Promise<AgentModelStep> {
+            secondMessages = params.messages;
+            return {
+              kind: "final",
+              text: "Second answer.",
+              assistantMessage: {
+                role: "assistant",
+                content: "Second answer.",
+              },
+            };
+          },
+        }),
+      });
+      await secondRuntime.runTurn({
+        request: { ...baseRequest, userText: "second turn" },
+      });
+
+      // The prompt-cache contract: with settings and selection unchanged,
+      // every system message must be byte-identical across turns, and the
+      // history replays append-only before the new turn message — no
+      // per-turn checkpoint injected into the cached prefix.
+      const systemOf = (messages: AgentModelMessage[]) =>
+        messages.filter((message) => message.role === "system");
+      assert.equal(
+        JSON.stringify(systemOf(secondMessages)),
+        JSON.stringify(systemOf(firstMessages)),
+      );
+      assert.isAbove(systemOf(firstMessages).length, 0);
+      const nonSystem = secondMessages.filter(
+        (message) => message.role !== "system",
+      );
+      assert.deepEqual(
+        nonSystem.map((message) => message.role),
+        ["user", "assistant", "user"],
+      );
+      assert.include(
+        String(nonSystem[0]?.content),
+        "User request:\nfirst turn",
+      );
+      assert.equal(nonSystem[1]?.content, "First answer.");
+      assert.include(
+        String(nonSystem[2]?.content),
+        "User request:\nsecond turn",
+      );
+      const systemText = JSON.stringify(systemOf(secondMessages));
+      assert.notInclude(systemText, "Active skills for this turn");
+      assert.notInclude(systemText, "Conversation continuity notes");
     } finally {
       restoreDb();
     }
@@ -3961,7 +4137,7 @@ describe("AgentRuntime", function () {
       const conversationKey = 702;
       const actionId = "recovery-action";
       let writes = 0;
-      const registry = new AgentToolRegistry(createTestActionContractService());
+      const registry = new AgentToolRegistry();
       registry.register({
         spec: {
           name: "recovery_write",
@@ -3971,8 +4147,6 @@ describe("AgentRuntime", function () {
           requiresConfirmation: false,
         },
         validate: () => ({ ok: true, value: {} }),
-        describeAction: () =>
-          commandActionDescriptor("command_execute:recovery-write"),
         planMutation: () => ({ effect: "write", reversibility: "full" }),
         execute: async (_input, context) => {
           writes += 1;
@@ -4048,6 +4222,7 @@ describe("AgentRuntime", function () {
             model: "gpt-4o-mini",
             apiBase: "https://api.openai.com/v1/chat/completions",
             apiKey: "test",
+            classifiedIntent: classifiedWriteIntent("command_execute"),
           },
         });
         assert.fail("expected the first run to be interrupted");
@@ -4098,6 +4273,7 @@ describe("AgentRuntime", function () {
           model: "gpt-4o-mini",
           apiBase: "https://api.openai.com/v1/chat/completions",
           apiKey: "test",
+          classifiedIntent: classifiedWriteIntent("command_execute"),
         },
       });
 
@@ -4120,7 +4296,7 @@ describe("AgentRuntime", function () {
       const conversationKey = 703;
       const actionId = "changed-key-action";
       let writes = 0;
-      const registry = new AgentToolRegistry(createTestActionContractService());
+      const registry = new AgentToolRegistry();
       registry.register({
         spec: {
           name: "changed_key_write",
@@ -4130,8 +4306,6 @@ describe("AgentRuntime", function () {
           requiresConfirmation: false,
         },
         validate: () => ({ ok: true, value: {} }),
-        describeAction: () =>
-          commandActionDescriptor("command_execute:changed-key"),
         planMutation: () => ({ effect: "write", reversibility: "full" }),
         execute: async (_input, context) => {
           writes += 1;
@@ -4206,6 +4380,7 @@ describe("AgentRuntime", function () {
             model: "gpt-4o-mini",
             apiBase: "https://api.openai.com/v1/chat/completions",
             apiKey: "test",
+            classifiedIntent: classifiedWriteIntent("command_execute"),
           },
         });
         assert.fail("expected interruption");
@@ -4265,6 +4440,7 @@ describe("AgentRuntime", function () {
           model: "gpt-4.1-mini",
           apiBase: "https://api.openai.com/v1/chat/completions",
           apiKey: "test",
+          classifiedIntent: classifiedWriteIntent("command_execute"),
         },
       });
 
@@ -4415,6 +4591,9 @@ describe("AgentRuntime", function () {
             reasoning: true,
           }),
       });
+      // Raw turns accumulate below the threshold, so the first /compact has
+      // real work to do; the checkpointed segment it leaves behind is then a
+      // no-op for a second /compact.
       const compactOutcome = await compactRuntime.runTurn({
         request: {
           ...request,
@@ -4425,9 +4604,27 @@ describe("AgentRuntime", function () {
 
       assert.equal(compactOutcome.kind, "completed");
       if (compactOutcome.kind !== "completed") return;
-      assert.equal(compactOutcome.text, "Nothing to compact yet");
-      assert.isFalse(
+      assert.equal(compactOutcome.text, "Conversation compacted");
+      assert.isTrue(
         compactEvents.some(
+          (event) =>
+            event.type === "context_compacted" && event.automatic === false,
+        ),
+      );
+
+      const secondCompactEvents: AgentEvent[] = [];
+      const secondCompactOutcome = await compactRuntime.runTurn({
+        request: {
+          ...request,
+          userText: "/compact",
+        },
+        onEvent: (event) => secondCompactEvents.push(event),
+      });
+      assert.equal(secondCompactOutcome.kind, "completed");
+      if (secondCompactOutcome.kind !== "completed") return;
+      assert.equal(secondCompactOutcome.text, "Nothing to compact yet");
+      assert.isFalse(
+        secondCompactEvents.some(
           (event) =>
             event.type === "context_compacted" && event.automatic === false,
         ),
@@ -4467,7 +4664,7 @@ describe("AgentRuntime", function () {
 
       assert.include(
         JSON.stringify(followupMessages),
-        "Agent semantic continuation checkpoint",
+        "Agent transcript compact checkpoint",
       );
       assert.match(JSON.stringify(followupMessages), /trh_[a-z0-9]+/i);
     } finally {
@@ -4600,8 +4797,10 @@ describe("AgentRuntime", function () {
       assert.lengthOf(modelFacing.results, 120);
       assert.include(JSON.stringify(modelFacing), "A".repeat(200));
       assert.isAtLeast(toolNamesByStep.length, 2);
-      assert.notInclude(toolNamesByStep[0], "tool_result_read");
-      assert.notInclude(toolNamesByStep[1], "tool_result_read");
+      // Always listed even with no stored handles: a byte-stable tools array
+      // keeps the prompt-cache prefix intact across every step.
+      assert.include(toolNamesByStep[0], "tool_result_read");
+      assert.include(toolNamesByStep[1], "tool_result_read");
     } finally {
       restoreDb();
     }
@@ -4747,7 +4946,7 @@ describe("AgentRuntime", function () {
       assert.include(checkpointText, "query_library");
       assert.match(checkpointText, /handle=trh_[a-z0-9]+/i);
       assert.isAtLeast(toolNamesByStep.length, 2);
-      assert.notInclude(toolNamesByStep[0], "tool_result_read");
+      assert.include(toolNamesByStep[0], "tool_result_read");
       assert.include(toolNamesByStep[1], "tool_result_read");
       assert.notInclude(checkpointText, "A".repeat(200));
     } finally {
@@ -4920,7 +5119,7 @@ describe("AgentRuntime", function () {
       });
 
       assert.equal(outcome.kind, "completed");
-      assert.notInclude(toolNamesByStep[0], "tool_result_read");
+      assert.include(toolNamesByStep[0], "tool_result_read");
       assert.include(toolNamesByStep[1], "tool_result_read");
       assert.equal(
         readToolMessage?.role,
@@ -5767,13 +5966,21 @@ describe("web attribution runtime guard", function () {
       );
       assert.notInclude(outcome.text, "llm-web-source");
       const transcript = readPersistedTranscript(restoreDb, 921);
-      assert.lengthOf(transcript, 1);
-      assert.equal(transcript[0]?.role, "user");
-      assert.include(
-        String(transcript[0]?.content || ""),
+      // Raw persistence keeps the full corrected turn; the persisted final
+      // answer must be the clean Markdown without the web-source marker.
+      const persistedFinal = [...transcript]
+        .reverse()
+        .find((message) => message.role === "assistant");
+      assert.equal(
+        typeof persistedFinal?.content === "string"
+          ? persistedFinal.content
+          : "",
         "A supported current claim.",
       );
-      assert.notInclude(JSON.stringify(transcript), "llm-web-source");
+      // The correction prompt legitimately documents the marker format
+      // (placeholder SOURCE_ID); only real anchors (web_ prefixed ids) must
+      // stay out of the persisted transcript.
+      assert.notMatch(JSON.stringify(transcript), /llm-web-source:web_/);
     } finally {
       restoreDb();
     }
@@ -6144,95 +6351,35 @@ describe("shallow guard round-limit safety", function () {
    * legitimate ("they were already in that collection") — the goal is an
    * accurate report, not a failed run.
    */
-  it("fails truthfully after one correction when a write has no verifiable receipt", async function () {
+  it("leaves the model's report as-is when a write has no effect; truth enforcement is retired", async function () {
     const restoreDb = installMockDb();
     try {
       await initAgentChangeJournal();
-      const registry = new AgentToolRegistry(
-        new ActionContractService({
-          getCollectionSummary: () => null,
-          listCollectionSummaries: () => [],
-          listCollectionPaperTargets: async () => ({ papers: [] }),
-          listCollectionItemTargets: async () => ({ items: [] }),
-          getItem: () => null,
-          getEditableArticleMetadata: () => null,
-        }),
-      );
+      const registry = new AgentToolRegistry();
       registerZeroEffectLibraryUpdate(registry);
 
-      let stepIndex = 0;
-      let resolvedRequest: AgentRuntimeRequest | undefined;
-      let correctionRequestMessages: AgentModelMessage[] = [];
       const runtime = new AgentRuntime({
         registry,
-        adapterFactory: (request) => {
-          resolvedRequest = request;
-          return {
-            getCapabilities: () => ({
-              streaming: true,
-              toolCalls: true,
-              multimodal: false,
-            }),
-            supportsTools: () => true,
-            async runStep(params: AgentStepParams): Promise<AgentModelStep> {
-              stepIndex += 1;
-              if (stepIndex === 1) {
-                return {
-                  kind: "tool_calls",
-                  calls: [
-                    {
-                      id: "c1",
-                      name: "library_update",
-                      arguments: { kind: "collections" },
-                    },
-                  ],
-                  assistantMessage: { role: "assistant", content: "" },
-                };
-              }
-              if (stepIndex === 2) {
-                resolvedRequest!.actionProgress!.updatedAt = 11;
-                await params.onTextDelta?.(
-                  "Filed both papers into Neuroscience.",
-                );
-                return {
-                  kind: "final",
-                  text: "Filed both papers into Neuroscience.",
-                  assistantMessage: {
-                    role: "assistant",
-                    content: "Filed both papers into Neuroscience.",
-                  },
-                };
-              }
-              assert.equal(resolvedRequest?.actionProgress?.correctionCount, 1);
-              assert.isAbove(
-                resolvedRequest?.actionProgress?.updatedAt || 0,
-                11,
-              );
-              resolvedRequest!.actionProgress!.updatedAt = 22;
-              correctionRequestMessages = structuredClone(params.messages);
-              await params.onTextDelta?.(
-                "Nothing changed — both items are the wrong type to file.",
-              );
-              return {
-                kind: "final",
-                text: "Nothing changed — both items are the wrong type to file.",
-                assistantMessage: {
-                  role: "assistant",
-                  content:
-                    "Nothing changed — both items are the wrong type to file.",
-                },
-              };
-            },
-          };
-        },
+        adapterFactory: () => ({
+          getCapabilities: () => ({
+            streaming: true,
+            toolCalls: true,
+            multimodal: false,
+          }),
+          supportsTools: () => true,
+          async runStep(): Promise<AgentModelStep> {
+            return {
+              kind: "final",
+              text: "Filed both papers into Neuroscience.",
+              assistantMessage: {
+                role: "assistant",
+                content: "Filed both papers into Neuroscience.",
+              },
+            };
+          },
+        }),
       });
 
-      const events: AgentEvent[] = [];
-      const rollbackProgress: Array<{
-        correctionCount: number | undefined;
-        state: string | undefined;
-        updatedAt: number | undefined;
-      }> = [];
       const outcome = await runtime.runTurn({
         request: {
           conversationKey: 991,
@@ -6243,300 +6390,24 @@ describe("shallow guard round-limit safety", function () {
           apiKey: "test",
           libraryID: 1,
         },
-        onEvent: (event) => {
-          events.push(event);
-          if (event.type !== "message_rollback") return;
-          const terminalSnapshot = [...events]
-            .reverse()
-            .find(
-              (candidate) =>
-                candidate.type === "provider_event" &&
-                candidate.providerType === "agent_action_contract" &&
-                typeof candidate.payload?.state === "string",
-            );
-          const progress = resolvedRequest?.actionProgress;
-          rollbackProgress.push({
-            correctionCount: progress?.correctionCount,
-            state: progress?.state,
-            updatedAt: progress?.updatedAt,
-          });
-          assert.equal(
-            terminalSnapshot?.type === "provider_event"
-              ? terminalSnapshot.payload?.state
-              : undefined,
-            "failed",
-          );
-          assert.equal(
-            progress?.state,
-            "pending",
-            "failed evaluation must remain nonterminal until rollback succeeds",
-          );
-        },
+        onEvent: () => undefined,
       });
 
       assert.equal(outcome.kind, "completed");
       if (outcome.kind !== "completed") return;
-      assert.notInclude(
-        outcome.text,
-        "Filed both papers",
-        "the first, false claim must not be what the user is left with",
-      );
-      assert.include(outcome.text, "write was blocked");
-      assert.deepEqual(rollbackProgress, [
-        { correctionCount: 0, state: "pending", updatedAt: 11 },
-        { correctionCount: 1, state: "pending", updatedAt: 22 },
-      ]);
-      assert.equal(resolvedRequest?.actionProgress?.state, "failed");
-      assert.isAbove(resolvedRequest?.actionProgress?.updatedAt || 0, 22);
-
-      const falseFinalIndexes = correctionRequestMessages
-        .map((message, index) =>
-          message.role === "assistant" &&
-          message.content === "Filed both papers into Neuroscience."
-            ? index
-            : -1,
-        )
-        .filter((index) => index >= 0);
-      assert.lengthOf(falseFinalIndexes, 1);
-      const falseFinalIndex = falseFinalIndexes[0];
-      assert.isAtLeast(falseFinalIndex, 0);
-      assert.equal(
-        correctionRequestMessages[falseFinalIndex + 1]?.role,
-        "user",
-      );
-      assert.match(
-        String(correctionRequestMessages[falseFinalIndex + 1]?.content || ""),
-        /^Correction for this turn:/,
-      );
-      assert.equal(
-        correctionRequestMessages.filter(
-          (message) =>
-            message.role === "user" &&
-            String(message.content || "").startsWith(
-              "Correction for this turn:",
-            ),
-        ).length,
-        1,
-      );
-
-      const terminalContractSnapshots = events.filter(
-        (event) =>
-          event.type === "provider_event" &&
-          event.providerType === "agent_action_contract" &&
-          typeof event.payload?.state === "string",
-      );
-      assert.lengthOf(terminalContractSnapshots, 2);
-      assert.deepEqual(
-        terminalContractSnapshots.map((event) =>
-          event.type === "provider_event"
-            ? (event.payload?.progress as { correctionCount?: number })
-                ?.correctionCount
-            : undefined,
-        ),
-        [0, 1],
-      );
+      // Turn-end reconciliation is retired by design: every attempted write
+      // is visible in the conversation, and the user reads the operations,
+      // not the agent's prose. An unverified claim is no longer rewritten.
+      assert.equal(outcome.text, "Filed both papers into Neuroscience.");
     } finally {
       restoreDb();
     }
   });
 
-  it("does not consume an action correction when streamed rollback fails", async function () {
-    const installed = installMockDb();
-    try {
-      await initAgentChangeJournal();
-      const registry = new AgentToolRegistry(createTestActionContractService());
-      registerZeroEffectLibraryUpdate(registry);
-
-      let resolvedRequest: AgentRuntimeRequest | undefined;
-      let modelStep = 0;
-      let transcriptAttemptsAtRollback = 0;
-      const runtime = new AgentRuntime({
-        registry,
-        adapterFactory: (request) => {
-          resolvedRequest = request;
-          return {
-            getCapabilities: () => ({
-              streaming: true,
-              toolCalls: true,
-              multimodal: false,
-            }),
-            supportsTools: () => true,
-            async runStep(params: AgentStepParams): Promise<AgentModelStep> {
-              modelStep += 1;
-              if (modelStep === 1) {
-                const call = {
-                  id: "rollback-c1",
-                  name: "library_update",
-                  arguments: { kind: "collections" },
-                };
-                return {
-                  kind: "tool_calls",
-                  calls: [call],
-                  assistantMessage: {
-                    role: "assistant",
-                    content: "",
-                    tool_calls: [call],
-                  },
-                };
-              }
-              resolvedRequest!.actionProgress!.updatedAt = 17;
-              await params.onTextDelta?.(
-                "Filed both papers into Neuroscience.",
-              );
-              return {
-                kind: "final",
-                text: "Filed both papers into Neuroscience.",
-                assistantMessage: {
-                  role: "assistant",
-                  content: "Filed both papers into Neuroscience.",
-                },
-              };
-            },
-          };
-        },
-      });
-
-      let error: unknown;
-      try {
-        await runtime.runTurn({
-          request: {
-            conversationKey: 993,
-            mode: "agent",
-            userText: "file these two papers into Neuroscience",
-            model: "gpt-4o-mini",
-            apiBase: "https://api.openai.com/v1/chat/completions",
-            apiKey: "test",
-            libraryID: 1,
-          },
-          onEvent: (event) => {
-            if (event.type !== "message_rollback") return;
-            transcriptAttemptsAtRollback = installed.transcriptWriteAttempts();
-            throw new Error("Injected rollback failure");
-          },
-        });
-      } catch (caught) {
-        error = caught;
-      }
-
-      assert.match(String(error), /injected rollback failure/i);
-      assert.equal(modelStep, 2);
-      assert.equal(resolvedRequest?.actionProgress?.correctionCount, 0);
-      assert.equal(resolvedRequest?.actionProgress?.state, "pending");
-      assert.equal(resolvedRequest?.actionProgress?.updatedAt, 17);
-      assert.equal(
-        installed.transcriptWriteAttempts(),
-        transcriptAttemptsAtRollback,
-        "no correction checkpoint may be attempted after rollback fails",
-      );
-    } finally {
-      installed();
-    }
-  });
-
-  it("does not consume an action correction when correction checkpoint storage fails", async function () {
-    const installed = installMockDb();
-    try {
-      await initAgentChangeJournal();
-      const registry = new AgentToolRegistry(createTestActionContractService());
-      registerZeroEffectLibraryUpdate(registry);
-
-      let resolvedRequest: AgentRuntimeRequest | undefined;
-      let modelStep = 0;
-      let rollbackObserved = false;
-      const runtime = new AgentRuntime({
-        registry,
-        adapterFactory: (request) => {
-          resolvedRequest = request;
-          return {
-            getCapabilities: () => ({
-              streaming: true,
-              toolCalls: true,
-              multimodal: false,
-            }),
-            supportsTools: () => true,
-            async runStep(params: AgentStepParams): Promise<AgentModelStep> {
-              modelStep += 1;
-              if (modelStep === 1) {
-                const call = {
-                  id: "storage-c1",
-                  name: "library_update",
-                  arguments: { kind: "collections" },
-                };
-                return {
-                  kind: "tool_calls",
-                  calls: [call],
-                  assistantMessage: {
-                    role: "assistant",
-                    content: "",
-                    tool_calls: [call],
-                  },
-                };
-              }
-              resolvedRequest!.actionProgress!.updatedAt = 19;
-              installed.setTranscriptWriteFailure(true);
-              await params.onTextDelta?.(
-                "Filed both papers into Neuroscience.",
-              );
-              return {
-                kind: "final",
-                text: "Filed both papers into Neuroscience.",
-                assistantMessage: {
-                  role: "assistant",
-                  content: "Filed both papers into Neuroscience.",
-                },
-              };
-            },
-          };
-        },
-      });
-
-      let error: unknown;
-      try {
-        await runtime.runTurn({
-          request: {
-            conversationKey: 994,
-            mode: "agent",
-            userText: "file these two papers into Neuroscience",
-            model: "gpt-4o-mini",
-            apiBase: "https://api.openai.com/v1/chat/completions",
-            apiKey: "test",
-            libraryID: 1,
-          },
-          onEvent: (event) => {
-            if (event.type !== "message_rollback") return;
-            rollbackObserved = true;
-            assert.equal(resolvedRequest?.actionProgress?.correctionCount, 0);
-          },
-        });
-      } catch (caught) {
-        error = caught;
-      }
-
-      assert.match(String(error), /transcript checkpoint storage failed/i);
-      assert.isTrue(rollbackObserved);
-      assert.equal(modelStep, 2);
-      assert.equal(resolvedRequest?.actionProgress?.correctionCount, 0);
-      assert.equal(resolvedRequest?.actionProgress?.state, "pending");
-      assert.equal(resolvedRequest?.actionProgress?.updatedAt, 19);
-      assert.notInclude(
-        JSON.stringify(installed.transcripts),
-        "Correction for this turn:",
-      );
-    } finally {
-      installed();
-    }
-  });
-
-  /**
-   * Chain survival. Three careful "Cancel" clicks used to fail the run
-   * outright, because a denial incremented the same counter as a broken tool
-   * -- and persistence was gated on a clean finish, so the run discarded its
-   * own transcript *after* its library writes had landed.
-   */
-  it("does not retry a typed obligation after the user declines it", async function () {
+  it("never executes a write whose confirmation the user keeps declining", async function () {
     const restoreDb = installMockDb();
     try {
-      const registry = new AgentToolRegistry(createTestActionContractService());
+      const registry = new AgentToolRegistry();
       registry.register({
         spec: {
           name: "library_update",
@@ -6546,8 +6417,6 @@ describe("shallow guard round-limit safety", function () {
           requiresConfirmation: true,
         },
         validate: (args) => ({ ok: true, value: args as never }),
-        describeAction: () =>
-          commandActionDescriptor("command_execute:cancel-once"),
         createPendingAction: () => ({
           toolName: "library_update",
           title: "Confirm",
@@ -6593,9 +6462,10 @@ describe("shallow guard round-limit safety", function () {
           ),
       });
 
-      // "safe" is what this test is about: declining a card the user was
-      // shown. Under the default "auto" mode these writes are reversible and
-      // apply without a card, so there would be nothing to decline.
+      // "manual" is what this test is about: declining a card the user was
+      // shown. Under the default "semi_auto" mode these writes are
+      // reversible and apply without a card, so there would be nothing to
+      // decline.
       const previousZotero = (globalThis as Record<string, any>).Zotero;
       (globalThis as Record<string, any>).Zotero = {
         ...(previousZotero || {}),
@@ -6603,7 +6473,7 @@ describe("shallow guard round-limit safety", function () {
           ...(previousZotero?.Prefs || {}),
           get: (key: string, ...rest: unknown[]) =>
             String(key).endsWith("agentLibraryWriteMode")
-              ? "safe"
+              ? "manual"
               : previousZotero?.Prefs?.get?.(key, ...rest),
         },
       };
@@ -6618,6 +6488,7 @@ describe("shallow guard round-limit safety", function () {
           apiBase: "https://api.openai.com/v1/chat/completions",
           apiKey: "test",
           libraryID: 1,
+          classifiedIntent: classifiedWriteIntent("command_execute"),
         },
         onEvent: async (event) => {
           if (event.type === "confirmation_required") {
@@ -6629,7 +6500,10 @@ describe("shallow guard round-limit safety", function () {
 
       (globalThis as Record<string, any>).Zotero = previousZotero;
 
-      assert.equal(denials, 1, "the cancelled obligation must not be retried");
+      // Typed obligations are retired: each retry from the model earns its
+      // own confirmation card, and every one of them is declined — the write
+      // itself never runs.
+      assert.equal(denials, 3, "every retry must be confirmed again");
 
       assert.equal(
         outcome.kind,
@@ -6661,19 +6535,7 @@ describe("shallow guard round-limit safety", function () {
         itemIds: [1, 2, 3],
         tags: ["reviewed"],
       };
-      const registry = new AgentToolRegistry(
-        createTestActionContractService((itemId) =>
-          [1, 2, 3].includes(itemId)
-            ? ({
-                id: itemId,
-                libraryID: 1,
-                isRegularItem: () => true,
-                isAttachment: () => false,
-                isAnnotation: () => false,
-              } as unknown as Zotero.Item)
-            : null,
-        ),
-      );
+      const registry = new AgentToolRegistry();
       registry.register({
         spec: {
           name: "library_update",
@@ -6683,7 +6545,6 @@ describe("shallow guard round-limit safety", function () {
           requiresConfirmation: false,
         },
         validate: () => ({ ok: true, value: { operation } }),
-        describeAction: (input) => describeLibraryMutationActions(input),
         planMutation: async () => ({
           effect: "write",
           reversibility: "full",
@@ -6782,6 +6643,21 @@ describe("shallow guard round-limit safety", function () {
           apiBase: "https://api.openai.com/v1/chat/completions",
           apiKey: "test",
           libraryID: 1,
+          classifiedIntent: {
+            retrievalIntent: "none",
+            wantedSections: [],
+            actionInterpretationSource: "classifier",
+            actionIntents: [
+              {
+                operation: "apply_tags",
+                capability: "zotero.tags",
+                proofDomain: "zotero_state",
+                coverage: "some",
+                targetKind: "papers",
+                parameters: { tags: ["reviewed"] },
+              },
+            ],
+          },
           selectedPaperContexts: [1, 2, 3].map((itemId) => ({
             itemId,
             contextItemId: itemId,

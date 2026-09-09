@@ -49,7 +49,6 @@ export type ContextCachePlan = {
     promptCacheRetention?: "in_memory" | "24h";
     anthropicBlockCacheControl?: AnthropicPromptCacheControl;
     anthropicToolCacheControl?: AnthropicPromptCacheControl;
-    anthropicRequestCacheControl?: AnthropicPromptCacheControl;
   };
 };
 
@@ -152,7 +151,6 @@ export function resolvePromptCacheCapability(
       stablePrefix: true,
       supportsAnthropicBlockCacheControl: true,
       supportsAnthropicToolCacheControl: true,
-      supportsAnthropicRequestCacheControl: true,
       supportsAnthropicCacheTtl1h: true,
     };
   }
@@ -241,12 +239,17 @@ function buildContextCacheKey(params: {
     .sort()
     .join(",");
   const contentHash = stableHash(params.contextText);
+  // The cache key deliberately excludes the content hash: providers such as
+  // OpenAI use it as a routing bucket (prompt_cache_key), and keying it on
+  // the exact context text meant any stable-block drift forced a guaranteed
+  // miss in a fresh bucket even when most of the prefix still matched. The
+  // prefix itself decides hit or miss; the key only needs to stay stable for
+  // the same provider+model+paper scope.
   return {
     cacheKey: [
       params.capability.provider,
       normalizeModelForCacheKey(params.model),
       papers || "no-papers",
-      contentHash,
     ].join(":"),
     contentHash,
   };
@@ -259,8 +262,7 @@ function supportsProviderRequestHints(
     capability.supportsPromptCacheKey ||
     capability.supportsRetentionHint ||
     capability.supportsAnthropicBlockCacheControl ||
-    capability.supportsAnthropicToolCacheControl ||
-    capability.supportsAnthropicRequestCacheControl,
+    capability.supportsAnthropicToolCacheControl,
   );
 }
 
@@ -352,12 +354,6 @@ export function planContextCacheReuse(params: {
   }
   if (capability.supportsAnthropicToolCacheControl) {
     requestHints.anthropicToolCacheControl = anthropicCacheControl;
-  }
-  if (
-    capability.supportsAnthropicRequestCacheControl &&
-    params.strategy === "agent-stable-resources"
-  ) {
-    requestHints.anthropicRequestCacheControl = anthropicCacheControl;
   }
 
   const mode: ContextCachePlanMode =

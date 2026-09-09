@@ -586,7 +586,6 @@ export async function executeAndRecordUndo(
       result: coordinated.results[0],
     },
     effect: coordinated.effect,
-    actionEvidence: coordinated.actionEvidence,
   };
 }
 
@@ -620,7 +619,6 @@ export async function executeAndRecordUndoBatch(
       results: coordinated.results,
     },
     effect: coordinated.effect,
-    actionEvidence: coordinated.actionEvidence,
   };
 }
 
@@ -638,11 +636,11 @@ export async function planLibraryMutations(
   for (const operation of operations) {
     plans.push(await mutationService.planOperation(operation, context));
   }
+  // Binary: every operation promises a lossless inverse, or the whole call
+  // is not undoable. There is no "partial" tier to land in between.
   const reversibility = plans.every((plan) => plan.reversibility === "full")
     ? "full"
-    : plans.every((plan) => plan.reversibility === "none")
-      ? "none"
-      : "partial";
+    : "none";
   return {
     effect: "write",
     reversibility,

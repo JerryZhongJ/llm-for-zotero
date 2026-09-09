@@ -32,12 +32,12 @@ When the user wants to add one or more papers to their library — whether from 
 
 ### Identify what the user gave you
 
-| User provides                                                                             | How to resolve                                                                                            |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Reference number(s)** from a paper in context (e.g. "add ref 5, 12, 23")                | Read the References section from the paper (see below), extract each cited reference, then resolve DOIs   |
-| **Pasted title or citation text** (e.g. a line like "Smith et al. 2020, Neural Networks") | Extract the title, then resolve the DOI                                                                   |
-| **DOI, arXiv ID, ISBN, or URL**                                                           | Pass directly to `library_import({ kind:'identifiers', identifiers:[...] })` — no resolution needed       |
-| **Vague description** (e.g. "that hippocampal replay paper by Buzsaki")                   | Use `literature_search({ workflow:'answer', mode:'search', query:'...', author:'...' })` to find it first |
+| User provides                                                                             | How to resolve                                                                                          |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Reference number(s)** from a paper in context (e.g. "add ref 5, 12, 23")                | Read the References section from the paper (see below), extract each cited reference, then resolve DOIs |
+| **Pasted title or citation text** (e.g. a line like "Smith et al. 2020, Neural Networks") | Extract the title, then resolve the DOI                                                                 |
+| **DOI, arXiv ID, ISBN, or URL**                                                           | Pass directly to `library_import({ kind:'identifiers', identifier:'<DOI>' })` — no resolution needed    |
+| **Vague description** (e.g. "that hippocampal replay paper by Buzsaki")                   | Use `literature_search({ mode:'search', query:'...', author:'...' })` to find it first                  |
 
 ### Reading the references section from a paper
 
@@ -52,17 +52,16 @@ If no MinerU cache, use `paper_read({ mode:'targeted', query:'reference number o
 
 For each paper that doesn't already have a DOI:
 
-- Call `literature_search({ workflow:'answer', mode:'metadata', title:'<exact title>' })` to resolve the DOI from CrossRef/Semantic Scholar.
-- If title match fails, try adding the first author: `literature_search({ workflow:'answer', mode:'metadata', title:'<title>', author:'<first author>' })`.
+- Call `literature_search({ mode:'metadata', title:'<exact title>' })` to resolve the DOI from CrossRef/Semantic Scholar.
+- If title match fails, try adding the first author: `literature_search({ mode:'metadata', title:'<title>', author:'<first author>' })`.
 
 ### Importing
 
-- **Single paper:** `library_import({ kind:'identifiers', identifiers:['<DOI>'] })`
-- **Multiple papers:** `library_import({ kind:'identifiers', identifiers:['<DOI1>', '<DOI2>', ...] })` — batch them in one call.
+- Import ONE paper per call: `library_import({ kind:'identifiers', identifier:'<DOI>' })`. Multiple papers = multiple calls — each import is separately journalled and separately undoable.
 - If the user specified a target collection, include `targetCollectionId`.
 
 ### Key rules
 
-- For multiple references, batch-resolve all DOIs first, then import them in a single `library_import({ kind:'identifiers', identifiers:[...] })` call.
+- For multiple references, resolve all DOIs first, then issue one import call per paper. Each import stops at its own confirmation checklist card (checklist cards are never batch-merged), so confirm them one by one.
 - Show the user what you resolved before importing so they can verify.
 - If DOI resolution fails for some papers, import the ones that succeeded and report which ones failed.

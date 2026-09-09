@@ -2,8 +2,6 @@ import type {
   AgentConfirmationResolution,
   AgentJournalActionScope,
   AgentPendingAction,
-  AgentActionContract,
-  AgentActionProgressLedger,
 } from "../types";
 import type { AgentToolRegistry } from "../tools/registry";
 import type { ZoteroGateway } from "../services/zoteroGateway";
@@ -76,8 +74,6 @@ export type ActionRequestContext = {
   fullTextPaperContexts?: PaperContextRef[];
   selectedCollectionContexts?: CollectionContextRef[];
   selectedTagContexts?: TagContextRef[];
-  actionContract?: AgentActionContract;
-  actionProgress?: AgentActionProgressLedger;
 };
 
 export type ActionExecutionContext = {

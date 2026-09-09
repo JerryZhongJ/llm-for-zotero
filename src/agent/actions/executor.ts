@@ -39,8 +39,6 @@ function buildToolContext(
       selectedCollectionContexts:
         ctx.requestContext?.selectedCollectionContexts,
       selectedTagContexts: ctx.requestContext?.selectedTagContexts,
-      actionContract: ctx.requestContext?.actionContract,
-      actionProgress: ctx.requestContext?.actionProgress,
     }),
     runId: ctx.runId,
     item: syntheticItem,
@@ -93,13 +91,6 @@ function withConfirmationActionId(
  *   - `"native_ui"` — emits a `confirmation_required` progress event and awaits
  *     the caller's `requestConfirmation()` to get the user's resolution.
  *   - `"mcp_response"` — same as native_ui; the MCP server handles the pause.
- *
- * NOTE: This function only handles `prepareExecution` (validation + confirmation).
- * It does NOT run the runtime's result-review loop (createResultReviewAction /
- * resolveResultReview). This means tools like search_literature_online will
- * return raw results without triggering per-item review cards — which is the
- * desired behavior for batch actions that gather data in a loop and present
- * one consolidated confirmation at the end.
  */
 export async function callTool(
   toolName: string,

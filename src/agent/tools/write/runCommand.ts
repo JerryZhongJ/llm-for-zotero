@@ -14,7 +14,6 @@ import {
 import { ok, fail, validateObject } from "../shared";
 import { executeExternalMutation } from "../../services/mutationCoordinator";
 import { sha256Bytes } from "../../store/journalRecoveryBlobStore";
-import { fingerprintText } from "../../contracts/actionOperationEvidence";
 
 type RunCommandInput = {
   command: string;
@@ -28,6 +27,13 @@ type ReversibleCommandWrite = {
   path: string;
   sourcePath?: string;
   description: string;
+  /**
+   * "program" — the whole command IS the primitive (touch/mkdir of a single
+   * new path), so deleting that path is a complete lossless inverse.
+   * "redirect" — only the redirect TARGET is declarative; the command body
+   * is arbitrary shell, so no lossless undo can be promised.
+   */
+  origin: "program" | "redirect";
 };
 
 /**
@@ -426,6 +432,7 @@ function parseRedirectTarget(command: string): ReversibleCommandWrite | null {
   return {
     kind: "file",
     path,
+    origin: "redirect",
     description: `Delete created file from shell redirect: ${path}`,
   };
 }
@@ -531,6 +538,7 @@ function parseReversibleCommandWrite(
     return {
       kind: "directory",
       path: paths[0],
+      origin: "program",
       description: `Remove created directory: ${paths[0]}`,
     };
   }
@@ -538,6 +546,7 @@ function parseReversibleCommandWrite(
     return {
       kind: "file",
       path: args[0],
+      origin: "program",
       description: `Delete created file: ${args[0]}`,
     };
   }
@@ -550,6 +559,7 @@ function parseReversibleCommandWrite(
       kind: "file",
       path: args[1],
       sourcePath: args[0],
+      origin: "program",
       description: `Delete copied file: ${args[1]}`,
     };
   }
@@ -606,20 +616,6 @@ export function createRunCommandTool(): AgentWriteToolDefinition<
   unknown
 > {
   return {
-    describeAction: (input) => [
-      {
-        id: `command_execute:${fingerprintText(input.command)}`,
-        proofDomain: "execution",
-        capability: "command.execute",
-        operation: "command_execute",
-        source: "command",
-        parameters: {
-          commandFingerprint: fingerprintText(input.command),
-        },
-        requestedTargets: [],
-        destinationCollectionIds: [],
-      },
-    ],
     spec: {
       name: "run_command",
       description:
@@ -664,8 +660,17 @@ export function createRunCommandTool(): AgentWriteToolDefinition<
         "Pass the complete command as a single string — pipes, redirects, globbing, and all shell features work. " +
         "Do NOT split the command into separate command/args fields.",
     },
-
     presentation: {
+      // A shell command's risk lives in the command text itself.
+      buildWriteGateSummary: ({ input }) => {
+        const value = input as { command?: string; cwd?: string };
+        return [
+          `Command: ${value.command || ""}`,
+          value.cwd ? `Working directory: ${value.cwd}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      },
       label: "Run Command",
       summaries: {
         onCall: ({ args }) => {
@@ -730,10 +735,15 @@ export function createRunCommandTool(): AgentWriteToolDefinition<
         const exists = await pathExists(outputPath);
         return {
           effect: "write",
-          reversibility: exists === false ? "partial" : "none",
+          reversibility:
+            exists === false && reversibleWrite.origin === "program"
+              ? "full"
+              : "none",
           reason:
             exists === false
-              ? "The declared new output can be removed, but other command effects cannot be proven reversible."
+              ? reversibleWrite.origin === "program"
+                ? "The whole command is a single create primitive (touch/mkdir/cp), so removing the new path is a complete inverse."
+                : "The redirect target can be removed, but the command body is arbitrary shell whose effects cannot be proven reversible."
               : "The command may affect paths or external state that have no complete declarative inverse.",
         };
       }
@@ -852,12 +862,16 @@ export function createRunCommandTool(): AgentWriteToolDefinition<
                 }
               : undefined,
             reversibility:
-              outputPath && existedBeforeWrite === false
-                ? ("partial" as const)
+              outputPath &&
+              existedBeforeWrite === false &&
+              reversibleWrite?.origin === "program"
+                ? ("full" as const)
                 : ("none" as const),
             reason:
               outputPath && existedBeforeWrite === false
-                ? "The declared new output can be removed, but arbitrary command side effects cannot be proven reversible."
+                ? reversibleWrite?.origin === "program"
+                  ? "The whole command is a single create primitive; removing the new path is a complete inverse."
+                  : "The redirect target can be removed, but the command body's effects cannot be proven reversible."
                 : "Arbitrary shell command effects have no complete declarative inverse.",
           };
         },
@@ -901,8 +915,10 @@ export function createRunCommandTool(): AgentWriteToolDefinition<
             result: commandResult,
             expectedPostcondition,
             reversibility:
-              outputPath && existedBeforeWrite === false
-                ? ("partial" as const)
+              outputPath &&
+              existedBeforeWrite === false &&
+              reversibleWrite?.origin === "program"
+                ? ("full" as const)
                 : ("none" as const),
             affectedCount: changed ? 1 : 0,
             effect: changed ? "applied" : "none",

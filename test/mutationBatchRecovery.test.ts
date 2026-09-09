@@ -312,11 +312,6 @@ describe("multi-operation durable mutation recovery", function () {
 
     assert.equal(executeCalls, 1);
     assert.equal(outcome.effect, "none");
-    assert.lengthOf(outcome.actionEvidence, 1);
-    assert.equal(
-      outcome.actionEvidence[0].postState.items?.[0].fields?.title,
-      "new",
-    );
     assert.equal([...db.actions.values()][0].status, "no_effect");
     assert.equal([...db.steps.values()][0].status, "no_effect");
   });

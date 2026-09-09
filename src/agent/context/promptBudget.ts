@@ -220,6 +220,10 @@ function isLibrarySearchTool(toolName: string): boolean {
   return normalized === "query_library" || normalized === "library_search";
 }
 
+function isZoteroScriptTool(toolName: string): boolean {
+  return toolName.trim().toLowerCase() === "zotero_script";
+}
+
 function isEvidenceTool(toolName: string): boolean {
   const normalized = toolName.trim().toLowerCase();
   return (
@@ -518,6 +522,60 @@ function buildGenericCompactToolResult(params: {
   };
 }
 
+/**
+ * A script's error text is the one thing compaction must never drop: the
+ * model iterates on scripts, and "it ran" without "what it printed or threw"
+ * (the exact failure mode observed in the wild) leaves it blind. Keep the
+ * error verbatim, sample the log output head/tail within the remaining
+ * budget, and summarize everything else.
+ */
+function buildZoteroScriptCompactToolResult(params: {
+  content: unknown;
+  maxTokens: number;
+}): unknown {
+  const record =
+    params.content && typeof params.content === "object"
+      ? (params.content as Record<string, unknown>)
+      : {};
+  const error =
+    typeof record.error === "string" && record.error.trim()
+      ? record.error
+      : undefined;
+  // Error text claims up to half the budget up front; the log keeps the rest.
+  const errorBudget = error
+    ? Math.max(32, Math.floor(params.maxTokens / 2))
+    : 0;
+  const errorText = error
+    ? truncateStringToTokenBudget(error, errorBudget)
+    : undefined;
+  const outputBudget = params.maxTokens - (errorText ? errorBudget : 0);
+  const output =
+    typeof record.output === "string" && record.output.trim()
+      ? truncateStringToTokenBudget(record.output, Math.max(32, outputBudget))
+      : undefined;
+  return {
+    modelContextCompacted: true,
+    compactionReason:
+      "The complete provider-bound prompt exceeded the active context budget.",
+    notice:
+      "zotero_script output was reduced under context pressure. The script's error (if any) and a log excerpt are preserved; call tool_result_read with the attached handle for the exact stored result.",
+    error: errorText,
+    output,
+    outputTruncated: record.outputTruncated || undefined,
+    returnValue:
+      record.returnValue === undefined
+        ? undefined
+        : truncateStringToTokenBudget(
+            stableStringify(record.returnValue),
+            Math.max(16, Math.floor(params.maxTokens / 8)),
+          ),
+    itemsAffected:
+      typeof record.itemsAffected === "number"
+        ? record.itemsAffected
+        : undefined,
+  };
+}
+
 function buildLibraryCompactToolResult(params: {
   toolName: string;
   content: unknown;
@@ -725,6 +783,9 @@ function compactToolContent(params: {
   if (isEvidenceTool(params.toolName)) {
     return buildEvidenceCompactToolResult(params);
   }
+  if (isZoteroScriptTool(params.toolName)) {
+    return buildZoteroScriptCompactToolResult(params);
+  }
   return buildGenericCompactToolResult(params);
 }
 
@@ -766,6 +827,12 @@ function buildToolResultHandle(params: {
           ?.queryCoverage,
       ),
     warnings: compactMetadataValue(content.warnings),
+    // An error is the one payload clearing must never drop: without it the
+    // model sees "it ran" and cannot know the call actually failed.
+    error:
+      typeof content.error === "string" && content.error.trim()
+        ? truncateStringToTokenBudget(content.error, 64)
+        : undefined,
     notice:
       "Older tool output was cleared under context pressure. If this message includes toolResultHandle, call tool_result_read to retrieve omitted sections from the exact stored result.",
   };
@@ -1094,7 +1161,11 @@ export function enforceAgentPromptBudget(params: {
       predicate: (message: AgentToolMessage) =>
         !protectedToolIds.has(message.tool_call_id) &&
         !isLibrarySearchTool(message.name) &&
-        !isEvidenceTool(message.name),
+        !isEvidenceTool(message.name) &&
+        // A script's error and log excerpt survive compaction (see
+        // buildZoteroScriptCompactToolResult): clearing it to a bare handle
+        // is exactly the "it ran, but what did it print?" blind spot.
+        !isZoteroScriptTool(message.name),
     },
     {
       kind: "catalog_compacted" as const,

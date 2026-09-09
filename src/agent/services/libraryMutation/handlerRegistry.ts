@@ -751,16 +751,18 @@ export const libraryMutationHandlers = {
     stateSections: ["items", "collections", "savedSearches"],
     replay: "state-aware",
     executionDomain: "notes-lifecycle",
+    // Restoring collections/saved searches brings back objects whose
+    // identity (subcollections ride along with their parent) is only known
+    // from Zotero's actual result, so the inverse is frozen after execution
+    // — the executor re-trashes exactly what was restored.
+    deferredInverse: (operation) =>
+      Boolean(
+        operation.collectionIds?.length || operation.savedSearchIds?.length,
+      ),
     planInverse: (operation) => ({
       inverseOperations: operation.itemIds?.length
         ? [{ type: "trash_items", itemIds: operation.itemIds }]
         : undefined,
-      ...(operation.collectionIds?.length || operation.savedSearchIds?.length
-        ? {
-            reason:
-              "The item portion is reversible, but collection/saved-search restore is finalized from Zotero's actual result.",
-          }
-        : {}),
     }),
     postconditionSatisfied: (operation, state) =>
       (operation.itemIds || []).every((itemId) => {

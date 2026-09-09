@@ -318,8 +318,12 @@ export function createToolResultReadTool(): AgentToolDefinition<
       mutability: "read",
       requiresConfirmation: false,
     },
-    isAvailable: (request) =>
-      request.metadata?.agentToolResultReadAvailable === true,
+    // Deliberately always listed: gating this tool on stored-handle presence
+    // made the tools array flip mid-turn (compaction creates handles partway
+    // through the loop), which invalidated the provider prompt-cache prefix —
+    // tools serialize at the very front of the request. The description scopes
+    // usage to checkpoint-provided handles, and execute() degrades gracefully
+    // ("No stored tool result exists...") when the conversation has none.
     validate: validateToolResultReadInput,
     execute: executeToolResultRead,
     presentation: {

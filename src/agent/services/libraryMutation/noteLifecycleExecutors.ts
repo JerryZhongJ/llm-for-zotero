@@ -11,13 +11,23 @@ type DomainOperation =
 
 export const noteLifecycleExecutors = {
   save_notes_batch: async (operation, context, zoteroGateway) => {
-    const rows: Array<{
-      targetItemId: number;
-      noteId?: number;
-      title: string;
-      status: "created" | "error";
-      reason?: string;
-    }> = [];
+    // A "created" row always carries its note ID — note persistence throws
+    // when it cannot resolve one — so the batch inverse (trash-by-ID) is
+    // complete whenever any row succeeded.
+    const rows: Array<
+      | {
+          targetItemId: number;
+          noteId: number;
+          title: string;
+          status: "created";
+        }
+      | {
+          targetItemId: number;
+          title: string;
+          status: "error";
+          reason: string;
+        }
+    > = [];
     const createdNoteIds: number[] = [];
     for (const entry of operation.notes) {
       const target = zoteroGateway.getItem(entry.targetItemId);
@@ -42,7 +52,7 @@ export const noteLifecycleExecutors = {
           target: operation.target || "item",
           collections: entry.collections,
         });
-        if (saved.noteId) createdNoteIds.push(saved.noteId);
+        createdNoteIds.push(saved.noteId);
         rows.push({
           targetItemId: entry.targetItemId,
           noteId: saved.noteId,
@@ -148,10 +158,7 @@ export const noteLifecycleExecutors = {
             : {}),
         },
       },
-      inverse:
-        saved.noteId && saved.noteId > 0
-          ? buildSaveNoteInverse(saved.noteId)
-          : undefined,
+      inverse: buildSaveNoteInverse(saved.noteId),
     };
   },
   trash_items: async (operation, context, zoteroGateway) => {
@@ -205,9 +212,6 @@ export const noteLifecycleExecutors = {
     )
       ? restoredSearches.savedSearchIds
       : [];
-    const incompleteRestoreIdentity =
-      restoredCollectionIds.length < restoredCollections.restoredCount ||
-      restoredSavedSearchIds.length < restoredSearches.restoredCount;
     const total =
       restoredItems.restoredCount +
       restoredCollections.restoredCount +
@@ -227,6 +231,11 @@ export const noteLifecycleExecutors = {
       },
       // The inverse re-trashes only what this call actually restored, so
       // undoing a partial restore cannot sweep up untouched siblings.
+      // The gateway contract guarantees the ID lists cover every reported
+      // restoration (both come from the same accounting inside the gateway),
+      // so this inverse is complete by construction — a gateway that breaks
+      // that contract fails the coordinator's reversibility check loudly
+      // instead of being downgraded here.
       inverse: total
         ? {
             inverseOperations: [
@@ -248,12 +257,6 @@ export const noteLifecycleExecutors = {
               })),
             ],
             description: `Move ${total} restored object${total === 1 ? "" : "s"} back to the trash`,
-            ...(incompleteRestoreIdentity
-              ? {
-                  irreversibleReason:
-                    "Some restored collection or saved-search IDs were not reported by Zotero, so only the identified objects can be returned to the trash safely.",
-                }
-              : {}),
           }
         : null,
     };

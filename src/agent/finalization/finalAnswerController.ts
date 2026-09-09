@@ -1,8 +1,4 @@
 import type { AgentModelMessage, AgentRuntimeRequest } from "../types";
-import type {
-  ActionContractRunSession,
-  RejectedActionContractFinalDecision,
-} from "../contracts/actionContractRunSession";
 import {
   findLibraryRetrieveShallowSignal,
   isEvidenceSeekingTurn,
@@ -19,11 +15,6 @@ export type AgentFinalAnswerToolRecord = {
   content?: unknown;
 };
 
-export type AgentFinalActionSession = Pick<
-  ActionContractRunSession,
-  "evaluateFinal"
->;
-
 export type AgentFinalAnswerDecision =
   | {
       kind: "accept";
@@ -33,18 +24,10 @@ export type AgentFinalAnswerDecision =
       kind: "correct";
       correction: string;
       assistantContent?: string;
-      actionContractRejection?: Extract<
-        RejectedActionContractFinalDecision,
-        { kind: "correct" }
-      >;
     }
   | {
       kind: "fail";
       userMessage: string;
-      actionContractRejection?: Extract<
-        RejectedActionContractFinalDecision,
-        { kind: "fail" }
-      >;
     };
 
 const LIBRARY_EVIDENCE_CORRECTION =
@@ -62,7 +45,6 @@ export class AgentFinalAnswerController {
 
   constructor(
     private readonly request: AgentRuntimeRequest,
-    private readonly actionContractSession: AgentFinalActionSession,
     private readonly transcriptMessages: readonly AgentModelMessage[],
   ) {}
 
@@ -71,24 +53,6 @@ export class AgentFinalAnswerController {
     canCorrect: boolean;
     toolExecutionRecords: readonly AgentFinalAnswerToolRecord[];
   }): Promise<AgentFinalAnswerDecision> {
-    const actionDecision = await this.actionContractSession.evaluateFinal({
-      canCorrect: params.canCorrect,
-    });
-    if (actionDecision.kind !== "accept") {
-      if (actionDecision.kind === "correct") {
-        return {
-          kind: "correct",
-          correction: actionDecision.correction,
-          actionContractRejection: actionDecision,
-        };
-      }
-      return {
-        kind: "fail",
-        userMessage: actionDecision.failure,
-        actionContractRejection: actionDecision,
-      };
-    }
-
     if (this.shouldCorrectShallowLibraryAnswer(params)) {
       this.shallowLibraryCorrectionUsed = true;
       return {

@@ -29,28 +29,14 @@ import type {
 } from "../shared/llm";
 import type { ContextCachePlan } from "../contextCache/manager";
 import type { ZoteroTurnMetadataContext } from "../services/zoteroMetadata/types";
-import type {
-  AgentActionContract,
-  AgentActionEvidence,
-  AgentActionIntent,
-  AgentActionProgressLedger,
-  AgentActionReceipt,
-  AgentToolActionDescriptor,
-} from "./contracts/types";
+import type { AgentActionIntent } from "./contracts/types";
 
 export type {
   AgentActionCapability,
-  AgentActionContract,
-  AgentActionEvidence,
   AgentActionIntent,
-  AgentActionObligation,
   AgentActionOperation,
   AgentActionParameters,
   AgentActionProofDomain,
-  AgentActionProgressLedger,
-  AgentActionProposal,
-  AgentActionReceipt,
-  AgentToolActionDescriptor,
 } from "./contracts/types";
 
 export type AgentRequest = {
@@ -122,6 +108,8 @@ export type AgentPendingField =
       label: string;
       value?: string;
       placeholder?: string;
+      /** Render as a read-only, word-wrapping block instead of a single-line input. */
+      multiline?: boolean;
     })
   | (AgentPendingFieldBase & {
       type: "code_preview";
@@ -336,7 +324,6 @@ export type AgentEvent =
       name: string;
       ok: boolean;
       effect?: AgentToolEffect;
-      actionReceipts: AgentActionReceipt[];
       content: unknown;
       artifacts?: AgentToolArtifact[];
     }
@@ -560,8 +547,6 @@ export type ClassifiedTurnIntent = {
   paperTargetIntent?: "active" | "added" | "all_visible" | "unspecified";
   externalSearchIntent?: "none" | "web" | "literature" | "both";
   wantedSections: Array<"methods" | "results" | "limitations">;
-  queryLanguage?: string;
-  writeDisposition?: "none" | "required" | "uncertain";
   actionInterpretationSource?: "classifier" | "deterministic_fallback";
   actionIntents: AgentActionIntent[];
 };
@@ -571,10 +556,6 @@ export type AgentRuntimeRequestInput = AgentRequest & {
   conversationGeneration?: number;
   /** Set by the runtime after per-turn classification; absent on fallback. */
   classifiedIntent?: ClassifiedTurnIntent;
-  /** Internal per-turn action obligations. Persisted with transcript events. */
-  actionContract?: AgentActionContract;
-  /** Mutable completion state kept separate from the immutable contract. */
-  actionProgress?: AgentActionProgressLedger;
   item?: Zotero.Item | null;
   history?: ChatMessage[];
   authMode?: ModelProviderAuthMode;
@@ -717,36 +698,9 @@ export type AgentToolResult = {
   name: string;
   ok: boolean;
   effect?: AgentToolEffect;
-  actionReceipts: AgentActionReceipt[];
   content: unknown;
   artifacts?: AgentToolArtifact[];
 };
-
-export type AgentToolReviewResolution =
-  | {
-      kind: "deliver";
-      toolMessageContent?: unknown;
-      followupMessages?: AgentModelMessage[];
-    }
-  | {
-      kind: "stop";
-      finalText: string;
-    }
-  | {
-      kind: "invoke_tool";
-      call: {
-        name: string;
-        arguments: unknown;
-        inheritedApproval?: AgentInheritedApproval;
-      };
-      terminalText?:
-        | {
-            onSuccess: string;
-            onDenied: string;
-            onError: string;
-          }
-        | undefined;
-    };
 
 export type AgentToolExecutionOutput<TResult = unknown> =
   | TResult
@@ -754,7 +708,6 @@ export type AgentToolExecutionOutput<TResult = unknown> =
       content: TResult;
       artifacts?: AgentToolArtifact[];
       effect?: AgentToolEffect;
-      actionEvidence?: AgentActionEvidence[];
     };
 
 /** Explicit execution contract for tools whose validated operation can write. */
@@ -762,7 +715,6 @@ export type AgentWriteToolOutput<TResult = unknown> = {
   content: TResult;
   effect: AgentToolEffect;
   artifacts?: AgentToolArtifact[];
-  actionEvidence?: AgentActionEvidence[];
 };
 
 export type AgentJournalStepOutcome = {
@@ -774,6 +726,8 @@ export type AgentJournalStepOutcome = {
     | "irreversible"
     | "uncertain"
     | "failed";
+  /** "partial" is legacy-only: journals written before the binary rating
+   * keep it on read; nothing produces it anymore. */
   reversibility: "full" | "partial" | "none";
   affectedCount: number;
 };
@@ -809,8 +763,6 @@ export type AgentToolContext = {
   journalToolName?: string;
   /** Internal parent action used by composite tools such as library_batch. */
   journalActionScope?: AgentJournalActionScope;
-  /** Persist the current contract ledger at a durable composite checkpoint. */
-  checkpointActionProgress?: () => Promise<void>;
 };
 
 export type AgentToolInputValidation<T> =
@@ -840,7 +792,7 @@ export type AgentToolPresentationSummary =
 /**
  * A single result card rendered below a tool's success row in the agent trace.
  * This path is display-only. Interactive review/approval flows should use
- * `createPendingAction` or `createResultReviewAction` instead.
+ * `createPendingAction` instead.
  */
 export type AgentToolResultCard = {
   title: string;
@@ -878,9 +830,31 @@ export type AgentToolPresentation = {
   }) => AgentTraceDetail[];
   /** Merge a successful result into its expandable call row in the trace. */
   mergeResultIntoCallTrace?: boolean;
+  /**
+   * One-step trace row text for this tool's call. The renderer stays
+   * open/closed: it only invokes this hook, so a new operation ships its own
+   * summary without touching render code. `labels` is best-effort,
+   * trace-side display-name resolution for library objects — use it instead
+   * of raw IDs.
+   */
   buildTraceSummary?: (params: {
     args: unknown;
     content?: unknown;
+    labels?: {
+      item?: (itemId: number) => string | null;
+      collection?: (collectionId: number) => string | null;
+    };
+  }) => string | null;
+  /**
+   * What the auto-mode write gate sees beyond the tool name. The registry
+   * stays open/closed: it only invokes this hook, so an operation whose risk
+   * lives in its payload (arbitrary code, a batch job) ships its own summary
+   * instead of the generic argument dump. Return null for the generic view.
+   * `reason` is the mutation plan's irreversibility rationale.
+   */
+  buildWriteGateSummary?: (params: {
+    input: unknown;
+    reason?: string;
   }) => string | null;
   /**
    * When provided, the agent trace renders a read-only card list below the
@@ -898,11 +872,10 @@ export type AgentToolPresentation = {
  */
 export type AgentMutationPlan = {
   effect: "none" | "write";
+  /** Library tools produce only "full" or "none"; "partial" stays in the
+   * union so custom/test tools (and legacy journal rows) keep compiling. */
   reversibility: "full" | "partial" | "none";
   reason?: string;
-  /** Recovery resumes and privileged source review may require consent even
-   * when the selected write mode would otherwise auto-approve the call. */
-  requiresConfirmation?: boolean;
 };
 
 export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
@@ -910,10 +883,6 @@ export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
   isAvailable?: (request: AgentRuntimeRequest) => boolean;
   guidance?: AgentToolGuidance;
   presentation?: AgentToolPresentation;
-  describeAction?: (
-    input: TInput,
-    context?: AgentToolContext,
-  ) => AgentToolActionDescriptor[] | Promise<AgentToolActionDescriptor[]>;
   validate: (args: unknown) => AgentToolInputValidation<TInput>;
   execute: (
     input: TInput,
@@ -945,17 +914,6 @@ export type AgentToolDefinition<TInput = unknown, TResult = unknown> = {
     result: AgentToolResult,
     context: AgentToolContext,
   ) => Promise<AgentModelMessage | null>;
-  createResultReviewAction?: (
-    input: TInput,
-    result: AgentToolResult,
-    context: AgentToolContext,
-  ) => AgentPendingAction | null | Promise<AgentPendingAction | null>;
-  resolveResultReview?: (
-    input: TInput,
-    result: AgentToolResult,
-    resolution: AgentConfirmationResolution,
-    context: AgentToolContext,
-  ) => AgentToolReviewResolution | Promise<AgentToolReviewResolution>;
 };
 
 /**

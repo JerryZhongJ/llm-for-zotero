@@ -54,9 +54,16 @@ export class LibraryMutationService {
     if (mutationUsesDeferredInverse(operation)) {
       return {
         effect: "write",
-        reversibility: "partial",
+        // Creation/import is reversible: the inverse (removing what was
+        // created) is captured right after Zotero commits the new IDs, and
+        // the journal records the step's actual reversibility from that
+        // outcome — this plan-time rating only feeds the write-mode gate,
+        // where "an undo exists once it lands" is the honest answer. Rating
+        // it "partial" made semi-auto mode demand a confirmation card for
+        // every import even though undo is one click away.
+        reversibility: "full",
         reason:
-          "The created Zotero object IDs are assigned only after commit; an interrupted step is reported as uncertain.",
+          "The created Zotero object IDs are assigned only after commit; the inverse is recorded immediately after execution, and an interrupted step is reported as uncertain by journal recovery.",
         description,
         precondition,
         deferredInverse: true,
@@ -71,9 +78,12 @@ export class LibraryMutationService {
       const record = inverse as unknown as Record<string, unknown>;
       return !Array.isArray(record.itemIds) || record.itemIds.length > 0;
     });
+    // Binary by design: an inverse either exists (full — undo is promised
+    // lossless) or it does not (none). A handler caveat rides in `reason`
+    // as audit text; it never turns a real inverse into a "partial" one.
     return {
       effect: "write",
-      reversibility: usefulInverse ? (reason ? "partial" : "full") : "none",
+      reversibility: usefulInverse ? "full" : "none",
       reason: usefulInverse ? reason : reason || "No lossless inverse exists.",
       description,
       inverseOperations: usefulInverse ? inverseOperations : undefined,

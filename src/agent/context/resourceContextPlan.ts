@@ -383,6 +383,20 @@ function buildAvailableAttachmentResourceLine(
   return `- Available attachment: ${resource.title} under ${resource.parentTitle} [${metadata.join(", ")}]`;
 }
 
+function formatAttachmentPoolSummaryLine(
+  summary: NonNullable<
+    AgentRuntimeRequest["attachmentResourceSummaries"]
+  >[number],
+): string {
+  const counts = formatAttachmentPoolCountSummary(summary.attachmentCounts);
+  return (
+    `- Attachment pool summary: ${summary.collectionName} ` +
+    `[collectionId=${summary.collectionId}, parentItems=${summary.parentItemCount}${
+      counts ? `, ${counts}` : ""
+    }]`
+  );
+}
+
 function buildAttachmentPoolResourceRecords(
   request: AgentRuntimeRequest,
 ): AgentResourceRecord[] {
@@ -413,7 +427,6 @@ function buildAttachmentPoolResourceRecords(
     });
   }
   for (const summary of request.attachmentResourceSummaries || []) {
-    const counts = formatAttachmentPoolCountSummary(summary.attachmentCounts);
     records.push({
       group: "attachmentPool",
       key: `summary:${summary.libraryID}:${summary.collectionId}`,
@@ -425,16 +438,21 @@ function buildAttachmentPoolResourceRecords(
         parentItemCount: normalizePositiveInt(summary.parentItemCount) || 0,
         attachmentCounts: summary.attachmentCounts,
       }),
-      line:
-        `- Attachment pool summary: ${summary.collectionName} ` +
-        `[collectionId=${summary.collectionId}, parentItems=${summary.parentItemCount}${
-          counts ? `, ${counts}` : ""
-        }]`,
+      line: formatAttachmentPoolSummaryLine(summary),
     });
   }
   return sortResourceRecords(records);
 }
 
+// The snapshot keys the transcript compatibility check, the evidence-ledger
+// relevance match, and the stored-tool-result stale gate. Note BODY hashes are
+// deliberately excluded: note text changes every time the agent edits the
+// active note, and hashing it here invalidated the persisted transcript after
+// every successful edit — dropping the conversation back to a lossy windowed
+// history. The fresh note text is re-injected into each turn user message
+// anyway, so the transcript only ever holds it as plain history. Identity
+// fields (noteId/kind/parent/title) stay: switching to a different note still
+// changes the signature.
 function buildAgentBaseScopeSnapshot(
   request: AgentRuntimeRequest,
 ): Record<string, unknown> {
@@ -448,10 +466,6 @@ function buildAgentBaseScopeSnapshot(
     activeNoteKind: normalizeText(activeNote?.noteKind, 40),
     activeNoteParentItemId: normalizePositiveInt(activeNote?.parentItemId) || 0,
     activeNoteTitle: normalizeText(activeNote?.title, 240),
-    activeNoteTextHash: activeNote ? hashText(activeNote.noteText || "") : "",
-    activeNoteHtmlHash: activeNote?.noteHtml
-      ? hashText(activeNote.noteHtml)
-      : "",
     scopeType: normalizeText(metadata.scopeType, 80),
     scopeId: normalizeText(metadata.scopeId, 160),
     scopeLabel: normalizeText(metadata.scopeLabel, 240),
@@ -634,7 +648,15 @@ export function buildAgentStableResourceContextBlock(
         .filter(Boolean),
     );
   }
-  const attachmentPoolRecords = buildAttachmentPoolResourceRecords(request);
+  // Summary records carry parent-item and per-type counts, which change the
+  // moment the agent imports items or attachments. They are deliberately
+  // excluded from this cached-prefix block (same rationale as the library
+  // overview in the message builder) and rendered per turn instead; the
+  // per-resource detail lines above stay because existing attachments keep
+  // their identity.
+  const attachmentPoolRecords = buildAttachmentPoolResourceRecords(
+    request,
+  ).filter((record) => !record.key.startsWith("summary:"));
   if (attachmentPoolRecords.length) {
     lines.push(
       "Attachment resource lifecycle:",
@@ -685,6 +707,20 @@ export function buildAgentStableResourceContextBlock(
   }
 
   return lines.filter(Boolean).join("\n");
+}
+
+// Volatile by nature: pool counts move whenever the agent imports items or
+// attachments mid-conversation, so this block rides in the turn user message
+// next to the library overview rather than in the cached system prefix.
+export function buildAttachmentPoolSummaryContextBlock(
+  request: AgentRuntimeRequest,
+): string {
+  const summaries = request.attachmentResourceSummaries || [];
+  if (!summaries.length) return "";
+  return [
+    "Attachment pool summary for this turn:",
+    ...summaries.map((summary) => formatAttachmentPoolSummaryLine(summary)),
+  ].join("\n");
 }
 
 export function commitAgentReadActivities(params: {

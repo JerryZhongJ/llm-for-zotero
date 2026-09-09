@@ -6,11 +6,21 @@ import type {
 import { callTool } from "./executor";
 import { getMetadataField } from "./metadataSnapshot";
 import type { PaperScopedActionProfile } from "./paperScope";
+import {
+  SEARCH_SOURCES,
+  SEARCH_SOURCE_IDS,
+  type SearchSourceId,
+} from "../services/literatureSearchService";
+
+/** Sources that can serve the graph modes this action offers. */
+const GRAPH_SOURCE_IDS = SEARCH_SOURCE_IDS.filter(
+  (id) => SEARCH_SOURCES[id].supportsGraphModes,
+);
 
 type DiscoverRelatedInput = {
   itemId: number;
   mode?: "recommendations" | "references" | "citations";
-  source?: "openalex" | "arxiv" | "europepmc";
+  source?: SearchSourceId;
   limit?: number;
 };
 
@@ -40,8 +50,8 @@ export const discoverRelatedAction: AgentAction<
   modes: ["paper"],
   paperScopeProfile: discoverRelatedPaperScopeProfile,
   description:
-    "Find papers related to a specific Zotero item using OpenAlex recommendations, " +
-    "references, or citations. Presents results for review and imports the selected papers.",
+    "Find papers related to a specific Zotero item using OpenAlex or Semantic Scholar " +
+    "recommendations, references, or citations. Presents results for review and imports the selected papers.",
   inputSchema: {
     type: "object",
     required: ["itemId"],
@@ -58,9 +68,10 @@ export const discoverRelatedAction: AgentAction<
       },
       source: {
         type: "string",
-        enum: ["openalex"],
-        description:
-          "Search source. Only OpenAlex supports recommendations, references, and citations.",
+        enum: GRAPH_SOURCE_IDS,
+        description: `Search source for the citation graph. Default: 'openalex'. ${GRAPH_SOURCE_IDS.map(
+          (id) => `'${id}' (${SEARCH_SOURCES[id].guidance})`,
+        ).join(", ")}.`,
       },
       limit: {
         type: "number",
@@ -382,21 +393,19 @@ export const discoverRelatedAction: AgentAction<
                 id: "recommendations",
                 label: "Recommendations",
                 rows: markRows(rec, true),
-                emptyMessage:
-                  "No recommendations available for this paper on OpenAlex.",
+                emptyMessage: "No recommendations available for this paper.",
               },
               {
                 id: "references",
                 label: "References",
                 rows: markRows(ref, false),
-                emptyMessage:
-                  "No reference list is available for this paper on OpenAlex.",
+                emptyMessage: "No reference list is available for this paper.",
               },
               {
                 id: "citations",
                 label: "Citations",
                 rows: markRows(cit, false),
-                emptyMessage: "This paper has no citing works on OpenAlex yet.",
+                emptyMessage: "This paper has no citing works yet.",
               },
             ],
             defaultModeId: lastActiveModeId,
@@ -490,31 +499,43 @@ export const discoverRelatedAction: AgentAction<
       };
     }
 
-    const importResult = await callTool(
-      "import_identifiers",
-      {
-        identifiers,
-        libraryID: ctx.libraryID,
-      },
-      ctx,
-      "Importing selected papers",
-    );
-
-    const importContent = importResult.content as Record<string, unknown>;
-    const resultObj = importContent.result as
-      | Record<string, unknown>
-      | undefined;
-    const importedCount =
-      importResult.ok && resultObj
-        ? Number(resultObj.succeeded || resultObj.importedCount || 0)
-        : 0;
+    // One call per paper: each import lands as its own journalled action,
+    // so each row keeps an independent undo.
+    let importedCount = 0;
+    let lastError: string | undefined;
+    for (const identifier of identifiers) {
+      const importResult = await callTool(
+        "import_identifiers",
+        {
+          identifier,
+          libraryID: ctx.libraryID,
+        },
+        ctx,
+        `Importing ${identifier}`,
+      );
+      const importContent = importResult.content as Record<string, unknown>;
+      const resultObj = importContent.result as
+        | Record<string, unknown>
+        | undefined;
+      if (importResult.ok && resultObj) {
+        importedCount += Number(
+          resultObj.succeeded || resultObj.importedCount || 0,
+        );
+      } else if (!importResult.ok) {
+        lastError = String(importContent.error || "import failed");
+      }
+    }
+    if (importedCount === 0 && lastError) {
+      return {
+        ok: false,
+        error: `Importing selected papers failed: ${lastError}`,
+      };
+    }
 
     ctx.onProgress({
       type: "step_done",
       step: "Reviewing and importing papers",
-      summary: importResult.ok
-        ? `Imported ${importedCount} paper${importedCount === 1 ? "" : "s"}`
-        : "Import was denied or failed",
+      summary: `Imported ${importedCount} paper${importedCount === 1 ? "" : "s"}`,
     });
 
     return {

@@ -32,7 +32,7 @@ export const AGENT_PERSONA_INSTRUCTIONS: string[] = [
     "## External evidence routing",
     "Use external search when the user asks for it or when current or public evidence is materially needed and the available conversation or Zotero evidence is insufficient.",
     "Route each evidence need independently: use literature_search for external scholarly evidence, web_search and web_read for general public evidence, and both source families when a request has distinct needs for each. Preserve the user's language by default.",
-    "Use literature_search workflow:'answer' for source-grounded chat answers and workflow:'review' only for imports, note saving, result refinement, or metadata review. When web results are used, follow the tool result's hidden source-marker instructions exactly. If necessary web access is unavailable, state that limitation.",
+    "Use literature_search for source-grounded chat answers; it is read-only, so imports, metadata application, and note saving are done by chaining the corresponding write tools directly, each behind its own confirmation card. When web results are used, follow the tool result's hidden source-marker instructions exactly. If necessary web access is unavailable, state that limitation.",
   ].join("\n"),
   RESEARCH_RESPONSE_FORMAT_GUIDANCE,
 ];

@@ -1,6 +1,5 @@
 import { assert } from "chai";
 import { AgentFinalAnswerController } from "../src/agent/finalization/finalAnswerController";
-import type { AgentFinalActionSession } from "../src/agent/finalization/finalAnswerController";
 import type { AgentRuntimeRequest } from "../src/agent/types";
 
 function makeRequest(
@@ -23,69 +22,7 @@ function makeRequest(
   } as AgentRuntimeRequest;
 }
 
-function acceptingActionSession(): AgentFinalActionSession {
-  return {
-    evaluateFinal: async () => ({ kind: "accept" as const }),
-  };
-}
-
 describe("AgentFinalAnswerController", function () {
-  it("returns an uncommitted action-contract correction before other quality gates", async function () {
-    const controller = new AgentFinalAnswerController(
-      makeRequest(),
-      {
-        evaluateFinal: async () => ({
-          kind: "correct" as const,
-          correction: "Complete the required action.",
-        }),
-      },
-      [],
-    );
-
-    const decision = await controller.evaluate({
-      candidateText: "Draft",
-      canCorrect: true,
-      toolExecutionRecords: [],
-    });
-
-    assert.deepEqual(decision, {
-      kind: "correct",
-      correction: "Complete the required action.",
-      actionContractRejection: {
-        kind: "correct",
-        correction: "Complete the required action.",
-      },
-    });
-  });
-
-  it("returns a kind-matched uncommitted action-contract failure", async function () {
-    const controller = new AgentFinalAnswerController(
-      makeRequest(),
-      {
-        evaluateFinal: async () => ({
-          kind: "fail" as const,
-          failure: "The action could not be verified.",
-        }),
-      },
-      [],
-    );
-
-    const decision = await controller.evaluate({
-      candidateText: "Draft",
-      canCorrect: false,
-      toolExecutionRecords: [],
-    });
-
-    assert.deepEqual(decision, {
-      kind: "fail",
-      userMessage: "The action could not be verified.",
-      actionContractRejection: {
-        kind: "fail",
-        failure: "The action could not be verified.",
-      },
-    });
-  });
-
   it("allows one collection evidence correction then accepts the next final", async function () {
     const request = makeRequest({
       userText: "What methods do these papers share?",
@@ -103,11 +40,7 @@ describe("AgentFinalAnswerController", function () {
         tags: [],
       },
     });
-    const controller = new AgentFinalAnswerController(
-      request,
-      acceptingActionSession(),
-      [],
-    );
+    const controller = new AgentFinalAnswerController(request, []);
 
     const first = await controller.evaluate({
       candidateText: "Shallow answer.",
@@ -128,11 +61,7 @@ describe("AgentFinalAnswerController", function () {
   });
 
   it("returns a clean assistant copy for a web-attribution correction", async function () {
-    const controller = new AgentFinalAnswerController(
-      makeRequest(),
-      acceptingActionSession(),
-      [],
-    );
+    const controller = new AgentFinalAnswerController(makeRequest(), []);
 
     const decision = await controller.evaluate({
       candidateText: "An unsupported current claim.",

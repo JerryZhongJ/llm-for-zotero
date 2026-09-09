@@ -33,21 +33,6 @@ export function createRevertChangesTool(
   zoteroGateway: ZoteroGateway,
 ): AgentWriteToolDefinition<RevertChangesInput, unknown> {
   return {
-    describeAction: (input) =>
-      input.dryRun
-        ? []
-        : [
-            {
-              id: `revert:${input.count}`,
-              proofDomain: "zotero_state",
-              capability: "zotero.undo",
-              operation: "revert",
-              source: "zotero_native",
-              parameters: { revertCount: input.count },
-              requestedTargets: [],
-              destinationCollectionIds: [],
-            },
-          ],
     spec: {
       name: "revert_changes",
       description:
@@ -266,7 +251,9 @@ function describeEntries(entries: JournalActionWithSteps[]): string {
       const suffix =
         entry.reversibility === "none"
           ? ` — cannot be undone: ${entry.recovery || "no inverse recorded"}`
-          : entry.reversibility === "partial"
+          : // "partial" only exists in journal rows recorded before the
+            // binary rating; new actions are full or none.
+            entry.reversibility === "partial"
             ? " — partially reversible"
             : "";
       return `• ${entry.description}${suffix}`;

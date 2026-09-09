@@ -80,8 +80,6 @@ export function buildActionExecutionContext(params: {
       ],
       selectedCollectionContexts: [...request.turnPaperScope.collections],
       selectedTagContexts: [...request.turnPaperScope.tags],
-      actionContract: request.actionContract,
-      actionProgress: request.actionProgress,
     },
     signal: context.signal,
   };

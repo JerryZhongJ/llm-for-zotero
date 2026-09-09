@@ -1,6 +1,4 @@
 import type {
-  AgentConfirmationResolution,
-  AgentInheritedApproval,
   AgentModelMessage,
   AgentPendingAction,
   AgentToolContext,
@@ -8,9 +6,7 @@ import type {
   AgentToolExecutionOutput,
   AgentToolInputValidation,
   AgentToolResult,
-  AgentToolReviewResolution,
 } from "../types";
-import { describeLibraryMutationActions } from "../contracts/actionContract";
 import { fail, ok } from "./shared";
 
 type DelegatedInput<TInput> = {
@@ -31,34 +27,6 @@ function clonePendingAction(
   return {
     ...action,
     toolName,
-  };
-}
-
-function rewriteInheritedApproval(
-  approval: AgentInheritedApproval | undefined,
-  sourceToolName: string,
-): AgentInheritedApproval | undefined {
-  if (!approval) return undefined;
-  return {
-    ...approval,
-    sourceToolName,
-  };
-}
-
-function rewriteReviewResolution(
-  resolution: AgentToolReviewResolution,
-  sourceToolName: string,
-): AgentToolReviewResolution {
-  if (resolution.kind !== "invoke_tool") return resolution;
-  return {
-    ...resolution,
-    call: {
-      ...resolution.call,
-      inheritedApproval: rewriteInheritedApproval(
-        resolution.call.inheritedApproval,
-        sourceToolName,
-      ),
-    },
   };
 }
 
@@ -104,9 +72,6 @@ export function createRenamedTool<TInput, TResult>(params: {
       : params.label
         ? { label: params.label }
         : undefined,
-    describeAction: (input, context) =>
-      tool.describeAction?.(input, context) ||
-      describeLibraryMutationActions(input),
     execute: (input, context) =>
       tool.execute(input, {
         ...context,
@@ -116,13 +81,6 @@ export function createRenamedTool<TInput, TResult>(params: {
       ? async (input, context) =>
           clonePendingAction(
             await tool.createPendingAction!(input, context),
-            params.name,
-          )
-      : undefined,
-    resolveResultReview: tool.resolveResultReview
-      ? async (input, result, resolution, context) =>
-          rewriteReviewResolution(
-            await tool.resolveResultReview!(input, result, resolution, context),
             params.name,
           )
       : undefined,
@@ -137,6 +95,9 @@ export function createDelegatingTool<TResult = unknown>(params: {
   requiresConfirmation: boolean;
   label: string;
   summaries?: NonNullable<AgentToolDefinition["presentation"]>["summaries"];
+  buildTraceSummary?: NonNullable<
+    AgentToolDefinition["presentation"]
+  >["buildTraceSummary"];
   tier?: "normal" | "advanced";
   guidance?: AgentToolDefinition<DelegatedInput<any>, TResult>["guidance"];
   chooseDelegate: (args: unknown) => AgentToolInputValidation<DelegateChoice>;
@@ -155,15 +116,15 @@ export function createDelegatingTool<TResult = unknown>(params: {
     presentation: {
       label: params.label,
       summaries: params.summaries,
+      ...(params.buildTraceSummary
+        ? { buildTraceSummary: params.buildTraceSummary }
+        : {}),
     },
     validate(args) {
       const choice = params.chooseDelegate(args);
       if (!choice.ok) return fail(choice.error);
       return validateDelegate(choice.value);
     },
-    describeAction: (input, context) =>
-      input.delegateTool.describeAction?.(input.delegateInput, context) ||
-      describeLibraryMutationActions(input.delegateInput),
     async shouldRequireConfirmation(input, context) {
       const tool = input.delegateTool;
       if (tool.shouldRequireConfirmation) {
@@ -237,30 +198,6 @@ export function createDelegatingTool<TResult = unknown>(params: {
       void context;
       void result;
       return null;
-    },
-    async createResultReviewAction(input, result, context) {
-      const tool = input.delegateTool;
-      const action = await tool.createResultReviewAction?.(
-        input.delegateInput,
-        result,
-        context,
-      );
-      return action ? clonePendingAction(action, params.name) : null;
-    },
-    async resolveResultReview(input, result, resolution, context) {
-      const tool = input.delegateTool;
-      const resolved = await tool.resolveResultReview?.(
-        input.delegateInput,
-        result,
-        resolution,
-        context,
-      );
-      return resolved
-        ? rewriteReviewResolution(resolved, params.name)
-        : {
-            kind: "deliver",
-            toolMessageContent: result.content,
-          };
     },
   };
 }

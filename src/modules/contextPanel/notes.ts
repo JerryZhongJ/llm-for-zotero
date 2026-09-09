@@ -1191,7 +1191,8 @@ export type AssistantResponseNoteDestination =
 export type AssistantResponseNoteResult = {
   status: "created";
   destination: AssistantResponseNoteDestination["kind"];
-  noteId?: number;
+  /** Guaranteed: note persistence throws when it cannot resolve the ID. */
+  noteId: number;
   /** Collection ids the note was actually filed into. */
   collections?: number[];
   warnings?: string[];
@@ -1325,21 +1326,15 @@ export async function createAssistantResponseNote(params: {
       persisted.warnings,
     );
   }
-  if (noteId && noteId > 0) {
-    const target =
-      params.destination.kind === "item"
-        ? `parent ${parentId}`
-        : `library ${libraryID}`;
-    ztoolkit.log(`LLM: Created response note ${noteId} for ${target}`);
-  } else {
-    ztoolkit.log(
-      "LLM: Warning – response note was saved but could not determine note ID",
-    );
-  }
+  const target =
+    params.destination.kind === "item"
+      ? `parent ${parentId}`
+      : `library ${libraryID}`;
+  ztoolkit.log(`LLM: Created response note ${noteId} for ${target}`);
   return {
     status: "created",
     destination: params.destination.kind,
-    noteId: noteId && noteId > 0 ? noteId : undefined,
+    noteId,
     collections: filedCollections.length ? filedCollections : undefined,
     warnings: persisted.warnings.length ? persisted.warnings : undefined,
     ...(persisted.createdNoteReceipt
@@ -1363,7 +1358,8 @@ export async function createNoteFromAssistantText(
   } = {},
 ): Promise<{
   status: "created" | "appended";
-  noteId?: number;
+  /** Guaranteed on both branches: the appended note exists, creation throws. */
+  noteId: number;
   createdNoteReceipt?: CreatedZoteroNoteReceipt;
 }> {
   const parentItem = resolveParentItemForNoteTarget(item);
@@ -1442,10 +1438,8 @@ export async function createNoteFromAssistantText(
     generatedImages: options.generatedImages,
     figureRender: options.figureRender,
   });
-  if (result.noteId && result.noteId > 0) {
-    if (options.rememberCreatedNote) {
-      rememberAssistantNoteForParent(parentId, result.noteId);
-    }
+  if (options.rememberCreatedNote) {
+    rememberAssistantNoteForParent(parentId, result.noteId);
   }
   return {
     status: "created",
@@ -1468,7 +1462,7 @@ export async function createStandaloneNoteFromAssistantText(
   collections?: number[],
 ): Promise<{
   status: "created";
-  noteId?: number;
+  noteId: number;
   collections?: number[];
   createdNoteReceipt?: CreatedZoteroNoteReceipt;
 }> {

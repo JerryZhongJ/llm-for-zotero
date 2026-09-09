@@ -120,27 +120,13 @@ export async function detectTurnIntent(
   const raw = result.text;
 
   const parsedIntent = parseClassifiedTurnIntent(raw);
-  const deterministicActions = inferActionIntentsFromRequest(request);
-  const classifierContradictsExplicitAction = Boolean(
-    parsedIntent &&
-    deterministicActions.length &&
-    JSON.stringify(
-      deterministicActions
-        .map((intent) => intent.operation)
-        .sort((left, right) => left.localeCompare(right)),
-    ) !==
-      JSON.stringify(
-        parsedIntent.actionIntents
-          .map((intent) => intent.operation)
-          .sort((left, right) => left.localeCompare(right)),
-      ),
-  );
-  const validParsedIntent = classifierContradictsExplicitAction
-    ? null
-    : parsedIntent;
-  const classifiedIntent = validParsedIntent
+  // The classifier's verdict is trusted as-is. Deterministic action parsing
+  // no longer overrides it: a regex second-guessing the model either
+  // discarded good classifications or rubber-stamped guesses, and write
+  // authority now correctly fails closed when no classification exists.
+  const classifiedIntent = parsedIntent
     ? {
-        ...validParsedIntent,
+        ...parsedIntent,
         actionInterpretationSource: "classifier" as const,
       }
     : null;
@@ -156,21 +142,6 @@ export async function detectTurnIntent(
     return {
       skillIds: regexFallback(skills, request),
       classifiedIntent,
-      degraded: true,
-      failureReason: "unparseable",
-    };
-  }
-  if (!validParsedIntent) {
-    (
-      globalThis as typeof globalThis & {
-        Zotero?: { debug?: (message: string) => void };
-      }
-    ).Zotero?.debug?.(
-      `[llm-for-zotero] Skill classifier returned an invalid or contradictory action intent, falling back to deterministic action parsing. Raw: ${raw.slice(0, 200)}`,
-    );
-    return {
-      skillIds: parsed,
-      classifiedIntent: null,
       degraded: true,
       failureReason: "unparseable",
     };
@@ -262,8 +233,6 @@ function buildClassifierPrompt(
     '• paperTargetIntent: which visible paper set the user references, in any language — "active" for this/current paper, "added" for selected/attached/added papers other than the active paper, "all_visible" for both/these/all papers visible in the turn, and "unspecified" only when no paper-set reference was found.',
     '• externalSearchIntent: whether the answer needs live external evidence, in any language — "web" for general public web information, "literature" for scholarly discovery or external scholarly metadata, "both" when distinct parts need each source, and "none" when the available context or stable knowledge is sufficient. The tools are complementary, not mutually exclusive.',
     "• wantedSections: only the sections the user explicitly asks about (methods, results, limitations); otherwise an empty array.",
-    '• queryLanguage: short language code of the user message, e.g. "en", "zh", "ja".',
-    '• writeDisposition: "required" only for a concrete requested mutation, "none" for questions, advice, negation, hypotheticals, or pure reads, and "uncertain" only when whether to write cannot be resolved.',
     "• actionIntents: exact semantic obligations. Each entry must include operation, coverage, targetKind, optional parameters, exact collection scope, scopeRole, and constraints. Use the LibraryMutationOperationType verb whenever one exists: apply_tags and remove_tags are different; create_collection, update_collection, and delete_collection are different. External verbs are note_create, note_edit, note_append, annotation_write, settings_update, undo, revert, file_write, command_execute, zotero_script_execute, and read_full.",
     '• Tag verbs are literal: "add/apply/assign" means apply_tags, "remove/delete the tag" means remove_tags, and only "replace/set the tags" means set_item_tags. The word "exactly" describes precision and never changes remove_tags into set_item_tags.',
     '• Tool or workflow names never replace the requested semantic operation. For example, "use library_batch auto_tag" is apply_tags, not command_execute. Use command_execute only when the user requests an actual operating-system or shell command, and use zotero_script_execute only for an actual Zotero script invocation.',
@@ -281,7 +250,7 @@ function buildClassifierPrompt(
     request.userText,
     `"""`,
     "",
-    'Reply with ONLY a JSON object in this exact shape, no prose, no code fences: {"skillIds": ["id1", "id2"], "retrievalIntent": "enumerate|verify|summarize|none", "paperTargetIntent":"active|added|all_visible|unspecified", "externalSearchIntent": "none|web|literature|both", "wantedSections": [], "queryLanguage": "en", "writeDisposition":"none|required|uncertain", "actionIntents": [{"operation":"apply_tags","coverage":"all","targetKind":"papers","parameters":{"tags":["topic:drift"]},"scopeRole":"source","scope":{"kind":"collection","path":"Parent/Leaf","includeDescendants":false},"constraints":{"tagPrefix":"topic:"}}]}',
+    'Reply with ONLY a JSON object in this exact shape, no prose, no code fences: {"skillIds": ["id1", "id2"], "retrievalIntent": "enumerate|verify|summarize|none", "paperTargetIntent":"active|added|all_visible|unspecified", "externalSearchIntent": "none|web|literature|both", "wantedSections": [], "actionIntents": [{"operation":"apply_tags","coverage":"all","targetKind":"papers","parameters":{"tags":["topic:drift"]},"scopeRole":"source","scope":{"kind":"collection","path":"Parent/Leaf","includeDescendants":false},"constraints":{"tagPrefix":"topic:"}}]}',
   ].join("\n");
 }
 
@@ -329,8 +298,6 @@ export function parseClassifiedTurnIntent(
     paperTargetIntent?: unknown;
     externalSearchIntent?: unknown;
     wantedSections?: unknown;
-    queryLanguage?: unknown;
-    writeDisposition?: unknown;
     actionIntents?: unknown;
   };
   const retrievalIntent =
@@ -359,27 +326,12 @@ export function parseClassifiedTurnIntent(
           VALID_WANTED_SECTIONS.has(value),
         )
     : [];
-  const queryLanguage =
-    typeof record.queryLanguage === "string" && record.queryLanguage.trim()
-      ? record.queryLanguage.trim().toLowerCase().slice(0, 12)
-      : undefined;
   const actionIntents = parseActionIntents(record.actionIntents);
-  const writeDisposition =
-    record.writeDisposition === "none" ||
-    record.writeDisposition === "required" ||
-    record.writeDisposition === "uncertain"
-      ? record.writeDisposition
-      : actionIntents.some((intent) => intent.operation !== "read_full")
-        ? "required"
-        : "none";
-  if (writeDisposition === "required" && !actionIntents.length) return null;
   return {
     retrievalIntent: retrievalIntent as ClassifiedTurnIntent["retrievalIntent"],
     ...(paperTargetIntent ? { paperTargetIntent } : {}),
     ...(externalSearchIntent ? { externalSearchIntent } : {}),
     wantedSections,
-    queryLanguage,
-    writeDisposition,
     actionInterpretationSource: "classifier",
     actionIntents,
   };

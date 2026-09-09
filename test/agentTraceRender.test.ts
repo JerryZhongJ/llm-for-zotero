@@ -1,4 +1,5 @@
 import { assert } from "chai";
+import { createBuiltInToolRegistry } from "../src/agent/tools";
 import { readFileSync } from "node:fs";
 import {
   buildAgentTraceChipDetails,
@@ -1142,17 +1143,17 @@ describe("agentTrace render", function () {
       message,
       events: events.slice(0, 1),
     }) as unknown as FakeElement;
-    assert.isTrue(
-      (
-        workingTrace.findByClass("llm-agent-activity-details") as
-          | (FakeElement & {
-              open?: boolean;
-            })
-          | null
-      )?.open,
-    );
-    assert.equal(
-      workingTrace.findByClass("llm-agent-activity-summary")?.textContent,
+    // No collapsed disclosure: the activity stays visible and a live
+    // "Working…" row closes the tail while the turn is streaming.
+    assert.isNull(workingTrace.findByClass("llm-agent-activity-details"));
+    const workingRow = Array.from(
+      workingTrace.findByClass("llm-agent-activity-list")?.children ?? [],
+    ).find((child) =>
+      (child as FakeElement).className?.includes?.("llm-at-row-working"),
+    ) as FakeElement | undefined;
+    assert.isDefined(workingRow, "a live Working… row closes the tail");
+    assert.include(
+      (workingRow?.children || []).map((child) => child.textContent).join(""),
       "Working…",
     );
 
@@ -1162,18 +1163,13 @@ describe("agentTrace render", function () {
       message,
       events,
     }) as unknown as FakeElement;
-    assert.isFalse(
-      (
-        completedTrace.findByClass("llm-agent-activity-details") as
-          | (FakeElement & {
-              open?: boolean;
-            })
-          | null
-      )?.open,
-    );
-    assert.equal(
-      completedTrace.findByClass("llm-agent-activity-summary")?.textContent,
-      "Worked for 4m 19s",
+    assert.isNull(completedTrace.findByClass("llm-agent-activity-details"));
+    assert.isUndefined(
+      Array.from(
+        completedTrace.findByClass("llm-agent-activity-list")?.children ?? [],
+      ).find((child) =>
+        (child as FakeElement).className?.includes?.("llm-at-row-working"),
+      ),
     );
   });
 
@@ -1266,8 +1262,8 @@ describe("agentTrace render", function () {
       ),
     );
     assert.isTrue(
-      children[0].classList.contains("llm-agent-activity-details"),
-      "disclosure stays above the rule",
+      children[0].classList.contains("llm-agent-activity-list"),
+      "the activity tail stays above the rule",
     );
   });
 
@@ -1373,20 +1369,11 @@ describe("agentTrace render", function () {
       message,
       events: runningEvents,
     }) as unknown as FakeElement;
-    const workingDetails = workingTrace.findByClass(
-      "llm-agent-activity-details",
-    ) as
-      | (FakeElement & {
-          open?: boolean;
-        })
-      | null;
-    assert.isTrue(workingDetails?.open);
-    assert.equal(
-      workingTrace.findByClass("llm-agent-activity-summary")?.textContent,
-      "Working…",
-    );
+    // The disclosure is gone: interleaved messages render directly in the
+    // always-visible activity list.
+    assert.isNull(workingTrace.findByClass("llm-agent-activity-details"));
     assert.deepEqual(
-      (workingDetails?.findAllByClass("llm-agent-process-message") || [])
+      (workingTrace.findAllByClass("llm-agent-process-message") || [])
         .map((entry) => `${entry.textContent}${entry.innerHTML}`)
         .filter(
           (text) =>
@@ -1396,10 +1383,10 @@ describe("agentTrace render", function () {
         "<p>I’m using the simple-paper-QA skill.</p>",
         "<p>This is the final answer.</p>",
       ],
-      "both agent messages stay inside the open activity container",
+      "both agent messages stay inside the visible activity container",
     );
     assert.isNotNull(
-      workingDetails?.findByClass("llm-agent-process-action") || null,
+      workingTrace.findByClass("llm-agent-process-action"),
       "the interleaved tool trace stays in the same container",
     );
 
@@ -1428,20 +1415,12 @@ describe("agentTrace render", function () {
         suppressFinalAnswer = true;
       },
     }) as unknown as FakeElement;
-    const completedDetails = completedTrace.findByClass(
-      "llm-agent-activity-details",
-    ) as
-      | (FakeElement & {
-          open?: boolean;
-        })
-      | null;
-    assert.isFalse(completedDetails?.open);
-    assert.equal(
-      completedTrace.findByClass("llm-agent-activity-summary")?.textContent,
-      "Worked for 4m 19s",
+    assert.isNull(
+      completedTrace.findByClass("llm-agent-activity-details"),
+      "there is no collapsed container to dismiss the trace",
     );
     assert.deepEqual(
-      (completedDetails?.findAllByClass("llm-agent-process-message") || [])
+      (completedTrace.findAllByClass("llm-agent-process-message") || [])
         .map((entry) => `${entry.textContent}${entry.innerHTML}`)
         .filter(
           (text) =>
@@ -1451,7 +1430,7 @@ describe("agentTrace render", function () {
         "<p>I’m using the simple-paper-QA skill.</p>",
         "<p>This is the final answer.</p>",
       ],
-      "collapsing the container must not dismiss its trace",
+      "the visible tail keeps its trace after completion",
     );
     assert.isFalse(suppressFinalAnswer);
     assert.isNotNull(
@@ -5567,5 +5546,110 @@ describe("agentTrace render", function () {
 
     assert.include(actionTexts, "Invoked Skill: evidence-based-qa");
     assert.notInclude(actionTexts, "Using Skill: evidence-based-qa");
+  });
+});
+
+describe("write outcome trace summaries (owned by the operation, not the renderer)", function () {
+  // Open/closed: these tests pull the facade's own buildTraceSummary hook —
+  // the renderer never names a specific tool's objects.
+  function facadeTraceSummary(
+    toolName: string,
+    params: { args?: unknown; content?: unknown },
+  ): string | null {
+    const registry = createBuiltInToolRegistry({
+      zoteroGateway: {} as never,
+      pdfService: {} as never,
+      pdfPageService: {} as never,
+      retrievalService: {} as never,
+    });
+    const hook = registry.getTool(toolName)?.presentation?.buildTraceSummary;
+    assert.isFunction(hook, `${toolName} should own its trace summary`);
+    return hook
+      ? hook({
+          args: params.args,
+          content: params.content,
+        })
+      : null;
+  }
+
+  it("names the concrete operation and stays count-only when titles cannot resolve", function () {
+    // No gateway in the unit-test scope: the row still names the operation
+    // and the count instead of a generic "delete/restore/merge completed".
+    assert.equal(
+      facadeTraceSummary("library_delete", {
+        args: { mode: "trash", itemIds: [11, 12] },
+        content: { result: { trashedCount: 2 } },
+      }),
+      "Trashed 2 items",
+    );
+  });
+
+  it("spells out a single restore of collections and searches", function () {
+    assert.equal(
+      facadeTraceSummary("library_delete", {
+        args: { mode: "restore", collectionIds: [42] },
+        content: { result: { restoredCount: 1 } },
+      }),
+      "Restored 1 collection",
+    );
+    assert.equal(
+      facadeTraceSummary("library_delete", {
+        args: { mode: "restore", savedSearchIds: [7] },
+        content: { result: { restoredCount: 1 } },
+      }),
+      "Restored 1 saved search",
+    );
+  });
+
+  it("names resolved titles through the injected label resolver", function () {
+    const registry = createBuiltInToolRegistry({
+      zoteroGateway: {} as never,
+      pdfService: {} as never,
+      pdfPageService: {} as never,
+      retrievalService: {} as never,
+    });
+    const hook =
+      registry.getTool("library_delete")?.presentation?.buildTraceSummary;
+    assert.isFunction(hook);
+    if (!hook) return;
+    assert.equal(
+      hook({
+        args: { mode: "trash", itemIds: [11, 12] },
+        labels: {
+          item: (id) => (id === 11 ? "Attention Is All You Need" : null),
+        },
+      }),
+      "Trashed 2 items: Attention Is All You Need",
+    );
+  });
+
+  it("names the merge survivor and the duplicate count", function () {
+    assert.equal(
+      facadeTraceSummary("library_delete", {
+        args: { mode: "merge", masterItemId: 5, otherItemIds: [6, 7] },
+        content: { result: { mergedCount: 2 } },
+      }),
+      "Merged 2 duplicates into the master item",
+    );
+  });
+
+  it("names an imported paper straight from the result row", function () {
+    assert.equal(
+      facadeTraceSummary("library_import", {
+        args: { kind: "identifiers", identifier: "10.1/abc" },
+        content: {
+          result: {
+            items: [
+              {
+                identifier: "10.1/abc",
+                status: "imported",
+                title: "Attention Is All You Need",
+              },
+            ],
+          },
+        },
+      }),
+      "Imported Attention Is All You Need",
+    );
   });
 });

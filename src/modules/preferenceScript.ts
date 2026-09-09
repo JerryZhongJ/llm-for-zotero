@@ -267,6 +267,10 @@ import {
 } from "../claudeCode/projectSkills";
 import { applyClaudeCodeModePreferenceChange } from "../claudeCode/bootstrapGate";
 import { getTavilyApiKey, setTavilyApiKey } from "../webAccess/prefs";
+import {
+  getSemanticScholarApiKey,
+  setSemanticScholarApiKey,
+} from "../agent/services/literatureSearchService";
 import { TavilyClient } from "../webAccess/tavilyClient";
 import {
   getDefaultClaudeManagedInstructionBlock,
@@ -1054,6 +1058,12 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   ) as HTMLSpanElement | null;
   const tavilyKeyLink = doc.querySelector(
     `#${config.addonRef}-tavily-key-link`,
+  ) as HTMLAnchorElement | null;
+  const semanticScholarApiKeyInput = doc.querySelector(
+    `#${config.addonRef}-semantic-scholar-api-key`,
+  ) as HTMLInputElement | null;
+  const semanticScholarKeyLink = doc.querySelector(
+    `#${config.addonRef}-semantic-scholar-key-link`,
   ) as HTMLAnchorElement | null;
   const codexAppServerEnableSelect = doc.querySelector(
     `#${config.addonRef}-codex-app-server-enable`,
@@ -2871,6 +2881,29 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
     tavilyKeyLink.addEventListener("click", (event) => {
       event.preventDefault();
       Zotero.launchURL("https://app.tavily.com");
+    });
+  }
+
+  if (semanticScholarApiKeyInput) {
+    semanticScholarApiKeyInput.value = getSemanticScholarApiKey();
+    const commitSemanticScholarKey = () => {
+      setSemanticScholarApiKey(semanticScholarApiKeyInput.value);
+      semanticScholarApiKeyInput.value = getSemanticScholarApiKey();
+    };
+    semanticScholarApiKeyInput.addEventListener(
+      "change",
+      commitSemanticScholarKey,
+    );
+    semanticScholarApiKeyInput.addEventListener(
+      "blur",
+      commitSemanticScholarKey,
+    );
+  }
+
+  if (semanticScholarKeyLink) {
+    semanticScholarKeyLink.addEventListener("click", (event) => {
+      event.preventDefault();
+      Zotero.launchURL("https://www.semanticscholar.org/product/api");
     });
   }
 

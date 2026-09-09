@@ -171,3 +171,30 @@ export function findAttachment(
   }
   return null;
 }
+
+/**
+ * "3 items: Paper A, Paper B, Paper C" — names when they resolve, a plain
+ * count when they do not, capped so one row cannot flood the trace (the
+ * expandable details carry the full list). Shared by write tools' trace
+ * summaries so every operation names its objects the same way.
+ */
+export function summarizeObjectList(params: {
+  count: number;
+  noun: string;
+  ids?: number[];
+  resolveName?: (id: number) => string | null;
+}): string {
+  const { count, noun, ids, resolveName } = params;
+  if (count === 1) {
+    const single = ids?.length === 1 ? resolveName?.(ids[0]) : null;
+    return single || `1 ${noun}`;
+  }
+  const names = (ids || []).map((id) => resolveName?.(id) || null);
+  const named = names.filter((name): name is string => Boolean(name));
+  if (!named.length) return `${count} ${noun}s`;
+  const shown =
+    named.length > 5
+      ? `${named.slice(0, 5).join(", ")} … +${named.length - 5} more`
+      : named.join(", ");
+  return `${count} ${noun}s: ${shown}`;
+}

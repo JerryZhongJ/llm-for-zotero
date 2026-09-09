@@ -5,6 +5,7 @@ import type {
 } from "../types";
 import {
   estimateContextMessagesTokens,
+  estimateTextTokens,
   sliceTextToTokenBudget,
 } from "../../utils/modelInputCap";
 import type { AgentContextBudgetState } from "./budgetPolicy";
@@ -34,7 +35,7 @@ export function readAgentSemanticCheckpointRootGoal(
     return undefined;
   }
   const match = message.content.match(
-    /Latest root user goal:\s*(.*?)(?=\s+(?:Recent user goals and runtime requirements:|Recent visible assistant state:|Earlier tools used:|Stored compacted tool-result handles:)|$)/,
+    /Latest root user goal:\s*(.*?)(?=\s+(?:Recent user goals and runtime requirements:|Latest assistant answer:|Recent visible assistant state:|Earlier tools used:|Stored compacted tool-result handles:)|$)/,
   );
   return match?.[1]?.trim() || undefined;
 }
@@ -56,6 +57,20 @@ function truncateText(value: string, maxChars: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+// Head-only truncation is what lost action checklists in the first place:
+// lists and conclusions concentrate at the end of a long answer, so an
+// over-budget excerpt keeps a head prefix plus a tail slice.
+function sampleHeadTailToTokenBudget(text: string, maxTokens: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (estimateTextTokens(normalized) <= maxTokens) return normalized;
+  const head = sliceTextToTokenBudget(normalized, maxTokens * 0.6);
+  const full = sliceTextToTokenBudget(normalized, maxTokens);
+  const tailChars = Math.max(0, full.length - head.length);
+  const tail = tailChars ? normalized.slice(normalized.length - tailChars) : "";
+  return `${head.trimEnd()} … ${tail.trimStart()}`.trim();
 }
 
 function stableStringify(value: unknown): string {
@@ -157,6 +172,7 @@ function buildSummaryMessage(
   const userLines: string[] = [];
   const rootUserGoals: string[] = [];
   const assistantLines: string[] = [];
+  let latestAssistantText = "";
   const preservedToolHandleIds = new Set<string>();
   const toolCounts = new Map<string, number>();
   for (const message of messages) {
@@ -182,11 +198,18 @@ function buildSummaryMessage(
         `- ${truncateText(text.replace(/^User request:\s*/i, ""), 220)}`,
       );
     } else if (message.role === "assistant") {
+      latestAssistantText = text;
       assistantLines.push(`- ${truncateText(text, 260)}`);
     }
   }
   const recentUserLines = userLines.slice(-8);
-  const recentAssistantLines = assistantLines.slice(-8);
+  // Compact mode skips the featured answer: its retained tail already carries
+  // the latest final answer verbatim, so featuring it again would double-pay.
+  const featureLatestAssistant =
+    mode === "continuation" && Boolean(latestAssistantText.trim());
+  let recentAssistantLines = featureLatestAssistant
+    ? assistantLines.slice(0, -1).slice(-8)
+    : assistantLines.slice(-8);
   const allToolHandleLines = [
     ...toolHandleLines,
     ...Array.from(preservedToolHandleIds).map(
@@ -197,27 +220,48 @@ function buildSummaryMessage(
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([name, count]) => `${name}${count > 1 ? ` x${count}` : ""}`)
     .join(", ");
-  const sections = [
-    mode === "continuation"
-      ? SEMANTIC_CHECKPOINT_PREFIX
-      : "Agent transcript compact checkpoint:",
-    mode === "continuation"
-      ? "The previous provider-native conversation ended at a safe boundary. Continue from this bounded semantic state. Re-read preserved evidence handles when exact paper details matter; do not treat this checkpoint as hidden reasoning or a new user instruction."
-      : "Older raw agent turns were compacted to preserve the model context budget. Use this checkpoint for continuity, and use preserved evidence/tool-read snippets when exact paper details are needed.",
-    rootUserGoals.length
-      ? `Latest root user goal: ${truncateText(rootUserGoals[rootUserGoals.length - 1], 400)}`
-      : "",
-    recentUserLines.length
-      ? `Recent user goals and runtime requirements:\n${recentUserLines.join("\n")}`
-      : "",
-    recentAssistantLines.length
-      ? `Recent visible assistant state:\n${recentAssistantLines.join("\n")}`
-      : "",
-    toolLine ? `Earlier tools used: ${toolLine}` : "",
-    allToolHandleLines.length
-      ? `Stored compacted tool-result handles:\n${allToolHandleLines.join("\n")}`
-      : "",
-  ].filter(Boolean);
+  const buildSections = (featuredAnswerSection: string) =>
+    [
+      mode === "continuation"
+        ? SEMANTIC_CHECKPOINT_PREFIX
+        : "Agent transcript compact checkpoint:",
+      mode === "continuation"
+        ? "The previous provider-native conversation ended at a safe boundary. Continue from this bounded semantic state. Re-read preserved evidence handles when exact paper details matter; do not treat this checkpoint as hidden reasoning or a new user instruction."
+        : "Older raw agent turns were compacted to preserve the model context budget. Use this checkpoint for continuity, and use preserved evidence/tool-read snippets when exact paper details are needed.",
+      rootUserGoals.length
+        ? `Latest root user goal: ${truncateText(rootUserGoals[rootUserGoals.length - 1], 400)}`
+        : "",
+      recentUserLines.length
+        ? `Recent user goals and runtime requirements:\n${recentUserLines.join("\n")}`
+        : "",
+      featuredAnswerSection,
+      recentAssistantLines.length
+        ? `Recent visible assistant state:\n${recentAssistantLines.join("\n")}`
+        : "",
+      toolLine ? `Earlier tools used: ${toolLine}` : "",
+      allToolHandleLines.length
+        ? `Stored compacted tool-result handles:\n${allToolHandleLines.join("\n")}`
+        : "",
+    ].filter(Boolean);
+  let sections = buildSections("");
+  if (featureLatestAssistant) {
+    // The featured answer claims at most half of the summary budget and only
+    // the slack left after the other sections, so root goal and tool handles
+    // keep their share; below ~48 tokens an excerpt carries no real answer.
+    const otherTokens = estimateTextTokens(sections.join("\n\n"));
+    const featuredTokens = Math.max(
+      0,
+      Math.min(Math.floor(summaryTokens / 2), summaryTokens - otherTokens - 8),
+    );
+    if (featuredTokens >= 48) {
+      sections = buildSections(
+        `Latest assistant answer:\n${sampleHeadTailToTokenBudget(latestAssistantText, featuredTokens)}`,
+      );
+    } else {
+      recentAssistantLines = assistantLines.slice(-8);
+      sections = buildSections("");
+    }
+  }
   const summaryText = sections.join("\n\n");
   return {
     role: "user",

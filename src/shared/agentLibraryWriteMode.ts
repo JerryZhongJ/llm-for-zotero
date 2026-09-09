@@ -1,37 +1,35 @@
 /**
  * How much the in-plugin agent may change the Zotero library without asking.
  *
- * This is deliberately a SEPARATE key from `agentPermissionMode`. That one's
- * on-screen help text promises users it "affects Claude Code's bridge
- * permission mode only; Zotero MCP and tool-specific safety checks can still
- * require confirmation" — a promise the MCP path still keeps. Reusing the
- * stored value would silently convert consent given for bash prompting into
- * consent for unattended whole-library rewrites.
+ * - `manual`     — every library write is confirmed. Batch jobs pause per
+ *                  page.
+ * - `semi_auto`  — the default. Reversible writes apply immediately (each
+ *                  one is journalled with a frozen inverse and can be
+ *                  undone from the conversation); irreversible writes are
+ *                  confirmed.
+ * - `auto`       — nothing waits for confirmation. A model gate judges
+ *                  model-originated irreversible writes against the user's
+ *                  request; reversible writes apply immediately.
  *
- * - `auto`   — the default. Confirms only what cannot be undone. Everything
- *              else applies immediately and stays revertible from the agent
- *              history.
- * - `safe`   — every library write is reviewed. Batch jobs pause per page.
- * - `yolo`   — the model's judgement decides, including irreversible writes.
- *              Batch jobs run to completion without per-page review.
- *
- * `auto` exists because the binary mode made the agent unusable for ordinary
- * work: one request that created a collection and filed a paper into it
- * raised TWO cards, and a three-step request raised three. That is a wizard,
- * not an agent. Confirming everything also stopped buying much safety once
- * every reversible write became journalled with a working inverse — so the
- * burden is now proportional to reversibility rather than uniform.
+ * Legacy values migrate on read: safe → manual, auto → semi_auto, yolo →
+ * auto.
  */
-export type AgentLibraryWriteMode = "auto" | "safe" | "yolo";
+export type AgentLibraryWriteMode = "manual" | "semi_auto" | "auto";
 
 export function normalizeAgentLibraryWriteMode(
   value: unknown,
 ): AgentLibraryWriteMode {
-  if (value === "yolo") return "yolo";
-  if (value === "safe") return "safe";
-  return "auto";
+  if (value === "manual" || value === "semi_auto" || value === "auto") {
+    return value;
+  }
+  // Legacy mappings from the pre-rename mode set. The legacy "auto" cannot be
+  // mapped here — it collides with the new "auto" — so it is migrated at
+  // read time with a one-time marker (see getAgentLibraryWriteMode).
+  if (value === "safe") return "manual";
+  if (value === "yolo") return "auto";
+  return "semi_auto";
 }
 
 export function getAgentLibraryWriteModeDescription(): string {
-  return "auto (default) applies changes that can be undone and asks only before something irreversible — permanently erasing, deleting a tag library-wide, or merging duplicates. safe reviews every library change before it happens, and batch jobs pause on each page. yolo lets the agent apply changes on its own judgement, including irreversible ones and whole-library batch jobs. Every reversible change is recorded either way and can be reverted from the agent history.";
+  return "manual confirms every library write before it happens. semi_auto (default) applies reversible changes immediately — each stays undoable from the conversation — and confirms only irreversible ones. auto applies everything without asking; a model gate judges irreversible writes against your request and refuses anything it cannot justify. Every reversible change is journalled either way and can be undone.";
 }

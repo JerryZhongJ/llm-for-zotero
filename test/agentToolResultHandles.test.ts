@@ -87,15 +87,13 @@ describe("agent tool-result handles", function () {
     assert.deepEqual(output.items, [{ itemId: 11, title: "Paper B" }]);
   });
 
-  it("tracks handle availability in memory and gates tool visibility", async function () {
+  it("keeps the tool always visible while tracking handle availability in memory", async function () {
+    // No isAvailable predicate: the tools array must stay byte-stable across
+    // steps (it serializes at the front of every request, ahead of the
+    // prompt-cache breakpoints), so tool_result_read is listed even before
+    // any handle exists and execute() reports the absence gracefully.
     const tool = createToolResultReadTool();
-    assert.isFalse(tool.isAvailable?.(request(1)) === true);
-    assert.isTrue(
-      tool.isAvailable?.({
-        ...request(1),
-        metadata: { agentToolResultReadAvailable: true },
-      }) === true,
-    );
+    assert.isUndefined(tool.isAvailable);
     assert.isFalse(hasAgentToolResultHandles(1));
 
     const record = createAgentToolResultHandleRecord({

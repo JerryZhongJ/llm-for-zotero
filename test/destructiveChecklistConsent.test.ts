@@ -163,33 +163,32 @@ describe("destructive checklist consent", function () {
     });
   });
 
-  describe('import_identifiers (row ids are array indices, so "0" is valid)', function () {
+  describe("import_identifiers (single identifier per call)", function () {
     function validated() {
       const tool = createImportIdentifiersTool(fakeGateway);
       const result = tool.validate({
-        identifiers: ["10.1/aaa", "10.2/bbb", "10.3/ccc"],
+        identifier: "10.1/aaa",
       });
       assert.isTrue(result.ok, "fixture should validate");
       if (!result.ok) throw new Error("unreachable");
       return { tool, input: result.value };
     }
 
-    it("imports only the checked identifiers, including index 0", function () {
+    it("imports when the single identifier stays checked", function () {
       const { tool, input } = validated();
       const applied = tool.applyConfirmation?.(input, {
-        identifiersChecklist: ["0", "2"],
+        identifiersChecklist: ["0"],
       });
       assert.isTrue(applied?.ok);
       if (!applied?.ok) return;
       assert.deepEqual(
         (applied.value as { operation: { identifiers: string[] } }).operation
           .identifiers,
-        ["10.1/aaa", "10.3/ccc"],
-        "index 0 must survive normalization",
+        ["10.1/aaa"],
       );
     });
 
-    it("fails when every identifier is unchecked", function () {
+    it("fails when the identifier is unchecked", function () {
       const { tool, input } = validated();
       const applied = tool.applyConfirmation?.(input, {
         identifiersChecklist: [],
@@ -198,35 +197,33 @@ describe("destructive checklist consent", function () {
     });
   });
 
-  describe("import_local_files (row ids are file paths)", function () {
-    function validated() {
+  describe("import_local_files (one file per call)", function () {
+    it("validates a singular filePath into a one-entry operation", function () {
       const tool = createImportLocalFilesTool(fakeGateway);
-      const result = tool.validate({
-        filePaths: ["/tmp/a.pdf", "/tmp/b.pdf"],
-      });
-      assert.isTrue(result.ok, "fixture should validate");
-      if (!result.ok) throw new Error("unreachable");
-      return { tool, input: result.value };
-    }
-
-    it("imports only the checked paths", function () {
-      const { tool, input } = validated();
-      const applied = tool.applyConfirmation?.(input, {
-        filesChecklist: ["/tmp/b.pdf"],
-      });
-      assert.isTrue(applied?.ok);
-      if (!applied?.ok) return;
-      assert.deepEqual(
-        (applied.value as { operation: { filePaths: string[] } }).operation
-          .filePaths,
-        ["/tmp/b.pdf"],
-      );
+      const result = tool.validate({ filePath: "/tmp/a.pdf" });
+      assert.isTrue(result.ok);
+      if (!result.ok) return;
+      assert.deepEqual(result.value.operation.filePaths, ["/tmp/a.pdf"]);
+      // A plain approve/deny card: no checklist, since there is exactly one
+      // file to consent to and the batch card carries the per-call rows.
+      const action = tool.createPendingAction?.(result.value, {
+        request: { conversationKey: 1 },
+      } as never);
+      assert.deepEqual(action?.fields, []);
     });
 
-    it("fails when every file is unchecked", function () {
-      const { tool, input } = validated();
-      const applied = tool.applyConfirmation?.(input, { filesChecklist: [] });
-      assert.isFalse(applied?.ok);
+    it("keeps legacy plural input working by importing its first entry", function () {
+      const tool = createImportLocalFilesTool(fakeGateway);
+      const result = tool.validate({ filePaths: ["/tmp/a.pdf", "/tmp/b.pdf"] });
+      assert.isTrue(result.ok);
+      if (!result.ok) return;
+      assert.deepEqual(result.value.operation.filePaths, ["/tmp/a.pdf"]);
+    });
+
+    it("rejects input without any path", function () {
+      const tool = createImportLocalFilesTool(fakeGateway);
+      assert.isFalse(tool.validate({}).ok);
+      assert.isFalse(tool.validate({ filePaths: [] }).ok);
     });
   });
 

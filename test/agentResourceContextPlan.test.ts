@@ -271,17 +271,23 @@ describe("agent resource context plan", function () {
       ],
     });
 
-    const text = stableSystemText(await renderedInitialMessages(req));
-    assert.include(text, "Attachment pool summary: Folder");
-    assert.include(text, "PDF=3");
-    assert.include(text, "MD=2");
-    assert.include(text, "DOCX=1");
-    assert.include(text, "unsupported=4");
+    const messages = await renderedInitialMessages(req);
+    const text = stableSystemText(messages);
+    const turnText = messageText(messages[messages.length - 1]);
+    // Pool counts are volatile (they change when the agent imports items), so
+    // they ride in the turn user message, never in the cached stable prefix.
+    assert.notInclude(text, "Attachment pool summary");
+    assert.include(turnText, "Attachment pool summary for this turn:");
+    assert.include(turnText, "Attachment pool summary: Folder");
+    assert.include(turnText, "PDF=3");
+    assert.include(turnText, "MD=2");
+    assert.include(turnText, "DOCX=1");
+    assert.include(turnText, "unsupported=4");
     assert.include(
       text,
       "enumerate item attachments with library_search plus library_read",
     );
-    assert.notInclude(text, "translation.docx");
+    assert.notInclude(turnText, "translation.docx");
   });
 
   it("diffs added, removed, changed, and unchanged resources", function () {
@@ -311,6 +317,36 @@ describe("agent resource context plan", function () {
     assert.include(delta.added[0].line, "Added Paper");
     assert.include(delta.removed[0].line, "Removed Paper");
     assert.include(delta.changed[0].line, "Updated Title");
+  });
+
+  it("keeps the resource signature stable across active-note body edits", function () {
+    const noteContext = (noteId: number, noteText: string) => ({
+      activeNoteContext: {
+        noteId,
+        title: "Working note",
+        noteKind: "item" as const,
+        noteText,
+      },
+    });
+    const before = buildAgentResourceSnapshot(request(noteContext(5, "draft")));
+    const afterEdit = buildAgentResourceSnapshot(
+      request(noteContext(5, "draft with agent additions")),
+    );
+    const otherNote = buildAgentResourceSnapshot(
+      request(noteContext(6, "draft")),
+    );
+
+    // The agent edits the active note as its job; the persisted transcript
+    // must survive that edit instead of falling back to windowed history.
+    assert.equal(
+      buildAgentResourceSignatureFromSnapshot(before),
+      buildAgentResourceSignatureFromSnapshot(afterEdit),
+    );
+    // Switching to a different note is a real scope change.
+    assert.notEqual(
+      buildAgentResourceSignatureFromSnapshot(before),
+      buildAgentResourceSignatureFromSnapshot(otherNote),
+    );
   });
 
   it("renders current context on every turn", async function () {

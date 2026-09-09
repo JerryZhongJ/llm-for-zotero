@@ -156,7 +156,7 @@ describe("parseClassifierResponse unmatched pseudo-skill", function () {
 describe("parseClassifiedTurnIntent", function () {
   it("parses a valid full intent object", function () {
     const result = parseClassifiedTurnIntent(
-      '{"skillIds":[],"retrievalIntent":"summarize","paperTargetIntent":"all_visible","externalSearchIntent":"both","wantedSections":["methods"],"queryLanguage":"zh"}',
+      '{"skillIds":[],"retrievalIntent":"summarize","paperTargetIntent":"all_visible","externalSearchIntent":"both","wantedSections":["methods"]}',
     );
 
     assert.deepEqual(result, {
@@ -164,8 +164,6 @@ describe("parseClassifiedTurnIntent", function () {
       paperTargetIntent: "all_visible",
       externalSearchIntent: "both",
       wantedSections: ["methods"],
-      queryLanguage: "zh",
-      writeDisposition: "none",
       actionInterpretationSource: "classifier",
       actionIntents: [],
     });
@@ -211,14 +209,6 @@ describe("parseClassifiedTurnIntent", function () {
     assert.isNull(parseClassifiedTurnIntent("not json"));
   });
 
-  it("rejects required-write classifications without typed obligations", function () {
-    assert.isNull(
-      parseClassifiedTurnIntent(
-        '{"retrievalIntent":"none","wantedSections":[],"writeDisposition":"required","actionIntents":[]}',
-      ),
-    );
-  });
-
   it("filters unknown wantedSections entries", function () {
     const result = parseClassifiedTurnIntent(
       '{"retrievalIntent":"enumerate","wantedSections":["methods","bogus"]}',
@@ -239,7 +229,6 @@ describe("parseClassifiedTurnIntent", function () {
           retrievalIntent: "none",
           externalSearchIntent,
           wantedSections: [],
-          queryLanguage: "es",
           actionIntents: [],
         }),
       );
@@ -250,18 +239,16 @@ describe("parseClassifiedTurnIntent", function () {
 
   it("omits a missing or invalid external search hint without losing other intent fields", function () {
     const missing = parseClassifiedTurnIntent(
-      '{"retrievalIntent":"verify","wantedSections":["results"],"queryLanguage":"zh","actionIntents":[]}',
+      '{"retrievalIntent":"verify","wantedSections":["results"],"actionIntents":[]}',
     );
     const invalid = parseClassifiedTurnIntent(
-      '{"retrievalIntent":"verify","externalSearchIntent":"browse","wantedSections":["results"],"queryLanguage":"zh","actionIntents":[]}',
+      '{"retrievalIntent":"verify","externalSearchIntent":"browse","wantedSections":["results"],"actionIntents":[]}',
     );
 
     for (const result of [missing, invalid]) {
       assert.deepEqual(result, {
         retrievalIntent: "verify",
         wantedSections: ["results"],
-        queryLanguage: "zh",
-        writeDisposition: "none",
         actionInterpretationSource: "classifier",
         actionIntents: [],
       });
@@ -311,7 +298,7 @@ describe("detectTurnIntent", function () {
       {
         llmCall: async (params) => {
           captured = params as unknown as Record<string, unknown>;
-          return '{"skillIds":["unmatched"],"retrievalIntent":"none","externalSearchIntent":"none","wantedSections":[],"queryLanguage":"en"}';
+          return '{"skillIds":["unmatched"],"retrievalIntent":"none","externalSearchIntent":"none","wantedSections":[]}';
         },
       },
     );
@@ -353,28 +340,7 @@ describe("detectTurnIntent", function () {
     assert.equal(result.failureReason, "unparseable");
   });
 
-  it("degrades to deterministic action parsing for required writes with no obligations", async function () {
-    const result = await detectTurnIntent(
-      {
-        userText: "create a Zotero note and export a markdown file",
-        model: "gpt-5.4",
-        apiBase: "https://api.openai.com/v1",
-        apiKey: "key",
-        providerProtocol: "openai_chat_compat",
-      } as any,
-      SKILLS,
-      {
-        llmCall: async () =>
-          '{"skillIds":["unmatched"],"retrievalIntent":"none","wantedSections":[],"writeDisposition":"required","actionIntents":[]}',
-      },
-    );
-
-    assert.isTrue(result.degraded);
-    assert.equal(result.failureReason, "unparseable");
-    assert.isNull(result.classifiedIntent);
-  });
-
-  it("rejects a classifier verb that contradicts an explicit tag removal", async function () {
+  it("trusts the classifier verdict instead of a regex second-guess", async function () {
     const result = await detectTurnIntent(
       {
         userText: 'Remove exactly the tag "reviewed" from item 41.',
@@ -390,9 +356,14 @@ describe("detectTurnIntent", function () {
       },
     );
 
-    assert.isTrue(result.degraded);
-    assert.equal(result.failureReason, "unparseable");
-    assert.isNull(result.classifiedIntent);
+    // A mismatched proposal is later rejected by obligation scope matching;
+    // the classifier result itself is no longer discarded here.
+    assert.isFalse(result.degraded);
+    assert.isNotNull(result.classifiedIntent);
+    assert.equal(
+      result.classifiedIntent?.actionIntents?.[0]?.operation,
+      "set_item_tags",
+    );
   });
 });
 

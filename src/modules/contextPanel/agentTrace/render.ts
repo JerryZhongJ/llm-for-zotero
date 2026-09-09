@@ -1,4 +1,5 @@
 import { getAgentRuntime } from "../../../agent";
+import { t } from "../../../utils/i18n";
 import type {
   AgentPendingAction,
   AgentPendingField,
@@ -48,8 +49,9 @@ import {
 } from "./toolResultTraceInfo";
 import { stripWebSourceMarkersForDisplay } from "../../../webAccess/attribution";
 import { createWebFaviconImage } from "../webFavicon";
+import { undoTraceAction, resolveZoteroGatewayForTrace } from "./traceUndo";
 
-type AgentTraceSummaryKind = "plan" | "tool" | "ok" | "skip" | "done";
+type AgentTraceSummaryKind = "plan" | "tool" | "ok" | "skip" | "done" | "write";
 
 type AgentTraceSummaryRow = {
   kind: AgentTraceSummaryKind;
@@ -58,13 +60,24 @@ type AgentTraceSummaryRow = {
   text: string;
   /** Optional code block shown below the summary text (e.g. shell commands). */
   codeBlock?: string;
+  /**
+   * Journal action id of a completed write. Present only when the write
+   * actually happened and was journalled; drives the inline Undo button.
+   */
+  undoActionId?: string;
+  /**
+   * Tool this row belongs to, when known. Confirmation flow rows use it to
+   * disappear once the tool's outcome row exists — attempts must not linger.
+   */
+  toolName?: string;
+  /**
+   * True for transient attempt rows ("Preparing…", "Waiting for approval").
+   * They never survive as key items; outcome rows replace them.
+   */
+  transient?: boolean;
 };
 
 const agentTraceActionExpandedCache = new Map<string, boolean>();
-const agentActivityExpandedCache = new WeakMap<
-  Message,
-  { open: boolean; wasWorking: boolean }
->();
 
 type AgentTraceDisplayItem =
   | {
@@ -155,46 +168,68 @@ function resolveAgentActivityDurationMs(
   return Math.max(0, end - start);
 }
 
-function appendAgentActivityDisclosure(params: {
+/**
+ * How many of the newest non-key activity items stay visible after a turn.
+ * Key rows (journalled writes with their Undo affordance, refusals and
+ * user-declined actions) never count against this limit — the permission
+ * audit trail must survive in the conversation, not behind a fold.
+ */
+const AGENT_ACTIVITY_TAIL_LIMIT = 5;
+
+function isKeyActivityItem(item: { type: string; row?: unknown }): boolean {
+  // The model's own prose is output, not activity: interleaved text and
+  // agent messages never drop off the tail window.
+  if (item.type === "inline_text" || item.type === "message") return true;
+  if (item.type !== "action") return false;
+  const row = item.row as
+    | {
+        kind?: string;
+        transient?: boolean;
+        undoActionId?: string;
+        icon?: string;
+      }
+    | undefined;
+  if (row?.transient) return false;
+  // Write OUTCOMES (success or failure) and refusals are the audit trail:
+  // they persist regardless of the tail limit.
+  return Boolean(
+    row?.kind === "write" ||
+    row?.undoActionId ||
+    row?.icon === "!" ||
+    row?.icon === "×",
+  );
+}
+
+/**
+ * The activity trace is always visible — no collapsed "Worked for…" fold.
+ * Older routine items drop off beyond the tail limit; while the turn is
+ * streaming, a live "Working…" row closes the list so the agent's latest
+ * step and its liveness are both on screen.
+ */
+function appendAgentActivityTail(params: {
   doc: Document;
   wrap: HTMLElement;
   list: HTMLElement;
   message: Message;
   userMessage?: Message | null;
   events: AgentRunEventRecord[];
-  forceOpen?: boolean;
 }): void {
   const { doc, wrap, list, message, userMessage, events } = params;
-  const working = message.streaming === true;
-  const previous = agentActivityExpandedCache.get(message);
-  const state = working
-    ? !previous || !previous.wasWorking
-      ? { open: true, wasWorking: true }
-      : previous
-    : previous?.wasWorking
-      ? { open: false, wasWorking: false }
-      : previous || { open: false, wasWorking: false };
-  agentActivityExpandedCache.set(message, state);
-
-  const details = doc.createElement("details") as HTMLDetailsElement;
-  details.className = "llm-agent-activity-details";
-  details.open = params.forceOpen === true || state.open;
-
-  const summary = doc.createElement("summary") as HTMLElement;
-  summary.className = "llm-agent-activity-summary";
-  summary.textContent = working
-    ? "Working…"
-    : `Worked for ${formatAgentActivityDuration(
-        resolveAgentActivityDurationMs(message, userMessage, events),
-      )}`;
-  details.append(summary, list);
-  details.addEventListener("toggle", () => {
-    agentActivityExpandedCache.set(message, {
-      open: details.open,
-      wasWorking: working,
-    });
-  });
-  wrap.appendChild(details);
+  wrap.appendChild(list);
+  if (message.streaming !== true) return;
+  const workingRow = doc.createElement("div");
+  workingRow.className = "llm-at-row llm-at-row-working";
+  const icon = doc.createElement("span");
+  icon.className = "llm-at-icon";
+  icon.textContent = "…";
+  const text = doc.createElement("span");
+  text.className = "llm-at-text";
+  const elapsed = formatAgentActivityDuration(
+    resolveAgentActivityDurationMs(message, userMessage, events),
+  );
+  text.textContent = elapsed ? `${t("Working…")} ${elapsed}` : t("Working…");
+  workingRow.append(icon, text);
+  list.appendChild(workingRow);
 }
 
 export function buildAgentTraceMarkdownForRender(
@@ -1798,6 +1833,25 @@ export function renderPendingActionCard(
       label.textContent = field.label;
       fieldContainer.appendChild(label);
 
+      if (field.multiline) {
+        // Read-only display: a single-line <input> scrolls horizontally for
+        // long text, so wrap it in a block instead.
+        const paragraph = doc.createElement("p");
+        paragraph.className = "llm-agent-hitl-text-multiline";
+        paragraph.textContent = field.value || "";
+        fieldContainer.appendChild(paragraph);
+        fieldAccessors.push({
+          field,
+          container: fieldContainer,
+          id: field.id,
+          getValue: () => null,
+          setDisabled: () => undefined,
+          isValid: () => true,
+        });
+        card.appendChild(fieldContainer);
+        continue;
+      }
+
       const input = doc.createElement("input");
       input.type = "text";
       input.className = "llm-agent-hitl-page-input";
@@ -2537,6 +2591,27 @@ function resolveToolPresentationSummary(
   return normalized || null;
 }
 
+/**
+ * Inline SVG undo glyph — a wide counter-clockwise arrow (Material "undo"),
+ * not the narrow ↺ text rune, so it reads clearly at 11px next to the row.
+ * Fills with currentColor so the button's state colors still apply.
+ */
+function createTraceUndoIcon(doc: Document): SVGElement {
+  const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("aria-hidden", "true");
+  const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute(
+    "d",
+    "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z",
+  );
+  path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
+
 function toolLabelFromName(name: string): string {
   const explicitLabel = getToolDefinition(name)?.presentation?.label?.trim();
   if (explicitLabel) return explicitLabel;
@@ -2948,6 +3023,8 @@ function summarizeAgentTraceConfirmationRequest(
     kind: "plan",
     icon: "...",
     text,
+    toolName,
+    transient: true,
   };
 }
 
@@ -2980,6 +3057,8 @@ function summarizeAgentTraceConfirmationResolved(
     kind: approved ? "ok" : "skip",
     icon: approved ? "✓" : "-",
     text,
+    toolName,
+    transient: true,
   };
 }
 
@@ -3004,6 +3083,119 @@ function toolContentLooksEmpty(content: unknown): boolean {
   return false;
 }
 
+/**
+ * Best-effort, trace-side display-name resolution for library objects.
+ * Generic infrastructure for every operation's `buildTraceSummary` hook —
+ * the renderer itself never names a specific tool's objects.
+ */
+function createTraceObjectLabels(): {
+  item: (itemId: number) => string | null;
+  collection: (collectionId: number) => string | null;
+} {
+  const gateway = resolveZoteroGatewayForTrace() as {
+    getItem?: (id: number) => { getDisplayTitle?: () => string } | null;
+    getCollectionSummary?: (id: number) => { name?: string } | null;
+  } | null;
+  return {
+    item: (id) => {
+      try {
+        const title = gateway?.getItem?.(id)?.getDisplayTitle?.();
+        return typeof title === "string" && title.trim() ? title.trim() : null;
+      } catch {
+        return null;
+      }
+    },
+    collection: (id) => {
+      try {
+        const name = gateway?.getCollectionSummary?.(id)?.name;
+        return typeof name === "string" && name.trim()
+          ? `"${name.trim()}"`
+          : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+function buildWriteOutcomeDetails(content: unknown): AgentTraceDetail[] {
+  const details: AgentTraceDetail[] = [];
+  const c =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? (content as Record<string, unknown>)
+      : null;
+  const result =
+    c && c.result && typeof c.result === "object"
+      ? (c.result as Record<string, unknown>)
+      : null;
+  if (!result) return details;
+
+  const collectionName =
+    typeof result.targetCollectionName === "string"
+      ? result.targetCollectionName
+      : undefined;
+  const lines: string[] = [];
+  if (Array.isArray(result.items)) {
+    for (const raw of result.items) {
+      if (!raw || typeof raw !== "object") continue;
+      const row = raw as {
+        identifier?: unknown;
+        status?: unknown;
+        reason?: unknown;
+        itemId?: unknown;
+        title?: unknown;
+      };
+      const label =
+        typeof row.title === "string" && row.title.trim()
+          ? row.title.trim()
+          : typeof row.identifier === "string"
+            ? row.identifier
+            : "?";
+      if (row.status === "imported") {
+        lines.push(`\u2713 ${label}`);
+      } else {
+        const reason =
+          typeof row.reason === "string" && row.reason
+            ? ` \u2014 ${row.reason}`
+            : "";
+        lines.push(`\u2717 ${label}${reason}`);
+      }
+    }
+  }
+  for (const key of ["succeeded", "failed", "importedCount", "pdfsFetched"]) {
+    const value = result[key];
+    if (typeof value === "number") lines.push(`${key}: ${value}`);
+  }
+  if (collectionName) {
+    lines.push(`into: ${collectionName}`);
+  }
+  if (lines.length) {
+    details.push({ label: "Outcome", value: lines.join("\n") });
+  }
+  return details;
+}
+
+function readTraceActionId(resultEvent: unknown): string | undefined {
+  const record =
+    resultEvent && typeof resultEvent === "object"
+      ? (resultEvent as {
+          ok?: unknown;
+          effect?: unknown;
+          content?: unknown;
+        })
+      : null;
+  if (!record || record.ok !== true) return undefined;
+  if (record.effect !== "applied" && record.effect !== "partial") {
+    return undefined;
+  }
+  const content = record.content;
+  if (!content || typeof content !== "object" || Array.isArray(content)) {
+    return undefined;
+  }
+  const actionId = (content as { actionId?: unknown }).actionId;
+  return typeof actionId === "string" && actionId ? actionId : undefined;
+}
+
 function summarizeAgentTraceToolResult(
   name: string,
   ok: boolean,
@@ -3016,7 +3208,13 @@ function summarizeAgentTraceToolResult(
   if (!ok) {
     const rawError = readAgentTraceText(normalized?.error);
     if (rawError?.toLowerCase() === "user denied action") {
-      return null;
+      // Refusals are part of the audit trail: the user must see what was
+      // declined, not have it silently dropped from the conversation.
+      return {
+        kind: "skip",
+        icon: "×",
+        text: `Cancelled ${label} — you declined this change`,
+      };
     }
     const text =
       resolveToolPresentationSummary(
@@ -3507,23 +3705,77 @@ function appendLegacyAgentTraceEvent(
             ),
             ...(resultInfo?.details || []),
           ];
-      const presentation = getToolDefinition(entry.payload.name)?.presentation;
+      const toolDefinition = getToolDefinition(entry.payload.name);
+      const presentation = toolDefinition?.presentation;
       let row = summarizeAgentTraceToolCall(
         entry.payload.name,
         entry.payload.args,
         ctx.requestSummary,
         resultInfo || undefined,
       );
-      if (resultEvent?.ok && presentation?.buildTraceSummary) {
+      // Open/closed: the renderer only invokes the tool's own
+      // `buildTraceSummary` hook (with best-effort object-name resolution)
+      // — a new operation ships its summary without touching render code.
+      const traceSummary = presentation?.buildTraceSummary;
+      const callArgs = entry.payload.args;
+      const callTraceSummary = (): string | null => {
+        if (resultEvent?.ok !== true || !traceSummary) return null;
         try {
-          const summary = presentation.buildTraceSummary({
-            args: entry.payload.args,
+          return traceSummary({
+            args: callArgs,
             content: resultEvent.content,
+            labels: createTraceObjectLabels(),
           });
-          if (summary) row = { ...row, text: summary };
         } catch {
           // Keep the regular call summary when display-only formatting fails.
+          return null;
         }
+      };
+      const hookSummary = callTraceSummary();
+      if (hookSummary) row = { ...row, text: hookSummary };
+      row = { ...row, toolName: entry.payload.name };
+      // A write tool's row becomes its OUTCOME once the result exists:
+      // highlighted, persistent, detailed — the attempt text ("Preparing…")
+      // must not outlive the operation it describes. The operation's own
+      // hook text wins over the generic summary, so key information sits
+      // directly in the row, never behind the details expander.
+      if (toolDefinition?.spec.mutability === "write") {
+        const outcomeRow = summarizeAgentTraceToolResult(
+          entry.payload.name,
+          resultEvent?.ok === true,
+          resultEvent?.content,
+          resultEvent?.effect,
+          ctx.requestSummary,
+        );
+        if (resultEvent) {
+          row = outcomeRow
+            ? {
+                ...row,
+                kind: "write",
+                icon: outcomeRow.icon,
+                text: hookSummary || outcomeRow.text,
+              }
+            : {
+                ...row,
+                kind: "write",
+                icon: resultEvent.ok ? "✓" : "!",
+                text:
+                  hookSummary ||
+                  (resultEvent.ok
+                    ? row.text
+                    : `Could not complete ${toolLabelFromName(entry.payload.name)}`),
+              };
+          details.unshift(...buildWriteOutcomeDetails(resultEvent.content));
+        } else {
+          row = { ...row, transient: true };
+        }
+      }
+      // Attach the inline Undo affordance to this main action row — the one
+      // carrying the summary text, chips, and expandable details — whenever
+      // the write completed and was journalled.
+      const undoActionId = readTraceActionId(resultEvent);
+      if (undoActionId) {
+        row = { ...row, undoActionId };
       }
       ctx.items.push({
         type: "action",
@@ -3548,6 +3800,11 @@ function appendLegacyAgentTraceEvent(
         getToolDefinition(entry.payload.name)?.presentation
           ?.mergeResultIntoCallTrace
       ) {
+        return true;
+      }
+      // Write outcomes render on the tool-call row (highlighted, persistent);
+      // a second bare result row here would only duplicate it.
+      if (getToolDefinition(entry.payload.name)?.spec.mutability === "write") {
         return true;
       }
       const row = summarizeAgentTraceToolResult(
@@ -3831,9 +4088,26 @@ export function buildAgentTraceDisplayItems(
   }
 
   const finalText = getFinalTraceText(compactedEvents);
+  // Once a tool has an outcome row, its attempt rows (confirmation requests,
+  // approval acks) are noise: the outcome already tells the story.
+  const writeOutcomeTools = new Set(
+    items
+      .filter((item) => item.type === "action" && item.row?.kind === "write")
+      .map(
+        (item) => (item as { row?: { toolName?: string } }).row?.toolName || "",
+      )
+      .filter(Boolean),
+  );
+  const cleanedItems = items.filter((item) => {
+    if (item.type !== "action" || !item.row?.transient) return true;
+    const toolName = item.row.toolName || "";
+    return !(toolName && writeOutcomeTools.has(toolName));
+  });
   const displayItems = finalText
-    ? items.filter((item) => !shouldSuppressInlineFinalAnswer(item, finalText))
-    : items;
+    ? cleanedItems.filter(
+        (item) => !shouldSuppressInlineFinalAnswer(item, finalText),
+      )
+    : cleanedItems;
   const inlineTextReplacesAssistantText = isInterleaved && !finalText;
 
   return {
@@ -4007,14 +4281,13 @@ export function renderAgentTrace({
     loadingText.textContent = "Loading agent activity...";
     loadingRow.append(loadingIcon, loadingText);
     list.appendChild(loadingRow);
-    appendAgentActivityDisclosure({
+    appendAgentActivityTail({
       doc,
       wrap,
       list,
       message,
       userMessage,
       events,
-      forceOpen: true,
     });
     return wrap;
   }
@@ -4030,7 +4303,13 @@ export function renderAgentTrace({
   const hasFinalResponse = events.some(
     (entry) => entry.payload.type === "final",
   );
+  // Key rows always stay; routine rows only within the newest tail window.
+  const lastItemIndex = processItems.length - 1;
+  const itemIsVisible = (itemIndex: number) =>
+    isKeyActivityItem(processItems[itemIndex]) ||
+    itemIndex > lastItemIndex - AGENT_ACTIVITY_TAIL_LIMIT;
   for (const [itemIndex, itemEntry] of processItems.entries()) {
+    if (!itemIsVisible(itemIndex)) continue;
     if (itemEntry.type === "inline_text") {
       const inlineEl = doc.createElement("div");
       inlineEl.className = "llm-agent-inline-text";
@@ -4171,9 +4450,60 @@ export function renderAgentTrace({
     const text = doc.createElement("span");
     text.className = `llm-at-text llm-at-${itemEntry.row.kind}-text`;
     text.textContent = itemEntry.row.text;
+    row.append(icon, text);
+    if (itemEntry.row.undoActionId) {
+      const undoBtn = doc.createElement("button");
+      undoBtn.type = "button";
+      undoBtn.className = "llm-at-undo-btn";
+      undoBtn.replaceChildren(createTraceUndoIcon(doc));
+      undoBtn.title = t("Undo this change");
+      undoBtn.setAttribute("aria-label", t("Undo this change"));
+      const undoMsg = doc.createElement("span");
+      undoMsg.className = "llm-at-undo-msg";
+      const runUndo = async () => {
+        undoBtn.disabled = true;
+        undoBtn.classList.add("llm-at-undo-busy");
+        undoMsg.textContent = "";
+        try {
+          const outcome = await undoTraceAction(
+            itemEntry.row.undoActionId as string,
+          );
+          undoBtn.classList.remove("llm-at-undo-busy");
+          undoBtn.title = outcome.message;
+          undoBtn.classList.toggle("llm-at-undo-failed", !outcome.ok);
+          if (outcome.ok) {
+            undoBtn.classList.add("llm-at-undo-done");
+            undoBtn.replaceChildren(doc.createTextNode("✓"));
+            undoMsg.textContent = outcome.message;
+          } else {
+            undoBtn.replaceChildren(createTraceUndoIcon(doc));
+            undoBtn.disabled = false;
+            undoMsg.textContent = outcome.message;
+          }
+        } catch (error) {
+          // Never leave the button silently dead: an undo that crashed is a
+          // visible failure, not a no-op.
+          undoBtn.classList.remove("llm-at-undo-busy");
+          undoBtn.classList.add("llm-at-undo-failed");
+          undoBtn.replaceChildren(createTraceUndoIcon(doc));
+          undoBtn.disabled = false;
+          const reason = error instanceof Error ? error.message : String(error);
+          undoMsg.textContent = reason;
+          (
+            globalThis as typeof globalThis & {
+              Zotero?: { debug?: (message: string) => void };
+            }
+          ).Zotero?.debug?.(`[llm-for-zotero] trace undo crashed: ${reason}`);
+        }
+      };
+      undoBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void runUndo();
+      });
+      row.append(undoBtn, undoMsg);
+    }
     if (isExpandable) {
-      row.append(icon, text);
-
       const summary = doc.createElement("summary") as HTMLElement;
       summary.className = "llm-agent-process-action-summary";
       summary.appendChild(row);
@@ -4196,14 +4526,13 @@ export function renderAgentTrace({
 
     list.appendChild(actionWrap);
   }
-  appendAgentActivityDisclosure({
+  appendAgentActivityTail({
     doc,
     wrap,
     list,
     message,
     userMessage,
     events,
-    forceOpen: Boolean(pending),
   });
 
   // The rule separates the activity trace from the answer, so visible answer

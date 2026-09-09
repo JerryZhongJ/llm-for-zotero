@@ -171,8 +171,8 @@ export function createUpdateMetadataTool(
         ),
       instruction:
         "When the user asks to fix, correct, or enrich metadata from external sources, " +
-        "use literature_search with workflow:'review' and mode:'metadata' first to fetch canonical data, " +
-        "then let the review card handle the update. " +
+        "use literature_search with mode:'metadata' first to fetch canonical data, " +
+        "then call update_metadata with the returned patch — its diff confirmation card reviews the change. " +
         "Only call update_metadata directly when the user provides specific field values to set " +
         "(e.g. 'change the title to XYZ').",
     },
@@ -252,15 +252,6 @@ export function createUpdateMetadataTool(
       };
 
       return ok({ operations: [operation] });
-    },
-
-    acceptInheritedApproval: async (_input, approval) => {
-      // Accept review-mode approvals from literature_search review cards.
-      return (
-        approval.sourceMode === "review" &&
-        (approval.sourceActionId === "apply_direct" ||
-          approval.sourceActionId === "review_changes")
-      );
     },
 
     createPendingAction(input, context) {

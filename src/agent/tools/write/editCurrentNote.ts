@@ -417,36 +417,6 @@ export function createEditCurrentNoteTool(
 ): AgentWriteToolDefinition<EditCurrentNoteInput, unknown> {
   const mutationService = new LibraryMutationService(zoteroGateway);
   return {
-    describeAction: (input) => [
-      {
-        id: `note_${input.mode}:${input.targetNoteId || input.noteId || input.targetItemId || "new"}`,
-        proofDomain: "zotero_state",
-        capability: "zotero.notes",
-        operation:
-          input.mode === "edit"
-            ? "note_edit"
-            : input.mode === "append"
-              ? "note_append"
-              : "note_create",
-        source: "zotero_native",
-        parameters: {
-          noteMode: input.mode,
-          targetItemId: input.targetItemId,
-          targetNoteId: input.targetNoteId || input.noteId,
-          expectedText: input.content
-            ? stripNoteHtml(renderRawNoteHtml(input.content))
-            : undefined,
-        },
-        requestedTargets: [
-          input.targetNoteId ||
-            input.noteId ||
-            (input.mode === "create" ? input.targetItemId : undefined),
-        ]
-          .filter((id): id is number => Boolean(id))
-          .map((id) => `item:${id}`),
-        destinationCollectionIds: input.collections || [],
-      },
-    ],
     spec: {
       name: "edit_current_note",
       description:
@@ -552,15 +522,6 @@ export function createEditCurrentNoteTool(
       if (input.mode === "create") return false;
       // Edit mode: always show diff preview for user review
       return true;
-    },
-    acceptInheritedApproval: async (_input, approval) => {
-      // Accept review-mode approvals from search_literature_online review cards
-      // that chain a save_note operation
-      return (
-        approval.sourceMode === "review" &&
-        (approval.sourceActionId === "save_metadata_note" ||
-          approval.sourceActionId === "save_paper_note")
-      );
     },
 
     validate: (args) => {
@@ -842,16 +803,21 @@ export function createEditCurrentNoteTool(
         /!\[[^\]]*\]\(file:\/\/|<img\s+[^>]*src\s*=\s*"file:\/\//i.test(
           input.content,
         );
+      // Binary and honest, matching what execution records: creating a note
+      // always has a complete inverse (the ID is frozen after commit and
+      // trashing cascades to embedded attachments), while editing is
+      // lossless only when no local images must be re-imported — an import
+      // can leave attachment side effects the note-HTML snapshot cannot
+      // restore.
+      const isCreate = input.mode === "create";
       return {
         effect: "write",
-        reversibility: hasLocalImages ? "partial" : "full",
-        reason: hasLocalImages
-          ? "The note pre-image is recoverable, but imported attachment side effects may require Zotero's trash cascade."
-          : undefined,
-        // Edit/append review also resolves patch inputs against the current
-        // note and binds the expected pre-image. Skipping that review would
-        // execute an unresolved patch as an empty replacement.
-        requiresConfirmation: input.mode !== "create",
+        reversibility: isCreate || !hasLocalImages ? "full" : "none",
+        reason: isCreate
+          ? "The note ID is assigned only after commit; the inverse is frozen then, and trashing the note cascades to its embedded attachments."
+          : hasLocalImages
+            ? "Re-importing local images can leave attachment side effects that the note-HTML snapshot alone cannot restore."
+            : undefined,
       };
     },
     execute: async (input, context) => {
@@ -960,10 +926,10 @@ export function createEditCurrentNoteTool(
               targetItemId: parentId,
               collections: input.collections,
             },
-            reversibility: "partial",
+            reversibility: "full",
             deferredInverse: true,
             reason:
-              "The note ID and any embedded attachment IDs are assigned during creation.",
+              "The note ID and any embedded attachment IDs are assigned during creation; trashing the note cascades to its embedded attachments, so the inverse is complete.",
           },
           execute: async () => {
             // Persist useful text before importing images that require a note
@@ -1069,9 +1035,7 @@ export function createEditCurrentNoteTool(
                 htmlChecksum: await sha256Text(note.getNote?.() || ""),
                 collections: filedCollections,
               },
-              reversibility: hasLocalImages
-                ? ("partial" as const)
-                : ("full" as const),
+              reversibility: "full" as const,
               reason: hasLocalImages
                 ? "The note itself is recoverable; embedded attachment creation is covered by Zotero's note trash cascade."
                 : undefined,
@@ -1125,7 +1089,7 @@ export function createEditCurrentNoteTool(
                 checksum: await sha256Text(snapshot.html),
               },
               reversibility: hasLocalImages
-                ? ("partial" as const)
+                ? ("none" as const)
                 : ("full" as const),
               reason: hasLocalImages
                 ? "Imported image attachments may remain if note restoration cannot cascade them."
@@ -1174,7 +1138,7 @@ export function createEditCurrentNoteTool(
                 checksum: await sha256Text(targetNote.getNote?.() || nextHtml),
               },
               reversibility: hasLocalImages
-                ? ("partial" as const)
+                ? ("none" as const)
                 : ("full" as const),
               affectedCount: 1,
               effect: "applied",
@@ -1215,7 +1179,7 @@ export function createEditCurrentNoteTool(
               checksum: await sha256Text(snapshot.html),
             },
             reversibility: hasLocalImages
-              ? ("partial" as const)
+              ? ("none" as const)
               : ("full" as const),
             reason: hasLocalImages
               ? "Imported image attachments may remain after HTML restoration."
@@ -1272,7 +1236,7 @@ export function createEditCurrentNoteTool(
               ),
             },
             reversibility: hasLocalImages
-              ? ("partial" as const)
+              ? ("none" as const)
               : ("full" as const),
             affectedCount: 1,
             effect: "applied",

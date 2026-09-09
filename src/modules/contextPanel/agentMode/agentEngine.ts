@@ -86,6 +86,7 @@ function applyResolvedClaudeEffortDisplay(
   if (typeof applyResolvedEffort !== "function") return;
   applyResolvedEffort(event.payload?.resolvedEffort);
 }
+
 import type {
   AdvancedModelParams,
   ChatAttachment,

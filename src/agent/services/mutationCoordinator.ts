@@ -1,6 +1,5 @@
 import type {
   AgentJournalStepOutcome,
-  AgentActionEvidence,
   AgentToolContext,
   AgentToolEffect,
   AgentWriteToolOutput,
@@ -33,7 +32,6 @@ export type CoordinatedMutationResult = {
   effect: AgentToolEffect;
   affectedCount: number;
   results: LibraryMutationExecutionResult[];
-  actionEvidence: AgentActionEvidence[];
 };
 
 class MutationMayHaveAppliedError extends Error {
@@ -69,11 +67,14 @@ function inversePayload(operations: LibraryMutationOperation[] | undefined) {
 function combineReversibility(
   values: JournalReversibility[],
 ): JournalReversibility {
+  // Binary: an action promises a lossless undo only when every recovery-
+  // relevant step does. One non-full step makes the whole action not
+  // undoable — "partially reversible" asked the user to reason about a
+  // third state that no longer exists.
   if (!values.length || values.every((value) => value === "full")) {
     return "full";
   }
-  if (values.every((value) => value === "none")) return "none";
-  return "partial";
+  return "none";
 }
 
 function combineEffects(values: AgentToolEffect[]): AgentToolEffect {
@@ -238,12 +239,16 @@ async function executeJournaledStep<T>(params: {
         outcome.inverse === undefined ? plan.inverse : outcome.inverse;
       const recoveryReason =
         outcome.reason || (plan.deferredInverse ? undefined : plan.reason);
+      // Binary reversibility: a frozen inverse WITHOUT a caveat promises a
+      // lossless undo (full). No inverse — or a caveat like "only the
+      // identified objects can be returned" — means the step is not
+      // undoable (none); the caveat rides along as the step's error text.
       const reversibility: JournalReversibility = changed
         ? outcome.reversibility ||
-          (finalInverse !== undefined && finalInverse !== null
-            ? recoveryReason
-              ? "partial"
-              : "full"
+          (finalInverse !== undefined &&
+          finalInverse !== null &&
+          !recoveryReason
+            ? "full"
             : "none")
         : "full";
       const status: AgentJournalStepOutcome["status"] =
@@ -409,7 +414,6 @@ export async function executeLibraryMutationAction(params: {
       effect: "none",
       affectedCount: 0,
       results: [],
-      actionEvidence: [],
     };
   }
 
@@ -427,7 +431,6 @@ export async function executeLibraryMutationAction(params: {
 
   const results: LibraryMutationExecutionResult[] = [];
   const completedOutcomes: AgentJournalStepOutcome[] = [];
-  const actionEvidence: AgentActionEvidence[] = [];
   let affectedCount = 0;
   try {
     for (let index = 0; index < operations.length; index += 1) {
@@ -457,23 +460,6 @@ export async function executeLibraryMutationAction(params: {
             : undefined,
       });
       results.push(executed.result);
-      if (
-        executed.precondition &&
-        executed.expectedPostcondition &&
-        typeof executed.precondition === "object" &&
-        typeof executed.expectedPostcondition === "object"
-      ) {
-        actionEvidence.push({
-          version: 1,
-          proofDomain: "zotero_state",
-          operationValue: operations[index],
-          preState: executed.precondition as AgentActionEvidence["preState"],
-          postState:
-            executed.expectedPostcondition as AgentActionEvidence["postState"],
-          journalStepId: executed.journalStepId,
-          effect: executed.effect,
-        });
-      }
       completedOutcomes.push({
         effect: executed.effect,
         status: executed.status,
@@ -506,7 +492,6 @@ export async function executeLibraryMutationAction(params: {
       effect,
       affectedCount: summary.affectedCount,
       results,
-      actionEvidence,
     };
   } catch (error) {
     const changedOutcomes = completedOutcomes.filter(

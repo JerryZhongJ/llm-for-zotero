@@ -80,7 +80,7 @@ describe("action compatibility after tool refactors", function () {
   it("discover_related reads nested read_library results and uses nested import counts", async function () {
     const registry = new AgentToolRegistry();
     let searchArgs: Record<string, unknown> | null = null;
-    let importArgs: Record<string, unknown> | null = null;
+    const importCalls: Array<Record<string, unknown>> = [];
 
     registry.register(
       createStubTool(
@@ -151,7 +151,7 @@ describe("action compatibility after tool refactors", function () {
         },
         (args) => ({ ok: true, value: args as Record<string, unknown> }),
         async (input) => {
-          importArgs = input;
+          importCalls.push(input);
           return {
             result: {
               succeeded: 1,
@@ -176,11 +176,15 @@ describe("action compatibility after tool refactors", function () {
     assert.isTrue(result.ok);
     if (!result.ok) return;
     assert.equal(searchArgs?.doi, "10.1000/seed");
-    assert.deepEqual(importArgs?.identifiers, ["10.1000/r1", "10.1000/r2"]);
+    // One call per paper, each separately journalled.
+    assert.deepEqual(
+      importCalls.map((call) => call.identifier),
+      ["10.1000/r1", "10.1000/r2"],
+    );
     assert.deepEqual(result.output, {
       seedTitle: "Seed Paper",
       discovered: 2,
-      imported: 1,
+      imported: 2,
     });
   });
 

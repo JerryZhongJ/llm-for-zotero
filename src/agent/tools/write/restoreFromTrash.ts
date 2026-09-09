@@ -45,7 +45,7 @@ export function createRestoreFromTrashTool(
     spec: {
       name: "restore_from_trash",
       description:
-        "Restore trashed Zotero items, collections, or saved searches back into the library.",
+        "Restore trashed Zotero objects back into the library. ONE kind of object per call — itemIds, collectionIds, or savedSearchIds, never a combination; each call is its own journalled action with its own undo, and multiple calls in one reply share a single batch confirmation.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -115,6 +115,22 @@ export function createRestoreFromTrashTool(
         return fail(
           "Provide at least one of itemIds, collectionIds, or savedSearchIds as a " +
             "non-empty array of positive integers. Example: { collectionIds: [42] }",
+        );
+      }
+      // One object kind per call (single responsibility): items restore with a
+      // knowable inverse, while collections/saved searches restore with an
+      // inverse finalized from Zotero's actual result (subcollections come
+      // back with their parent). Mixing them in one journalled action made
+      // the undo rating an ambiguous "partial"; split calls keep every
+      // operation cleanly reversible.
+      const kinds = [
+        itemIds.length,
+        collectionIds.length,
+        savedSearchIds.length,
+      ].filter(Boolean).length;
+      if (kinds > 1) {
+        return fail(
+          "Restore one kind of object per call — itemIds, collectionIds, or savedSearchIds, never a combination. Multiple calls in one reply share a single batch confirmation.",
         );
       }
 

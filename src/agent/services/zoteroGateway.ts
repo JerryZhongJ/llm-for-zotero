@@ -143,7 +143,11 @@ export type CollectionBrowseNode = {
  */
 export type SaveAnswerToNoteResult = {
   status: "created" | "appended" | "standalone_created";
-  noteId?: number;
+  /**
+   * Guaranteed: note persistence throws when it cannot resolve the ID, so
+   * an undo (trash-by-ID) is always freezable from this receipt.
+   */
+  noteId: number;
   collections?: number[];
   createdNoteReceipt?: CreatedZoteroNoteReceipt;
 };
@@ -6474,10 +6478,15 @@ export class ZoteroGateway {
     succeeded: number;
     failed: number;
     itemIds?: number[];
+    pdfsFetched?: number;
+    /** Resolved name of the target collection, when one was given. */
+    targetCollectionName?: string;
     items: Array<{
       identifier: string;
       status: "imported" | "not_found" | "error";
       itemId?: number;
+      /** Display title of the imported item — users read titles, not IDs. */
+      title?: string;
       reason?: string;
     }>;
   }> {
@@ -6490,6 +6499,7 @@ export class ZoteroGateway {
       identifier: string;
       status: "imported" | "not_found" | "error";
       itemId?: number;
+      title?: string;
       reason?: string;
     }> = [];
     const targetLibraryID =
@@ -6569,7 +6579,12 @@ export class ZoteroGateway {
           if (importedRegularItemIds.length) {
             succeeded += importedRegularItemIds.length;
             for (const itemId of importedRegularItemIds) {
-              rows.push({ identifier: rawId, status: "imported", itemId });
+              rows.push({
+                identifier: rawId,
+                status: "imported",
+                itemId,
+                title: this.getItem(itemId)?.getDisplayTitle?.() || undefined,
+              });
             }
           } else {
             failed++;
@@ -6609,6 +6624,66 @@ export class ZoteroGateway {
 
     // A follow-up library_search would not have seen the new items.
 
-    return { succeeded, failed, itemIds, items: rows };
+    const pdfsFetched = await this.fetchMissingPdfAttachments(itemIds);
+
+    return {
+      succeeded,
+      failed,
+      itemIds,
+      pdfsFetched,
+      targetCollectionName: targetCollection
+        ? targetCollection.name || undefined
+        : undefined,
+      items: rows,
+    };
+  }
+
+  /**
+   * Attach PDFs that Zotero's own "Find Available PDF" resolvers can locate —
+   * the same machinery as the right-click menu entry (DOI landing pages,
+   * Unpaywall mirror, custom resolvers). `addAvailableFile` is the Zotero 7
+   * name; `addAvailablePDF` is kept as a Zotero 6 fallback. Best-effort per
+   * item: a failed lookup is logged, never thrown, so it cannot break the
+   * import that precedes it.
+   */
+  private async fetchMissingPdfAttachments(itemIds: number[]): Promise<number> {
+    const attachmentsApi = (
+      Zotero as unknown as {
+        Attachments?: {
+          addAvailableFile?: (
+            item: Zotero.Item,
+          ) => Promise<Zotero.Item | false>;
+          addAvailablePDF?: (item: Zotero.Item) => Promise<Zotero.Item | false>;
+        };
+      }
+    ).Attachments;
+    const findAvailable =
+      attachmentsApi?.addAvailableFile || attachmentsApi?.addAvailablePDF;
+    if (!attachmentsApi || !findAvailable) {
+      return 0;
+    }
+    let fetched = 0;
+    for (const itemId of itemIds) {
+      try {
+        const item = this.getItem(itemId);
+        if (!item || getPdfChildAttachments(item).length) {
+          continue;
+        }
+        Zotero.debug(
+          `[llm-for-zotero] Fetching available PDF for imported item ${itemId}`,
+        );
+        const attachment = await findAvailable.call(attachmentsApi, item);
+        if (attachment) {
+          fetched += 1;
+        }
+      } catch (error) {
+        Zotero.debug(
+          `[llm-for-zotero] findPDF for item ${itemId} failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    return fetched;
   }
 }

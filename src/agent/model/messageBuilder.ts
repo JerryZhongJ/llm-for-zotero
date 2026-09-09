@@ -2,7 +2,6 @@ import { renderLibraryOverviewSection } from "../context/libraryOverview";
 
 import type {
   AgentContentInputCapabilities,
-  AgentActionObligation,
   AgentModelContentPart,
   AgentModelMessage,
   AgentRuntimeRequest,
@@ -10,7 +9,6 @@ import type {
   AgentToolDefinition,
   AgentUserMessage,
 } from "../types";
-import { actionToolGuidanceForCapabilities } from "../contracts/actionEvaluation";
 import { AGENT_PERSONA_INSTRUCTIONS } from "./agentPersona";
 import { buildAgentMemoryBlock } from "../store/conversationMemory";
 import { getAllSkills } from "../skills";
@@ -34,6 +32,7 @@ import {
 } from "../../modules/contextPanel/quoteCitations";
 import {
   buildAgentStableResourceContextBlock,
+  buildAttachmentPoolSummaryContextBlock,
   type AgentResourceContextPlan,
 } from "../context/resourceContextPlan";
 import { buildAgentCoverageContextBlock } from "../context/coverageLedger";
@@ -135,15 +134,6 @@ export function normalizeHistoryMessages(
     }));
 }
 
-function describeFrozenTargets(obligation: AgentActionObligation): string {
-  const boundary = obligation.targetBoundary;
-  if (!boundary) return "";
-  if (boundary.frozenTargetIds.length <= 50) {
-    return `frozen item IDs [${boundary.frozenTargetIds.join(", ")}]`;
-  }
-  return `${boundary.frozenTargetIds.length} frozen targets (scope digest ${boundary.scopeDigest})`;
-}
-
 function buildFullUserMessage(
   request: AgentRuntimeRequest,
   options: {
@@ -161,38 +151,13 @@ function buildFullUserMessage(
   if (libraryOverview) {
     contextLines.push(libraryOverview);
   }
+  const attachmentPoolSummary = buildAttachmentPoolSummaryContextBlock(request);
+  if (attachmentPoolSummary) {
+    contextLines.push(attachmentPoolSummary);
+  }
   const visibleTurnContext = buildVisibleTurnContextBlock(request);
   if (visibleTurnContext) {
     contextLines.push(visibleTurnContext);
-  }
-  if (request.actionContract?.obligations.length) {
-    const obligations = request.actionContract.obligations.map((obligation) => {
-      const scope = obligation.scope
-        ? obligation.scopeRole === "destination"
-          ? ` exact destination collection "${obligation.scope.collectionPath}" (ID ${obligation.scope.collectionId})`
-          : ` exact source collection "${obligation.scope.collectionPath}", direct members only, ${describeFrozenTargets(obligation)}`
-        : obligation.targetBoundary?.kind === "library"
-          ? ` frozen whole-library scope, ${describeFrozenTargets(obligation)}`
-          : obligation.targetBoundary?.kind === "selection"
-            ? ` frozen selected scope, ${describeFrozenTargets(obligation)}`
-            : "";
-      const constraint = obligation.constraints?.tagPrefix
-        ? `, required tag prefix "${obligation.constraints.tagPrefix}"`
-        : "";
-      return `- ${obligation.capability}; coverage=${obligation.coverage}; targets=${obligation.targetKind};${scope}${constraint}`;
-    });
-    contextLines.push(
-      [
-        "Action contract for this turn:",
-        ...obligations,
-        `Tool guidance: ${actionToolGuidanceForCapabilities(
-          request.actionContract.obligations.map(
-            (obligation) => obligation.capability,
-          ),
-        )}`,
-        "Do not widen an exact collection to its parent or descendants. A completion claim requires a verified tool receipt covering this contract; already-satisfied targets count, but prose and opaque script/command output do not.",
-      ].join("\n"),
-    );
   }
   if (request.activeNoteContext) {
     const note = request.activeNoteContext;
@@ -686,6 +651,10 @@ function buildRuntimePlatformSection(): string {
   return buildRuntimePlatformGuidanceText();
 }
 
+// Turn-scoped by design: this depends on per-turn figure intent in the user
+// text and on screenshot presence. It used to live in the cached system
+// prefix, where those changes invalidated the whole prompt cache; it now
+// rides with the other dynamic guidance in the turn user message.
 function buildTextOnlyModelInstruction(
   request: AgentRuntimeRequest,
   matchedSkillIds: ReadonlyArray<string>,
@@ -724,6 +693,7 @@ export async function renderAgentPromptEnvelope(
   const dynamicGuidanceInstructions = [
     autoReadInstruction,
     ...workflowParityInstructions,
+    buildTextOnlyModelInstruction(request, matchedSkillIds),
     ...collectToolGuidanceInstructions(request, tools, matchedSkillIds),
   ];
   const matchedSkillInstructions = collectSkillGuidanceInstructions(
@@ -751,10 +721,6 @@ export async function renderAgentPromptEnvelope(
     {
       id: "runtime-platform",
       lines: [buildRuntimePlatformSection()],
-    },
-    {
-      id: "model-limitations",
-      lines: [buildTextOnlyModelInstruction(request, matchedSkillIds)],
     },
     {
       id: "custom-instructions",

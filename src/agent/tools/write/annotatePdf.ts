@@ -44,21 +44,6 @@ export function createAnnotatePdfTool(
 ): AgentWriteToolDefinition<AnnotateInput, unknown> {
   const mutationService = new LibraryMutationService(zoteroGateway);
   return {
-    describeAction: (input) => [
-      {
-        id: `annotation_write:${input.attachmentId}:${input.pageIndex}`,
-        proofDomain: "zotero_state",
-        capability: "zotero.annotations",
-        operation: "annotation_write",
-        source: "zotero_native",
-        parameters: {
-          targetItemId: input.attachmentId,
-          pageIndex: input.pageIndex,
-        },
-        requestedTargets: [`item:${input.attachmentId}`],
-        destinationCollectionIds: [],
-      },
-    ],
     spec: {
       name: "annotate_pdf",
       description:
@@ -218,9 +203,9 @@ export function createAnnotatePdfTool(
     planMutation() {
       return {
         effect: "write",
-        reversibility: "partial",
+        reversibility: "full",
         reason:
-          "The annotation ID needed by the inverse is assigned only after Zotero commits.",
+          "The annotation ID needed by the inverse is assigned only after Zotero commits; the inverse (trashing the annotation) is frozen then — a deferred creation, same as an import.",
       };
     },
 
@@ -261,7 +246,7 @@ export function createAnnotatePdfTool(
             operation: "create_pdf_annotation",
             description: "Create a PDF highlight annotation",
             forward: { attachmentId: input.attachmentId, json },
-            reversibility: "partial" as const,
+            reversibility: "full" as const,
             deferredInverse: true,
             reason: "The annotation ID is assigned only after Zotero commits.",
           };

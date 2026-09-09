@@ -1,3 +1,4 @@
+import { config } from "../../../package.json";
 import type { PaperContextRef } from "../../shared/types";
 import type { AgentToolContext } from "../types";
 import type { EditableArticleMetadataPatch } from "./zoteroGateway";
@@ -10,7 +11,13 @@ type SearchMode =
   | "search"
   | "metadata";
 
-type SearchSource = "openalex" | "arxiv" | "europepmc";
+/** Stable source ids used in tool schemas. */
+export type SearchSourceId =
+  | "openalex"
+  | "arxiv"
+  | "europepmc"
+  | "dblp"
+  | "semanticscholar";
 
 type SearchInput = {
   itemId?: number;
@@ -21,7 +28,7 @@ type SearchInput = {
   query?: string;
   author?: string;
   mode: SearchMode;
-  source?: SearchSource;
+  source?: SearchSourceId;
   limit?: number;
   libraryID?: number;
 };
@@ -109,6 +116,11 @@ const OA_SELECT =
   "id,doi,display_name,authorships,publication_year,abstract_inverted_index,cited_by_count,open_access";
 const OA_MAILTO = "mailto=llm-for-zotero@github.com";
 const OA_BASE = "https://api.openalex.org";
+const S2_GRAPH_BASE = "https://api.semanticscholar.org/graph/v1";
+const S2_RECOMMENDATIONS_BASE =
+  "https://api.semanticscholar.org/recommendations/v1";
+const S2_PAPER_FIELDS =
+  "title,authors,year,abstract,externalIds,citationCount,venue,openAccessPdf";
 const USER_AGENT =
   "llm-for-zotero/1.0 (https://github.com/yilewang/llm-for-zotero)";
 
@@ -185,6 +197,40 @@ async function zoteroFetchJson(url: string): Promise<unknown> {
 async function oaFetch(url: string): Promise<unknown> {
   const separator = url.includes("?") ? "&" : "?";
   return fetchJson(`${url}${separator}${OA_MAILTO}`);
+}
+
+/**
+ * Read the optional Semantic Scholar API key at request time so preference
+ * changes apply without a restart. Without a key, requests run unauthenticated
+ * against S2's shared public rate pool.
+ */
+export function getSemanticScholarApiKey(): string {
+  try {
+    return String(
+      Zotero.Prefs.get(`${config.prefsPrefix}.semanticScholarApiKey`, true) ||
+        "",
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+export function setSemanticScholarApiKey(value: string): void {
+  Zotero.Prefs.set(
+    `${config.prefsPrefix}.semanticScholarApiKey`,
+    value.trim(),
+    true,
+  );
+}
+
+async function s2FetchJson(url: string): Promise<unknown> {
+  const apiKey = getSemanticScholarApiKey();
+  return fetchJson(url, apiKey ? { "x-api-key": apiKey } : undefined);
+}
+
+/** fetchJson throws `HTTP <status>`; S2 signals unknown identifiers with 404. */
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && /\bHTTP 404\b/.test(error.message);
 }
 
 function reconstructAbstract(invertedIndex: unknown): string {
@@ -547,6 +593,193 @@ async function fetchEuropePmcSearch(
     .filter((paper): paper is OnlinePaperResult => Boolean(paper));
 }
 
+/**
+ * Normalize one DBLP hit's `info.authors.author`, which is a string, a single
+ * `{ "@pid", "text" }` object, or an array mixing both — depending on author
+ * count and DBLP's serialization mood.
+ */
+function normalizeDblpAuthors(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return raw
+    .map((entry) =>
+      typeof entry === "string"
+        ? entry.trim()
+        : normalizeString((entry as Record<string, unknown>)?.text),
+    )
+    .filter(Boolean);
+}
+
+async function fetchDblpSearch(
+  query: string,
+  limit: number,
+): Promise<OnlinePaperResult[]> {
+  const url =
+    `https://dblp.org/search/publ/api` +
+    `?q=${encodeURIComponent(query)}&format=json&h=${limit}`;
+  let raw: unknown;
+  try {
+    raw = await zoteroFetchJson(url);
+  } catch (error) {
+    throw new Error(
+      `DBLP API request failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const body = raw as {
+    result?: { hits?: { hit?: unknown } };
+  };
+  const hit = body.result?.hits?.hit;
+  const entries = (Array.isArray(hit) ? hit : hit ? [hit] : []) as Array<{
+    info?: Record<string, unknown>;
+  }>;
+  return entries
+    .map((entry): OnlinePaperResult | null => {
+      const info = entry.info;
+      const title = normalizeString(info?.title);
+      if (!title) {
+        return null;
+      }
+      const authors = normalizeDblpAuthors(
+        (info?.authors as Record<string, unknown> | undefined)?.author,
+      );
+      const yearRaw = normalizeString(info?.year);
+      const year = yearRaw
+        ? parseInt(yearRaw.slice(0, 4), 10) || undefined
+        : undefined;
+      const doiUrl = normalizeString(info?.doi);
+      const doi = doiUrl.startsWith("https://doi.org/")
+        ? doiUrl.slice("https://doi.org/".length)
+        : doiUrl || undefined;
+      const ee = info?.ee;
+      const eeList = Array.isArray(ee) ? ee : ee ? [ee] : [];
+      const openAccessUrl = normalizeString(eeList[0]) || undefined;
+      const sourceUrl = normalizeString(info?.url) || openAccessUrl;
+      return {
+        title,
+        authors,
+        year,
+        doi,
+        sourceUrl,
+        openAccessUrl,
+      };
+    })
+    .filter((paper): paper is OnlinePaperResult => Boolean(paper));
+}
+
+function normalizeSemanticScholarPaper(raw: unknown): OnlinePaperResult | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const paper = raw as Record<string, unknown>;
+  const title = normalizeString(paper.title);
+  if (!title) {
+    return null;
+  }
+  const authorList = Array.isArray(paper.authors)
+    ? (paper.authors as Array<{ name?: string }>)
+    : [];
+  const authors = authorList
+    .map((author) => normalizeString(author.name))
+    .filter(Boolean);
+  const year = typeof paper.year === "number" ? paper.year : undefined;
+  const abstractText = normalizeString(paper.abstract);
+  const abstract = abstractText
+    ? `${abstractText.slice(0, 400)}${abstractText.length > 400 ? "..." : ""}`
+    : undefined;
+  const externalIds = (paper.externalIds || {}) as Record<string, string>;
+  const doi = externalIds.DOI || externalIds.doi || undefined;
+  const citationCount =
+    typeof paper.citationCount === "number" ? paper.citationCount : undefined;
+  const openAccessPdf = paper.openAccessPdf as
+    | { url?: string }
+    | null
+    | undefined;
+  const openAccessUrl = normalizeString(openAccessPdf?.url) || undefined;
+  const sourceUrl = doi
+    ? `https://doi.org/${doi}`
+    : normalizeString(paper.paperId)
+      ? `https://www.semanticscholar.org/paper/${normalizeString(paper.paperId)}`
+      : undefined;
+  return {
+    title,
+    authors,
+    year,
+    abstract,
+    doi,
+    citationCount,
+    openAccessUrl,
+    sourceUrl,
+  };
+}
+
+/**
+ * Resolve a Semantic Scholar paper ID for graph queries (references /
+ * citations / recommendations). DOI and arXiv IDs map directly; a bare title
+ * goes through S2's match endpoint, which returns the single best match.
+ */
+async function resolveSemanticScholarPaperId(params: {
+  doi?: string;
+  arxivId?: string;
+  title?: string;
+}): Promise<string | null> {
+  if (params.doi) {
+    return `DOI:${params.doi.replace(/^https?:\/\/doi\.org\//i, "")}`;
+  }
+  if (params.arxivId) {
+    return `ARXIV:${params.arxivId.replace(/^arxiv:/i, "")}`;
+  }
+  if (!params.title) {
+    return null;
+  }
+  try {
+    const raw = (await s2FetchJson(
+      `${S2_GRAPH_BASE}/paper/search/match?query=${encodeURIComponent(params.title)}&fields=paperId`,
+    )) as { data?: Array<{ paperId?: string }> };
+    const paperId = normalizeString(raw.data?.[0]?.paperId);
+    return paperId || null;
+  } catch (err) {
+    ztoolkit.log("LLM: Semantic Scholar title match failed", err);
+    return null;
+  }
+}
+
+async function fetchSemanticScholarSearch(
+  query: string,
+  limit: number,
+): Promise<OnlinePaperResult[]> {
+  const raw = (await s2FetchJson(
+    `${S2_GRAPH_BASE}/paper/search?query=${encodeURIComponent(query)}&fields=${S2_PAPER_FIELDS}&limit=${limit}`,
+  )) as { data?: unknown[] };
+  return (raw.data ?? [])
+    .map(normalizeSemanticScholarPaper)
+    .filter((paper): paper is OnlinePaperResult => Boolean(paper));
+}
+
+async function fetchSemanticScholarGraph(
+  kind: "references" | "citations",
+  paperId: string,
+  limit: number,
+): Promise<OnlinePaperResult[]> {
+  const raw = (await s2FetchJson(
+    `${S2_GRAPH_BASE}/paper/${encodeURIComponent(paperId)}/${kind}?fields=${S2_PAPER_FIELDS}&limit=${limit}`,
+  )) as { data?: Array<Record<string, unknown>> };
+  const key = kind === "references" ? "citedPaper" : "citingPaper";
+  return (raw.data ?? [])
+    .map((entry) => normalizeSemanticScholarPaper(entry[key]))
+    .filter((paper): paper is OnlinePaperResult => Boolean(paper));
+}
+
+async function fetchSemanticScholarRecommendations(
+  paperId: string,
+  limit: number,
+): Promise<OnlinePaperResult[]> {
+  const raw = (await s2FetchJson(
+    `${S2_RECOMMENDATIONS_BASE}/papers/forpaper/${encodeURIComponent(paperId)}?fields=${S2_PAPER_FIELDS}&limit=${limit}`,
+  )) as { recommendedPapers?: unknown[] };
+  return (raw.recommendedPapers ?? [])
+    .map(normalizeSemanticScholarPaper)
+    .filter((paper): paper is OnlinePaperResult => Boolean(paper));
+}
+
 function normalizeTitleKey(title: string): string {
   return title
     .toLowerCase()
@@ -752,18 +985,18 @@ async function lookupSemanticScholar(params: {
       "title,authors,year,abstract,externalIds,citationCount,venue,publicationTypes,openAccessPdf";
     let url: string;
     if (params.doi) {
-      url = `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(params.doi)}?fields=${fields}`;
+      url = `${S2_GRAPH_BASE}/paper/DOI:${encodeURIComponent(params.doi)}?fields=${fields}`;
     } else if (params.arxivId) {
       const cleaned = params.arxivId.replace(/^arxiv:/i, "");
-      url = `https://api.semanticscholar.org/graph/v1/paper/ARXIV:${encodeURIComponent(cleaned)}?fields=${fields}`;
+      url = `${S2_GRAPH_BASE}/paper/ARXIV:${encodeURIComponent(cleaned)}?fields=${fields}`;
     } else if (params.title) {
       const encoded = encodeURIComponent(params.title);
-      url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encoded}&fields=${fields}&limit=1`;
+      url = `${S2_GRAPH_BASE}/paper/search?query=${encoded}&fields=${fields}&limit=1`;
     } else {
       return null;
     }
 
-    const raw = (await fetchJson(url)) as Record<string, unknown>;
+    const raw = (await s2FetchJson(url)) as Record<string, unknown>;
     const paper =
       params.doi || params.arxivId
         ? raw
@@ -821,6 +1054,351 @@ async function lookupSemanticScholar(params: {
     return null;
   }
 }
+
+/** Everything a source needs to execute one search, resolved by the service. */
+export type SearchSourceRunContext = {
+  mode: Exclude<SearchMode, "metadata">;
+  /** User query, or the seed paper's title as fallback. */
+  query?: string;
+  title?: string;
+  author?: string;
+  arxivId?: string;
+  doi?: string;
+  titleFallback?: string;
+  limit: number;
+  /** Drops the seed paper itself from result sets. */
+  dedupe: (results: OnlinePaperResult[]) => OnlinePaperResult[];
+};
+
+export type SearchSourceDefinition = {
+  id: SearchSourceId;
+  /** Human-facing label in results and logs. */
+  label: string;
+  /** Short guidance fragment describing the source's scope. */
+  guidance: string;
+  /** Whether the source supports recommendations/references/citations modes. */
+  supportsGraphModes: boolean;
+  run: (ctx: SearchSourceRunContext) => Promise<LiteratureSearchResult>;
+};
+
+/**
+ * Factory for search-only sources (keyword in, paper list out) — arXiv,
+ * Europe PMC, DBLP all share this shape, so their branches collapse into
+ * one descriptor each.
+ */
+function createSearchOnlySource(config: {
+  id: SearchSourceId;
+  label: string;
+  guidance: string;
+  fetchPapers: (query: string, limit: number) => Promise<OnlinePaperResult[]>;
+}): SearchSourceDefinition {
+  const { id, label, guidance, fetchPapers } = config;
+  return {
+    id,
+    label,
+    guidance,
+    supportsGraphModes: false,
+    async run({ query, limit, dedupe }) {
+      if (!query) {
+        return {
+          results: [],
+          message: `No search query available for ${label}.`,
+        };
+      }
+      try {
+        Zotero.debug(
+          `[llm-for-zotero] ${label} search: query="${query}", limit=${limit}`,
+        );
+        const results = dedupe(await fetchPapers(query, limit));
+        Zotero.debug(
+          `[llm-for-zotero] ${label} search returned ${results.length} results`,
+        );
+        return { results, total: results.length, source: label, query };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        Zotero.debug(`[llm-for-zotero] ${label} search failed: ${msg}`);
+        return {
+          results: [],
+          source: label,
+          query,
+          message: `${label} search failed: ${msg}`,
+        };
+      }
+    },
+  };
+}
+
+const openAlexSource: SearchSourceDefinition = {
+  id: "openalex",
+  label: "OpenAlex",
+  guidance: "broadest cross-domain coverage",
+  supportsGraphModes: true,
+  async run({ mode, query, author, doi, titleFallback, limit, dedupe }) {
+    if (mode === "search") {
+      if (!query && !author) {
+        return { results: [], message: "No search query available." };
+      }
+      try {
+        let results: OnlinePaperResult[];
+        if (query) {
+          results = dedupe(await fetchKeywordSearch(query, limit, author));
+        } else {
+          results = dedupe(await fetchAuthorSearch(author!, limit));
+        }
+        return {
+          results,
+          total: results.length,
+          source: "OpenAlex",
+          query: query || `author:${author}`,
+        };
+      } catch (error) {
+        return {
+          results: [],
+          source: "OpenAlex",
+          query: query || `author:${author}`,
+          message: `OpenAlex search failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    }
+
+    if (!doi) {
+      if (titleFallback) {
+        const results = dedupe(await fetchKeywordSearch(titleFallback, limit));
+        return {
+          results,
+          total: results.length,
+          source: "OpenAlex",
+          query: titleFallback,
+          warnings: [
+            "DOI unavailable; returned keyword search results instead.",
+          ],
+        };
+      }
+      throw new Error(
+        "No DOI found for the active paper. Provide a doi or query explicitly.",
+      );
+    }
+
+    const work = await resolveOpenAlexWork(doi);
+    if (!work) {
+      if (titleFallback) {
+        const results = dedupe(await fetchKeywordSearch(titleFallback, limit));
+        return {
+          results,
+          total: results.length,
+          source: "OpenAlex",
+          query: titleFallback,
+          warnings: [
+            "Paper not found on OpenAlex by DOI; returned keyword search results instead.",
+          ],
+        };
+      }
+      throw new Error(`Paper with DOI "${doi}" was not found on OpenAlex.`);
+    }
+
+    const openAlexId = normalizeString(work.id) || null;
+    let results: OnlinePaperResult[] = [];
+    const warnings: string[] = [];
+
+    if (mode === "recommendations") {
+      results = dedupe(await fetchRelated(work, limit));
+      if (results.length === 0 && titleFallback) {
+        results = dedupe(await fetchKeywordSearch(titleFallback, limit));
+        warnings.push(
+          "OpenAlex had no related works yet; returned keyword search results instead.",
+        );
+        return {
+          results,
+          total: results.length,
+          source: "OpenAlex",
+          query: titleFallback,
+          doi,
+          openAlexId,
+          warnings,
+        };
+      }
+    } else if (mode === "references") {
+      results = dedupe(await fetchReferences(work, limit));
+    } else {
+      if (!openAlexId) {
+        throw new Error("Could not determine OpenAlex ID to query citations.");
+      }
+      results = dedupe(await fetchCitations(openAlexId, limit));
+    }
+
+    return {
+      results,
+      total: results.length,
+      source: "OpenAlex",
+      doi,
+      openAlexId,
+      openAlexUrl: openAlexId || undefined,
+      ...(warnings.length ? { warnings } : {}),
+    };
+  },
+};
+
+const semanticScholarSource: SearchSourceDefinition = {
+  id: "semanticscholar",
+  label: "Semantic Scholar",
+  guidance:
+    "default; best citation graph for CS/ML, includes arXiv preprints and their citing works",
+  supportsGraphModes: true,
+  async run({ mode, query, title, arxivId, doi, limit, dedupe }) {
+    try {
+      Zotero.debug(
+        `[llm-for-zotero] Semantic Scholar search: mode=${mode}, limit=${limit}`,
+      );
+      if (mode === "search") {
+        if (!query) {
+          return {
+            results: [],
+            message: "No search query available for Semantic Scholar.",
+          };
+        }
+        const results = dedupe(await fetchSemanticScholarSearch(query, limit));
+        return {
+          results,
+          total: results.length,
+          source: "Semantic Scholar",
+          query,
+        };
+      }
+
+      // Graph modes (references / citations / recommendations) need a seed
+      // paper, resolved from DOI, arXiv ID, or title match.
+      const keywordFallback = async (
+        warning: string,
+      ): Promise<LiteratureSearchResult> => {
+        const results = dedupe(await fetchSemanticScholarSearch(query!, limit));
+        return {
+          results,
+          total: results.length,
+          source: "Semantic Scholar",
+          query,
+          warnings: [warning],
+        };
+      };
+
+      const fetchGraph = (id: string): Promise<OnlinePaperResult[]> =>
+        mode === "recommendations"
+          ? fetchSemanticScholarRecommendations(id, limit)
+          : fetchSemanticScholarGraph(
+              mode === "references" ? "references" : "citations",
+              id,
+              limit,
+            );
+
+      const paperId = await resolveSemanticScholarPaperId({
+        doi,
+        arxivId,
+        title: title || query,
+      });
+      if (!paperId) {
+        if (query) {
+          return keywordFallback(
+            "Could not resolve the paper on Semantic Scholar; returned keyword search results instead.",
+          );
+        }
+        throw new Error(
+          "No DOI, arXiv ID, or title available to resolve the paper on Semantic Scholar.",
+        );
+      }
+
+      let results: OnlinePaperResult[];
+      try {
+        results = dedupe(await fetchGraph(paperId));
+      } catch (error) {
+        // S2 answers 404 for identifiers it does not index (e.g.
+        // proceedings-only DOIs like 10.5555/...). Retry once via title
+        // match before degrading to a keyword search.
+        if (!isNotFoundError(error)) {
+          throw error;
+        }
+        const matchedId = title
+          ? await resolveSemanticScholarPaperId({ title })
+          : null;
+        if (!matchedId || matchedId === paperId) {
+          if (query) {
+            return keywordFallback(
+              "Paper not found on Semantic Scholar; returned keyword search results instead.",
+            );
+          }
+          throw error;
+        }
+        try {
+          results = dedupe(await fetchGraph(matchedId));
+        } catch (retryError) {
+          if (isNotFoundError(retryError) && query) {
+            return keywordFallback(
+              "Paper not found on Semantic Scholar; returned keyword search results instead.",
+            );
+          }
+          throw retryError;
+        }
+      }
+
+      if (!results.length && mode === "recommendations" && query) {
+        return keywordFallback(
+          "Semantic Scholar had no recommendations for this paper; returned keyword search results instead.",
+        );
+      }
+
+      return {
+        results,
+        total: results.length,
+        source: "Semantic Scholar",
+        ...(doi ? { doi } : {}),
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      Zotero.debug(`[llm-for-zotero] Semantic Scholar search failed: ${msg}`);
+      return {
+        results: [],
+        source: "Semantic Scholar",
+        message: `Semantic Scholar search failed: ${msg}`,
+      };
+    }
+  },
+};
+
+/**
+ * Registry of every online source the literature search can dispatch to.
+ * Adding a source = adding one entry here; tool schemas, validation, and
+ * guidance all derive from this table (open/closed principle).
+ */
+export const SEARCH_SOURCES: Record<SearchSourceId, SearchSourceDefinition> = {
+  openalex: openAlexSource,
+  semanticscholar: semanticScholarSource,
+  arxiv: createSearchOnlySource({
+    id: "arxiv",
+    label: "arXiv",
+    guidance: "preprints, CS/ML/physics",
+    fetchPapers: fetchArxivSearch,
+  }),
+  europepmc: createSearchOnlySource({
+    id: "europepmc",
+    label: "Europe PMC",
+    guidance: "biomedical/life sciences",
+    fetchPapers: fetchEuropePmcSearch,
+  }),
+  dblp: createSearchOnlySource({
+    id: "dblp",
+    label: "DBLP",
+    guidance: "computer science bibliography",
+    fetchPapers: fetchDblpSearch,
+  }),
+};
+
+export const SEARCH_SOURCE_IDS = Object.keys(
+  SEARCH_SOURCES,
+) as SearchSourceId[];
+
+/**
+ * The source used when the model omits `source`, and the graph-capable
+ * source that non-graph selections are auto-corrected to.
+ */
+export const DEFAULT_SEARCH_SOURCE_ID: SearchSourceId = "semanticscholar";
 
 export class LiteratureSearchService {
   constructor(private readonly zoteroGateway: ZoteroGateway) {}
@@ -1013,7 +1591,7 @@ export class LiteratureSearchService {
     context: AgentToolContext,
   ): Promise<LiteratureSearchResult> {
     const mode = input.mode === "metadata" ? "search" : input.mode;
-    const source = input.source ?? "openalex";
+    const source = input.source ?? DEFAULT_SEARCH_SOURCE_ID;
     const limit = input.limit ?? 10;
     let doi = input.doi;
     let titleFallback = input.query || input.title;
@@ -1044,173 +1622,16 @@ export class LiteratureSearchService {
     const dedupe = (results: OnlinePaperResult[]): OnlinePaperResult[] =>
       results.filter((result) => !isActivePaper(doi, activeTitleKey, result));
 
-    if (source === "arxiv") {
-      const query = input.query || titleFallback;
-      if (!query) {
-        return { results: [], message: "No search query available for arXiv." };
-      }
-      try {
-        Zotero.debug(
-          `[llm-for-zotero] arXiv search: query="${query}", limit=${limit}`,
-        );
-        const results = dedupe(await fetchArxivSearch(query, limit));
-        Zotero.debug(
-          `[llm-for-zotero] arXiv search returned ${results.length} results`,
-        );
-        return {
-          results,
-          total: results.length,
-          source: "arXiv",
-          query,
-        };
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        Zotero.debug(`[llm-for-zotero] arXiv search failed: ${msg}`);
-        return {
-          results: [],
-          source: "arXiv",
-          query,
-          message: `arXiv search failed: ${msg}`,
-        };
-      }
-    }
-
-    if (source === "europepmc") {
-      const query = input.query || titleFallback;
-      if (!query) {
-        return {
-          results: [],
-          message: "No search query available for Europe PMC.",
-        };
-      }
-      try {
-        Zotero.debug(
-          `[llm-for-zotero] Europe PMC search: query="${query}", limit=${limit}`,
-        );
-        const results = dedupe(await fetchEuropePmcSearch(query, limit));
-        Zotero.debug(
-          `[llm-for-zotero] Europe PMC search returned ${results.length} results`,
-        );
-        return {
-          results,
-          total: results.length,
-          source: "Europe PMC",
-          query,
-        };
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        Zotero.debug(`[llm-for-zotero] Europe PMC search failed: ${msg}`);
-        return {
-          results: [],
-          source: "Europe PMC",
-          query,
-          message: `Europe PMC search failed: ${msg}`,
-        };
-      }
-    }
-
-    if (mode === "search") {
-      const query = input.query || titleFallback;
-      const author = input.author;
-      if (!query && !author) {
-        return { results: [], message: "No search query available." };
-      }
-      try {
-        let results: OnlinePaperResult[];
-        if (query) {
-          results = dedupe(await fetchKeywordSearch(query, limit, author));
-        } else {
-          results = dedupe(await fetchAuthorSearch(author!, limit));
-        }
-        return {
-          results,
-          total: results.length,
-          source: "OpenAlex",
-          query: query || `author:${author}`,
-        };
-      } catch (error) {
-        return {
-          results: [],
-          source: "OpenAlex",
-          query: query || `author:${author}`,
-          message: `OpenAlex search failed: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-    }
-
-    if (!doi) {
-      if (titleFallback) {
-        const results = dedupe(await fetchKeywordSearch(titleFallback, limit));
-        return {
-          results,
-          total: results.length,
-          source: "OpenAlex",
-          query: titleFallback,
-          warnings: [
-            "DOI unavailable; returned keyword search results instead.",
-          ],
-        };
-      }
-      throw new Error(
-        "No DOI found for the active paper. Provide a doi or query explicitly.",
-      );
-    }
-
-    const work = await resolveOpenAlexWork(doi);
-    if (!work) {
-      if (titleFallback) {
-        const results = dedupe(await fetchKeywordSearch(titleFallback, limit));
-        return {
-          results,
-          total: results.length,
-          source: "OpenAlex",
-          query: titleFallback,
-          warnings: [
-            "Paper not found on OpenAlex by DOI; returned keyword search results instead.",
-          ],
-        };
-      }
-      throw new Error(`Paper with DOI "${doi}" was not found on OpenAlex.`);
-    }
-
-    const openAlexId = normalizeString(work.id) || null;
-    let results: OnlinePaperResult[] = [];
-    const warnings: string[] = [];
-
-    if (mode === "recommendations") {
-      results = dedupe(await fetchRelated(work, limit));
-      if (results.length === 0 && titleFallback) {
-        results = dedupe(await fetchKeywordSearch(titleFallback, limit));
-        warnings.push(
-          "OpenAlex had no related works yet; returned keyword search results instead.",
-        );
-        return {
-          results,
-          total: results.length,
-          source: "OpenAlex",
-          query: titleFallback,
-          doi,
-          openAlexId,
-          warnings,
-        };
-      }
-    } else if (mode === "references") {
-      results = dedupe(await fetchReferences(work, limit));
-    } else {
-      if (!openAlexId) {
-        throw new Error("Could not determine OpenAlex ID to query citations.");
-      }
-      results = dedupe(await fetchCitations(openAlexId, limit));
-    }
-
-    return {
-      results,
-      total: results.length,
-      source: "OpenAlex",
+    return SEARCH_SOURCES[source].run({
+      mode,
+      query: input.query || titleFallback,
+      title: input.title,
+      author: input.author,
+      arxivId: input.arxivId,
       doi,
-      openAlexId,
-      openAlexUrl: openAlexId || undefined,
-      ...(warnings.length ? { warnings } : {}),
-    };
+      titleFallback,
+      limit,
+      dedupe,
+    });
   }
 }

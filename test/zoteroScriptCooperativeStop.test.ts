@@ -178,7 +178,10 @@ describe("zotero_script cooperative cancellation", function () {
     });
     assert.lengthOf(actions, 1, "the timed-out script is one durable action");
     assert.equal(actions[0].status, "applied");
-    assert.equal(actions[0].reversibility, "partial");
+    // The snapshots explain every observed effect (the script only read
+    // items it snapshotted), so the binary rating is full even though the
+    // run timed out — the timeout predates nothing that changed.
+    assert.equal(actions[0].reversibility, "full");
     assert.lengthOf(actions[0].steps, 1);
     assert.include(
       String(actions[0].steps[0].inverseJson),
@@ -194,9 +197,9 @@ describe("zotero_script cooperative cancellation", function () {
       } as never,
       context,
     });
-    assert.equal(outcome.reverted, 0);
-    assert.equal(outcome.partiallyReverted, 1);
-    assert.equal(outcome.residuals[0]?.actionId, actions[0].actionId);
+    assert.equal(outcome.reverted, 1);
+    assert.equal(outcome.partiallyReverted, 0);
+    assert.lengthOf(outcome.residuals, 0);
     assert.deepEqual(
       restored.sort(),
       [1, 2, 3],

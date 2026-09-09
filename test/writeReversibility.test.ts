@@ -1,8 +1,12 @@
 import { assert } from "chai";
 import { normalizeAgentLibraryWriteMode } from "../src/shared/agentLibraryWriteMode";
 import { initAgentChangeJournal } from "../src/agent/store/changeJournal";
-import { AgentToolRegistry } from "../src/agent/tools/registry";
+import {
+  AgentToolRegistry,
+  writePlanRequiresConfirmation,
+} from "../src/agent/tools/registry";
 import { createLibrarySettingsTool } from "../src/agent/tools/write/librarySettings";
+import { createImportIdentifiersTool } from "../src/agent/tools/write/importIdentifiers";
 import type {
   AgentMutationPlan,
   AgentToolContext,
@@ -13,7 +17,17 @@ import { ChangeJournalTestDb } from "./helpers/changeJournalTestDb";
 describe("mutation-plan confirmation policy", function () {
   const originalZotero = globalThis.Zotero;
   const context = {
-    request: { conversationKey: 1, libraryID: 1 },
+    request: {
+      conversationKey: 1,
+      libraryID: 1,
+      // These tests target the confirmation policy, not classification.
+      classifiedIntent: {
+        retrievalIntent: "none",
+        wantedSections: [],
+        actionInterpretationSource: "classifier",
+        actionIntents: [],
+      },
+    },
     item: null,
     currentAnswerText: "",
     modelName: "test",
@@ -52,7 +66,7 @@ describe("mutation-plan confirmation policy", function () {
   }
 
   async function prepare(params: {
-    mode: "auto" | "safe" | "yolo";
+    mode: "manual" | "semi_auto" | "auto";
     plan?: AgentMutationPlan;
     journal: boolean;
   }) {
@@ -71,18 +85,18 @@ describe("mutation-plan confirmation policy", function () {
     );
   }
 
-  it("safe reviews every concrete write plan", async function () {
+  it("manual reviews every concrete write plan", async function () {
     const prepared = await prepare({
-      mode: "safe",
+      mode: "manual",
       journal: true,
       plan: { effect: "write", reversibility: "full" },
     });
     assert.equal(prepared.kind, "confirmation");
   });
 
-  it("auto runs a fully reversible initialized-journal plan directly", async function () {
+  it("semi_auto runs a fully reversible initialized-journal plan directly", async function () {
     const prepared = await prepare({
-      mode: "auto",
+      mode: "semi_auto",
       journal: true,
       plan: { effect: "write", reversibility: "full" },
     });
@@ -92,10 +106,10 @@ describe("mutation-plan confirmation policy", function () {
     }
   });
 
-  it("auto reviews partial and irreversible plans", async function () {
+  it("semi_auto reviews partial and irreversible plans", async function () {
     for (const reversibility of ["partial", "none"] as const) {
       const prepared = await prepare({
-        mode: "auto",
+        mode: "semi_auto",
         journal: true,
         plan: { effect: "write", reversibility },
       });
@@ -103,30 +117,37 @@ describe("mutation-plan confirmation policy", function () {
     }
   });
 
-  it("defaults a future write without a planner to irreversible", async function () {
-    const prepared = await prepare({ mode: "auto", journal: true });
-    assert.equal(prepared.kind, "confirmation");
+  it("semi_auto imports a paper without a card — the undo is deferred, not absent", async function () {
+    // Import creates items, so its inverse (deleting them) can only be frozen
+    // after Zotero assigns the IDs. That makes it reversible-in-principle:
+    // semi_auto must run it directly and rely on the trace's undo button,
+    // not demand a confirmation card for every paper. Assert on the plan and
+    // the shared gate formula — executing would need a working gateway.
+    const tool = createImportIdentifiersTool({
+      getItem: () => null,
+      getCollection: () => null,
+    } as never);
+    const validated = tool.validate({ identifier: "10.1/abc" });
+    assert.isTrue(validated.ok);
+    if (!validated.ok) return;
+    const plan = await tool.planMutation?.(validated.value, context);
+    assert.isOk(plan);
+    if (!plan) return;
+    assert.equal(plan.reversibility, "full");
+    assert.isFalse(writePlanRequiresConfirmation(plan, "semi_auto", false));
+    assert.isTrue(writePlanRequiresConfirmation(plan, "manual", false));
   });
 
-  it("honours an operation-specific confirmation requirement even in yolo", async function () {
-    const prepared = await prepare({
-      mode: "yolo",
-      journal: true,
-      plan: {
-        effect: "write",
-        reversibility: "full",
-        requiresConfirmation: true,
-        reason: "Resume an interrupted batch only after reviewing its state.",
-      },
-    });
+  it("defaults a future write without a planner to irreversible", async function () {
+    const prepared = await prepare({ mode: "semi_auto", journal: true });
     assert.equal(prepared.kind, "confirmation");
   });
 
   it("applies the global write mode to library settings", async function () {
     for (const [mode, expectedKind] of [
-      ["safe", "confirmation"],
+      ["manual", "confirmation"],
+      ["semi_auto", "result"],
       ["auto", "result"],
-      ["yolo", "result"],
     ] as const) {
       const db = new ChangeJournalTestDb();
       globalThis.Zotero = {
@@ -179,7 +200,7 @@ describe("mutation-plan confirmation policy", function () {
     const db = new ChangeJournalTestDb();
     globalThis.Zotero = {
       DB: db,
-      Prefs: { get: () => "safe" },
+      Prefs: { get: () => "manual" },
       Items: { get: () => null },
       debug: () => undefined,
     } as never;
@@ -227,9 +248,9 @@ describe("mutation-plan confirmation policy", function () {
     assert.equal(read.kind, "result");
   });
 
-  it("refuses yolo writes when the durable journal is unavailable", async function () {
+  it("refuses auto-mode writes when the durable journal is unavailable", async function () {
     const prepared = await prepare({
-      mode: "yolo",
+      mode: "auto",
       journal: false,
       plan: { effect: "write", reversibility: "full" },
     });
@@ -243,9 +264,9 @@ describe("mutation-plan confirmation policy", function () {
     }
   });
 
-  it("auto falls back to explicit confirmation with a recovery warning", async function () {
+  it("semi_auto falls back to explicit confirmation with a recovery warning", async function () {
     const prepared = await prepare({
-      mode: "auto",
+      mode: "semi_auto",
       journal: false,
       plan: { effect: "write", reversibility: "full" },
     });
@@ -259,13 +280,16 @@ describe("mutation-plan confirmation policy", function () {
 
   describe("stored preference normalization", function () {
     it("defaults to auto", function () {
-      assert.equal(normalizeAgentLibraryWriteMode(undefined), "auto");
-      assert.equal(normalizeAgentLibraryWriteMode("nonsense"), "auto");
+      assert.equal(normalizeAgentLibraryWriteMode(undefined), "semi_auto");
+      assert.equal(normalizeAgentLibraryWriteMode("nonsense"), "semi_auto");
     });
 
-    it("honours explicit safe and yolo modes", function () {
-      assert.equal(normalizeAgentLibraryWriteMode("safe"), "safe");
-      assert.equal(normalizeAgentLibraryWriteMode("yolo"), "yolo");
+    it("migrates legacy safe/yolo values; legacy auto is migrated at read time", function () {
+      assert.equal(normalizeAgentLibraryWriteMode("safe"), "manual");
+      assert.equal(normalizeAgentLibraryWriteMode("yolo"), "auto");
+      // "auto" is now a valid mode of its own; the read-level migration in
+      // getAgentLibraryWriteMode disambiguates the legacy value.
+      assert.equal(normalizeAgentLibraryWriteMode("auto"), "auto");
     });
   });
 });
