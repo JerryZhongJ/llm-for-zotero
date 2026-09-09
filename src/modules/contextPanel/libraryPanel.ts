@@ -309,6 +309,12 @@ function toggleLibraryPanel(controller: LibraryPanelController): void {
   } else {
     container.style.display = "";
     setLibraryPanelEnabledPref(true);
+    // Mounting only runs at startup when the panel was already enabled, so
+    // a first-ever open (or one after a failed mount) must mount here —
+    // otherwise the toggle reveals an empty container.
+    if (!controller.mounted) {
+      void mountLibraryPanelConversation(controller);
+    }
   }
   updateToggleButtonState(controller);
 }
@@ -329,7 +335,14 @@ function registerToolbarButton(controller: LibraryPanelController): void {
   (button as unknown as HTMLElement).style.listStyleImage =
     `url(chrome://${config.addonRef}/content/icons/icon.svg)`;
   button.addEventListener("command", () => {
-    toggleLibraryPanel(controller);
+    // The container waits for the item tree to exist, so an early click may
+    // race its creation — ensure it before toggling.
+    void (async () => {
+      if (!controller.container && !controller.cancelled) {
+        await ensurePanelContainer(controller);
+      }
+      toggleLibraryPanel(controller);
+    })();
   });
   const anchor = doc.querySelector("#zotero-tb-advanced-search");
   if (anchor?.parentElement === toolbar && anchor.nextElementSibling) {
