@@ -5649,7 +5649,7 @@ describe("write outcome trace summaries (owned by the operation, not the rendere
           },
         },
       }),
-      "Imported Attention Is All You Need",
+      'Imported "Attention Is All You Need"',
     );
   });
 });

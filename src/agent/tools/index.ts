@@ -239,24 +239,69 @@ function buildLibraryDeleteTraceSummary(
 }
 
 /** Trace row text for library_import: name the one imported object. */
+export function buildLibraryImportTraceSummaryForTests(
+  content: unknown,
+): string | null {
+  return buildLibraryImportTraceSummary(content);
+}
+
 function buildLibraryImportTraceSummary(content: unknown): string | null {
+  if (!content || typeof content !== "object" || Array.isArray(content)) {
+    return null;
+  }
+  const outer = (content as { result?: unknown }).result;
+  if (!outer || typeof outer !== "object" || Array.isArray(outer)) return null;
+  // Delegated executions wrap the gateway payload one level deeper:
+  // { result: { operation, operationId, result: { items, ... } } } — unwrap
+  // it so the user-facing row shows real titles and collection names.
   const record =
-    content && typeof content === "object" && !Array.isArray(content)
-      ? ((content as { result?: unknown }).result as
-          | Record<string, unknown>
-          | undefined)
-      : undefined;
-  const items = Array.isArray(record?.items)
-    ? (record?.items as unknown[])
-    : [];
+    (outer as { result?: unknown }).result &&
+    typeof (outer as { result?: unknown }).result === "object" &&
+    !Array.isArray((outer as { result?: unknown }).result)
+      ? ((outer as { result?: unknown }).result as Record<string, unknown>)
+      : (outer as Record<string, unknown>);
+  const items = Array.isArray(record.items) ? (record.items as unknown[]) : [];
+  const importedTitles: string[] = [];
+  let importedCount = 0;
   for (const raw of items) {
     if (!raw || typeof raw !== "object") continue;
-    const title = (raw as { title?: unknown }).title;
-    if (typeof title === "string" && title.trim()) {
-      return `Imported ${title.trim()}`;
+    const entry = raw as { status?: unknown; title?: unknown };
+    if (entry.status !== "imported") continue;
+    importedCount += 1;
+    if (typeof entry.title === "string" && entry.title.trim()) {
+      importedTitles.push(entry.title.trim());
     }
   }
-  return null;
+  if (!importedCount) {
+    const succeeded = Number(record.succeeded || 0);
+    return succeeded > 0 ? `Imported ${succeeded} item(s)` : null;
+  }
+  const collectionName =
+    typeof record.targetCollectionName === "string" &&
+    record.targetCollectionName.trim()
+      ? record.targetCollectionName.trim()
+      : undefined;
+  const failed = Number(record.failed || 0);
+  const suffix = [
+    ...(collectionName ? [`to ${collectionName}`] : []),
+    ...(failed > 0 ? [`${failed} failed`] : []),
+  ]
+    .map((part) => ` ${part}`)
+    .join("");
+  if (!importedTitles.length) {
+    return `Imported ${importedCount} item${importedCount === 1 ? "" : "s"}${suffix}`;
+  }
+  const MAX_LISTED_TITLES = 3;
+  const listed = importedTitles
+    .slice(0, MAX_LISTED_TITLES)
+    .map((title) => `"${title}"`);
+  // Remaining imports: extra titles plus any imported item without a title.
+  const unlistedCount = importedCount - listed.length;
+  const titleList =
+    unlistedCount > 0
+      ? `${listed.join(", ")} +${unlistedCount} more`
+      : listed.join(", ");
+  return `Imported ${titleList}${suffix}`;
 }
 
 function markToolTier<TInput, TResult>(
