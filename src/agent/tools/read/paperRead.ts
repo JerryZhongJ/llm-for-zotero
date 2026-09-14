@@ -173,7 +173,7 @@ function resolveFullReadTargets(params: {
   const requestText =
     (params.context.request.userText || "").trim() || params.input.query || "";
   const selected = dedupePaperContexts([
-    ...getTurnPapersWithRoles(params.context.request, ["selected"]),
+    ...getTurnPapersWithRoles(params.context.request, ["selected", "ambient"]),
   ]);
   const activePaper = getTurnPapersWithRoles(params.context.request, [
     "active",

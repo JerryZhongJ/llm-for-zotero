@@ -19,6 +19,10 @@ pref("maxTokensTertiary", "4096");
 pref("temperatureQuaternary", "0.3");
 pref("maxTokensQuaternary", "4096");
 pref("enableAgentMode", false);
+// Library chat: automatically mirror the open collection and the highlighted
+// item from the library pane into each agent turn as ambient context
+// (metadata references only; never user-attached resources).
+pref("libraryChatAmbientContext", true);
 pref("contextCacheTelemetry", "");
 pref("enableClaudeCodeMode", false);
 pref("agentBackendBridgeUrl", "http://127.0.0.1:19787");

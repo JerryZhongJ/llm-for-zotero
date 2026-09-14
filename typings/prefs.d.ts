@@ -28,6 +28,7 @@ declare namespace _ZoteroTypes {
       "temperatureQuaternary": string;
       "maxTokensQuaternary": string;
       "enableAgentMode": boolean;
+      "libraryChatAmbientContext": boolean;
       "contextCacheTelemetry": string;
       "enableClaudeCodeMode": boolean;
       "agentBackendBridgeUrl": string;

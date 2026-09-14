@@ -574,6 +574,19 @@ export function getLibraryPanelEnabledPref(): boolean {
   return getBoolPref(LIBRARY_PANEL_ENABLED_PREF_KEY, false);
 }
 
+// ── Library chat ambient context preferences ───────────────────────────────
+
+const LIBRARY_CHAT_AMBIENT_CONTEXT_PREF_KEY = "libraryChatAmbientContext";
+
+/**
+ * Whether library chat automatically mirrors the open collection and the
+ * highlighted item from the library pane into each agent turn as ambient
+ * context (metadata references only).
+ */
+export function getLibraryChatAmbientContextPref(): boolean {
+  return getBoolPref(LIBRARY_CHAT_AMBIENT_CONTEXT_PREF_KEY, true);
+}
+
 export function setLibraryPanelEnabledPref(value: boolean): void {
   getZoteroPrefs()?.set?.(
     `${config.prefsPrefix}.${LIBRARY_PANEL_ENABLED_PREF_KEY}`,

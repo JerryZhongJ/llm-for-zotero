@@ -85,6 +85,13 @@ Documentation:
   a resizable chat panel below the item list. It anchors the library-wide
   conversation — selecting items only refreshes the attached context, never
   the conversation — and is available without selecting any item.
+- **Library Chat Ambient Context** mirrors the collection you have open and
+  the item you have highlighted into every library-chat turn as _ambient_
+  context (metadata references only, clearly marked so the model never
+  confuses them with papers you attached yourself). The agent can answer
+  "which collection am I in?" or read the highlighted paper directly; expand
+  the open collection with its library tools. Toggle it in
+  `Preferences -> Agent -> Library Chat Ambient Context`.
 - **Surface-scoped conversations**: the reader sidebar hosts paper chat, the
   library panel hosts library chat, and each keeps its conversation until you
   switch explicitly via history or "new chat" (the old mode-toggle chip is

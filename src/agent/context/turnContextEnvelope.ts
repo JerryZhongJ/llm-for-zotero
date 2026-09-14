@@ -306,12 +306,20 @@ export function renderTurnContextEnvelopeForModel(
   });
 
   envelope.paperScope.collections.forEach((collection, index) => {
+    const isAmbient = envelope.paperScope.ambientCollectionIds.includes(
+      collection.collectionId,
+    );
     lines.push(
       `Collection ${index + 1}: ${renderFields([
         ["name", collection.name],
         ["collectionId", collection.collectionId],
         ["libraryID", collection.libraryID],
-        ["source", "selected resource pool"],
+        [
+          "source",
+          isAmbient
+            ? "ambient context (current collection)"
+            : "selected resource pool",
+        ],
       ])}`,
     );
   });
@@ -425,6 +433,7 @@ export function renderTurnContextEnvelopeForModel(
     "Zotero context for this turn:",
     ...lines,
     'Resolve current-resource references only from the context listed above. "This paper" means the active paper. In Paper Chat, "these papers" or "both papers" means the active paper plus visibly added concrete papers; in Library Chat it means all visibly attached concrete papers. Collections and tags remain lazy resource pools and are never silently included in "these papers". Do not infer missing resource identity from old thread history, citation provenance, retrieved candidates, local PDF transport, or local memory.',
+    'Entries marked "ambient selection" or "ambient context" mirror what is currently selected in the Zotero library pane (the open collection and/or the highlighted item); the user did not attach them. Ambient papers are metadata references only — call paper_read for their content — and they never count as "these papers". Expand ambient collections with library_search or library_read before relying on them.',
   ].join("\n");
 }
 
@@ -432,6 +441,7 @@ function renderPaperRole(role: TurnPaperRole): string {
   if (role === "active") return "active paper";
   if (role === "full_text") return "full-text";
   if (role === "raw_pdf") return "raw PDF";
+  if (role === "ambient") return "ambient selection";
   return role;
 }
 

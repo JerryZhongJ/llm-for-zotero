@@ -1047,6 +1047,9 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
   const enableAgentModeInput = doc.querySelector(
     `#${config.addonRef}-enable-agent-mode`,
   ) as HTMLInputElement | null;
+  const libraryChatAmbientContextInput = doc.querySelector(
+    `#${config.addonRef}-library-chat-ambient-context`,
+  ) as HTMLInputElement | null;
   const tavilyApiKeyInput = doc.querySelector(
     `#${config.addonRef}-tavily-api-key`,
   ) as HTMLInputElement | null;
@@ -2858,6 +2861,24 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
       Zotero.Prefs.set(
         `${config.prefsPrefix}.enableAgentMode`,
         enableAgentModeInput.checked,
+        true,
+      );
+    });
+  }
+
+  if (libraryChatAmbientContextInput) {
+    const ambientPrefValue = Zotero.Prefs.get(
+      `${config.prefsPrefix}.libraryChatAmbientContext`,
+      true,
+    );
+    libraryChatAmbientContextInput.checked =
+      ambientPrefValue === false
+        ? false
+        : `${ambientPrefValue ?? ""}`.toLowerCase() !== "false";
+    libraryChatAmbientContextInput.addEventListener("change", () => {
+      Zotero.Prefs.set(
+        `${config.prefsPrefix}.libraryChatAmbientContext`,
+        libraryChatAmbientContextInput.checked,
         true,
       );
     });

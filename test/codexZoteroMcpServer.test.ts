@@ -1294,6 +1294,7 @@ describe("Zotero MCP server", function () {
               name: "Scoped Collection",
             },
           ],
+          ambientCollectionIds: [],
           tags: [
             {
               name: "Stable",

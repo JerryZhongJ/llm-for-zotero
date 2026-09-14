@@ -698,6 +698,37 @@
 
         <html:div style="display: flex; flex-direction: column; gap: 4px">
           <html:label
+            style="
+              display: inline-flex;
+              align-items: center;
+              gap: 8px;
+              font-weight: 600;
+              font-size: 12px;
+              color: var(--fill-primary, inherit);
+            "
+          >
+            <html:input
+              id="__addonRef__-library-chat-ambient-context"
+              type="checkbox"
+            ></html:input>
+            Library Chat Ambient Context
+          </html:label>
+          <html:span
+            style="
+              font-size: 11px;
+              color: var(--fill-secondary, #888);
+              margin-top: 1px;
+              display: block;
+            "
+          >
+            Library chat automatically mirrors the currently open collection and
+            the highlighted item into each turn as ambient context (metadata
+            references only; never counted as attached papers).
+          </html:span>
+        </html:div>
+
+        <html:div style="display: flex; flex-direction: column; gap: 4px">
+          <html:label
             for="__addonRef__-agent-library-write-mode"
             style="
               font-weight: 600;

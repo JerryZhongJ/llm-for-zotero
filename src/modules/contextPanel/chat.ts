@@ -293,6 +293,7 @@ import {
   setLastReasoningExpanded,
   setLastUsedReasoningLevelForProvider,
 } from "./prefHelpers";
+import { resolveLibraryChatAmbientContext } from "./ambientContext";
 import { resolveMultiContextPlan } from "./multiContextPlanner";
 import {
   formatPaperCitationLabel,
@@ -9687,6 +9688,14 @@ async function buildAgentRuntimeRequest(
     // is temporarily unavailable.
   }
   const conversationInstanceID = registeredConversation?.instanceID;
+  // Library chat: mirror the open collection and the highlighted item from
+  // the library pane into the turn as ambient context (metadata refs only).
+  // Deliberately NOT fed into the attachment resource pool above — ambient
+  // collections can be huge and that pool enumerates child attachments.
+  const ambientLibraryContext = resolveLibraryChatAmbientContext({
+    conversationKind,
+    libraryID: requestLibraryID,
+  });
   return {
     conversationKey: params.conversationKey,
     conversationGeneration: params.conversationGeneration,
@@ -9702,6 +9711,12 @@ async function buildAgentRuntimeRequest(
               Number(activePaperContext.libraryID || requestLibraryID),
             ) || undefined,
         }
+      : undefined,
+    ambientPaperContexts: ambientLibraryContext.paperContext
+      ? [ambientLibraryContext.paperContext]
+      : undefined,
+    ambientCollectionContexts: ambientLibraryContext.collectionContext
+      ? [ambientLibraryContext.collectionContext]
       : undefined,
     selectedTextContexts: params.selectedTextContexts,
     resolvedSelectedTextAnchors: params.resolvedSelectedTextAnchors,

@@ -156,6 +156,7 @@ import {
   setLockedGlobalConversationKey,
   buildPaperStateKey,
 } from "./prefHelpers";
+import { resolveLibraryChatAmbientContext } from "./ambientContext";
 import { refreshConfiguredProviderModelCatalogs } from "../../utils/modelProviders";
 import {
   refreshModelCapabilityRegistry,
@@ -4067,6 +4068,65 @@ export function setupHandlers(
     list.appendChild(chip);
   };
 
+  // Library chat ambient chips: read-only mirrors of the library-pane state
+  // (open collection, highlighted item). Never removable, never cached —
+  // they are recomputed from the live pane on every preview refresh.
+  const appendAmbientContextChips = (
+    ownerDoc: Document,
+    list: HTMLDivElement,
+    ambient: {
+      paperContext?: { title: string };
+      collectionContext?: { name: string };
+    },
+  ) => {
+    const appendChip = (
+      iconKind: "collection" | "paper",
+      title: string,
+      tooltip: string,
+    ) => {
+      const chip = createElement(
+        ownerDoc,
+        "div",
+        "llm-selected-context llm-ambient-context-chip",
+      );
+      chip.classList.add("collapsed");
+      const chipHeader = createElement(
+        ownerDoc,
+        "div",
+        "llm-image-preview-header llm-selected-context-header llm-collection-chip-header",
+      );
+      const chipLabel = createElement(
+        ownerDoc,
+        "span",
+        "llm-collection-chip-label",
+        { title: tooltip },
+      );
+      chipLabel.append(
+        createContextIcon(ownerDoc, iconKind, "llm-collection-chip-icon"),
+        createElement(ownerDoc, "span", "llm-collection-chip-title", {
+          textContent: title,
+        }),
+      );
+      chipHeader.append(chipLabel);
+      chip.appendChild(chipHeader);
+      list.appendChild(chip);
+    };
+    if (ambient.collectionContext) {
+      appendChip(
+        "collection",
+        ambient.collectionContext.name,
+        "Ambient context — the collection currently open in the library pane",
+      );
+    }
+    if (ambient.paperContext) {
+      appendChip(
+        "paper",
+        ambient.paperContext.title,
+        "Ambient context — the item currently selected in the library pane",
+      );
+    }
+  };
+
   const updatePaperPreview = () => {
     if (!item || !paperPreview || !paperPreviewList) return;
     closePaperChipMenu();
@@ -4080,12 +4140,20 @@ export function setupHandlers(
     const selectedCollections =
       selectedCollectionContextCache.get(itemId) || [];
     const selectedTags = selectedTagContextCache.get(itemId) || [];
+    const ambientLibraryChatContext = resolveLibraryChatAmbientContext({
+      conversationKind: isGlobalMode() ? "global" : "paper",
+      libraryID: Math.floor(Number(item.libraryID)) || 0,
+    });
     const hasAnyContext =
       selectedPapers.length > 0 ||
       selectedOtherRefs.length > 0 ||
       selectedCollections.length > 0 ||
       selectedTags.length > 0 ||
-      !!autoLoadedPaperContext;
+      !!autoLoadedPaperContext ||
+      Boolean(
+        ambientLibraryChatContext.paperContext ||
+        ambientLibraryChatContext.collectionContext,
+      );
     if (!hasAnyContext) {
       paperPreview.style.display = "none";
       paperPreviewList.innerHTML = "";
@@ -4112,6 +4180,10 @@ export function setupHandlers(
     paperPreviewList.innerHTML = "";
     const ownerDoc = body.ownerDocument;
     if (!ownerDoc) return;
+    appendAmbientContextChips(ownerDoc, paperPreviewList, {
+      paperContext: ambientLibraryChatContext.paperContext,
+      collectionContext: ambientLibraryChatContext.collectionContext,
+    });
     const effectivePaperCount =
       selectedPapers.length + (autoLoadedPaperContext ? 1 : 0);
     const paperCollapseState = getPaperContextCollapseState({

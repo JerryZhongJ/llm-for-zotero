@@ -50,6 +50,10 @@ export type AgentRequest = {
   activeItemId?: number;
   /** Input-only exact active paper/content-source identity from the UI. */
   activePaperContext?: PaperContextRef;
+  /** Library-pane ambient paper (highlighted item); auto-injected, never user-attached. */
+  ambientPaperContexts?: PaperContextRef[];
+  /** Library-pane ambient collection (the currently open collection); auto-injected. */
+  ambientCollectionContexts?: CollectionContextRef[];
   selectedTextContexts?: SelectedTextContext[];
   resolvedSelectedTextAnchors?: ResolvedSelectedTextAnchor[];
   selectedTexts?: string[];
@@ -583,7 +587,9 @@ export type LegacyPaperContextField =
   | "pinnedPaperContexts"
   | "selectedCollectionContexts"
   | "selectedTagContexts"
-  | "selectedTextPaperContexts";
+  | "selectedTextPaperContexts"
+  | "ambientPaperContexts"
+  | "ambientCollectionContexts";
 
 export type ResolvedAgentRuntimeRequest = Omit<
   AgentRuntimeRequestInput,

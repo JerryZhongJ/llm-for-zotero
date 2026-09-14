@@ -23,7 +23,8 @@ export type TurnPaperRole =
   | "selected"
   | "full_text"
   | "raw_pdf"
-  | "pinned";
+  | "pinned"
+  | "ambient";
 
 export type TurnScopedPaper = Readonly<{
   paper: TurnPaperRef;
@@ -41,6 +42,8 @@ export type TurnPaperScope = Readonly<{
   conversationKind: "global" | "paper";
   papers: readonly TurnScopedPaper[];
   collections: readonly Readonly<CollectionContextRef>[];
+  /** collectionId entries in `collections` injected from library-pane ambient state. */
+  ambientCollectionIds: readonly number[];
   tags: readonly Readonly<TagContextRef>[];
   selectedPassagePaperRefs: readonly SelectedPassagePaperRef[];
 }>;
@@ -70,6 +73,10 @@ export type TurnPaperScopeInput = Readonly<{
   conversationKind?: "global" | "paper";
   activeItemId?: number;
   activePaperContext?: PaperContextRef;
+  /** Library-pane ambient papers (metadata refs only; never user-attached). */
+  ambientPaperContexts?: readonly PaperContextRef[];
+  /** Library-pane ambient collection (the currently open collection). */
+  ambientCollectionContexts?: readonly CollectionContextRef[];
   selectedPaperContexts?: readonly PaperContextRef[];
   pdfPaperContexts?: readonly PaperContextRef[];
   fullTextPaperContexts?: readonly PaperContextRef[];
@@ -294,6 +301,7 @@ export function buildTurnPaperScope(
     ...(input.fullTextPaperContexts || []),
     ...(input.pdfPaperContexts || []),
     ...(input.pinnedPaperContexts || []),
+    ...(input.ambientPaperContexts || []),
   ].filter((paper): paper is PaperContextRef => Boolean(paper));
   if (allConcretePapers.length && !libraryID) {
     return {
@@ -381,6 +389,10 @@ export function buildTurnPaperScope(
     const failure = pushPaper(paper, "pinned", index);
     if (failure) return failure;
   }
+  for (const [index, paper] of (input.ambientPaperContexts || []).entries()) {
+    const failure = pushPaper(paper, "ambient", index);
+    if (failure) return failure;
+  }
 
   const collectionsResult = normalizeCollections(
     input.selectedCollectionContexts,
@@ -395,6 +407,31 @@ export function buildTurnPaperScope(
       resourceKind: "collection",
     };
   }
+  // Ambient collections: appended after user-selected ones; a user-selected
+  // collection with the same id wins and is NOT marked ambient. Cross-library
+  // ambient entries are silently dropped rather than failing the turn —
+  // ambient state must never reject a request.
+  const ambientCollectionsResult = normalizeCollections(
+    input.ambientCollectionContexts,
+    libraryID,
+  );
+  const selectedCollectionKeys = new Set(
+    collectionsResult.collections.map(
+      (entry) => `${entry.libraryID}:${entry.collectionId}`,
+    ),
+  );
+  const ambientCollections = ambientCollectionsResult.ok
+    ? ambientCollectionsResult.collections.filter(
+        (entry) =>
+          !selectedCollectionKeys.has(
+            `${entry.libraryID}:${entry.collectionId}`,
+          ),
+      )
+    : [];
+  const collections = [...collectionsResult.collections, ...ambientCollections];
+  const ambientCollectionIds = ambientCollections.map(
+    (entry) => entry.collectionId,
+  );
   const tagsResult = normalizeTags(input.selectedTagContexts, libraryID);
   if (!tagsResult.ok) {
     return {
@@ -465,7 +502,8 @@ export function buildTurnPaperScope(
     libraryName: normalizeText(input.libraryName) || undefined,
     conversationKind: input.conversationKind === "paper" ? "paper" : "global",
     papers,
-    collections: collectionsResult.collections,
+    collections,
+    ambientCollectionIds,
     tags: tagsResult.tags,
     selectedPassagePaperRefs,
   };

@@ -63,6 +63,8 @@ export function resolveAgentRuntimeRequest(
     conversationKind: input.conversationKind,
     activeItemId: input.activeItemId,
     activePaperContext: input.activePaperContext,
+    ambientPaperContexts: input.ambientPaperContexts,
+    ambientCollectionContexts: input.ambientCollectionContexts,
     selectedPaperContexts: input.selectedPaperContexts,
     pdfPaperContexts: input.pdfPaperContexts,
     fullTextPaperContexts: input.fullTextPaperContexts,
@@ -82,6 +84,8 @@ export function resolveAgentRuntimeRequest(
 
   const {
     activePaperContext: _activePaperContext,
+    ambientPaperContexts: _ambientPaperContexts,
+    ambientCollectionContexts: _ambientCollectionContexts,
     selectedPaperContexts: _selectedPaperContexts,
     pdfPaperContexts: _pdfPaperContexts,
     fullTextPaperContexts: _fullTextPaperContexts,
@@ -96,6 +100,8 @@ export function resolveAgentRuntimeRequest(
     ...rest
   } = input;
   void _activePaperContext;
+  void _ambientPaperContexts;
+  void _ambientCollectionContexts;
   void _selectedPaperContexts;
   void _pdfPaperContexts;
   void _fullTextPaperContexts;

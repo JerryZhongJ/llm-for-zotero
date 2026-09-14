@@ -45,8 +45,9 @@ export type PaperContentSourceMode =
 export type ModelInputMode = "text_only" | "vision_allowed";
 
 export type AdvancedModelParams = {
-  temperature: number;
-  maxTokens: number;
+  /** Unset means "follow the provider default" — the value is omitted from requests. */
+  temperature?: number;
+  maxTokens?: number;
   /** True when the user deliberately set maxTokens, even to the default value. */
   maxTokensExplicit?: boolean;
   inputTokenCap?: number;

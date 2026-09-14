@@ -279,6 +279,96 @@ describe("TurnPaperScope", function () {
     );
   });
 
+  it("marks ambient papers with the ambient role and merges with selected", function () {
+    const ambientOnly: PaperContextRef = {
+      libraryID: 1,
+      itemId: 70,
+      contextItemId: 71,
+      title: "Highlighted item",
+    };
+    const resolved = resolveAgentRuntimeRequest(
+      input({
+        conversationKind: "global",
+        selectedPaperContexts: [addedPaper],
+        ambientPaperContexts: [ambientOnly, addedPaper],
+      }),
+    );
+
+    assert.deepEqual(
+      resolved.turnPaperScope.papers.map((entry) => ({
+        key: buildTurnPaperKey(entry.paper),
+        roles: entry.roles,
+      })),
+      [
+        { key: "1:20:21", roles: ["selected", "ambient"] },
+        { key: "1:70:71", roles: ["ambient"] },
+      ],
+    );
+    assert.notProperty(resolved, "ambientPaperContexts");
+    assert.notProperty(resolved, "ambientCollectionContexts");
+  });
+
+  it("appends ambient collections after selected ones and marks only ambient ids", function () {
+    const resolved = resolveAgentRuntimeRequest(
+      input({
+        conversationKind: "global",
+        selectedCollectionContexts: [
+          { collectionId: 5, libraryID: 1, name: "User-selected" },
+        ],
+        ambientCollectionContexts: [
+          { collectionId: 5, libraryID: 1, name: "Same id wins as selected" },
+          { collectionId: 6, libraryID: 1, name: "Open collection" },
+        ],
+      }),
+    );
+
+    assert.deepEqual(
+      resolved.turnPaperScope.collections.map((entry) => entry.collectionId),
+      [5, 6],
+    );
+    assert.deepEqual(resolved.turnPaperScope.ambientCollectionIds, [6]);
+  });
+
+  it("silently drops cross-library ambient collections instead of failing the turn", function () {
+    const resolved = resolveAgentRuntimeRequest(
+      input({
+        conversationKind: "global",
+        ambientCollectionContexts: [
+          { collectionId: 9, libraryID: 7, name: "Other library" },
+        ],
+      }),
+    );
+
+    assert.deepEqual(resolved.turnPaperScope.collections, []);
+    assert.deepEqual(resolved.turnPaperScope.ambientCollectionIds, []);
+  });
+
+  it("renders ambient provenance in the turn context envelope without changing these-papers semantics", function () {
+    const resolved = resolveAgentRuntimeRequest(
+      input({
+        conversationKind: "global",
+        selectedPaperContexts: undefined,
+        ambientPaperContexts: [
+          {
+            libraryID: 1,
+            itemId: 80,
+            contextItemId: 81,
+            title: "Highlighted paper",
+          },
+        ],
+        ambientCollectionContexts: [
+          { collectionId: 3, libraryID: 1, name: "Open collection" },
+        ],
+      }),
+    );
+
+    const block = buildVisibleTurnContextBlock(resolved);
+    assert.include(block, "ambient selection");
+    assert.include(block, 'source="ambient context (current collection)"');
+    assert.include(block, '"these papers"');
+    assert.include(block, "never count as");
+  });
+
   it("links local PDF transport to one existing raw-PDF paper", function () {
     const rawPaper = {
       ...addedPaper,

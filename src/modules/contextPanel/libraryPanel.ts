@@ -32,6 +32,7 @@ import {
   applyPanelFontScale,
 } from "./prefHelpers";
 import { buildUI } from "./buildUI";
+import { getFirstSelectedLibraryContextItem } from "./ambientContext";
 import { setupHandlers, disposeSetupHandlers } from "./setupHandlers";
 import { ensureConversationLoaded, refreshChat } from "./chat";
 import { renderShortcuts } from "./shortcuts";
@@ -87,22 +88,12 @@ function getLibraryPanelSystem(): ConversationSystem {
 function getFirstSelectedContextItem(
   win: _ZoteroTypes.MainWindow,
 ): Zotero.Item | null {
-  try {
-    const pane = (
-      win as unknown as {
-        ZoteroPane?: { getSelectedItems?: () => Zotero.Item[] };
-      }
-    ).ZoteroPane;
-    const items = pane?.getSelectedItems?.() || [];
-    return (
-      items.find(
-        (item) =>
-          item && (item.isRegularItem?.() || item.isAttachment?.() === true),
-      ) || null
-    );
-  } catch {
-    return null;
-  }
+  const pane = (
+    win as unknown as {
+      ZoteroPane?: { getSelectedItems?: () => Zotero.Item[] };
+    }
+  ).ZoteroPane;
+  return getFirstSelectedLibraryContextItem(pane);
 }
 
 function clampLibraryPanelHeight(value: number): number {
@@ -278,6 +269,14 @@ async function ensurePanelContainer(
   container.id = LIBRARY_PANEL_ID;
   container.style.height = `${getLibraryPanelHeightPref()}px`;
   container.style.minHeight = `${LIBRARY_PANEL_MIN_HEIGHT_PX}px`;
+  // The panel lives inside the item tree's React root (#item-tree-main-default),
+  // which delegates keydown to the virtualized table — keys typed in the chat
+  // would otherwise toggle/move the item selection (space, arrows, Enter, …).
+  // Stop keyboard events at the panel boundary so they never reach that root.
+  const stopKeyboardPropagation = (event: Event) => event.stopPropagation();
+  for (const type of ["keydown", "keyup", "keypress"] as const) {
+    container.addEventListener(type, stopKeyboardPropagation);
+  }
   const resizer = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
     "div",
