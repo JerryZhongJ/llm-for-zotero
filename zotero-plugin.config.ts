@@ -12,17 +12,27 @@ const workflowTestsEnabled =
   agentLiveTestsEnabled ||
   process.env.LLM_FOR_ZOTERO_WORKFLOW_TESTS === "1";
 
+// GitHub Actions sets GITHUB_REPOSITORY to the repo the workflow runs on,
+// so a fork publishes its release, update feed, and download links to
+// itself instead of upstream (package.json's repository). Locally the
+// {{owner}}/{{repo}} placeholders keep resolving from package.json.
+const releaseRepository = process.env.GITHUB_REPOSITORY || "{{owner}}/{{repo}}";
+
 export default defineConfig({
   source: ["src", "addon"],
   dist: ".scaffold/build",
   name: pkg.config.addonName,
   id: pkg.config.addonID,
   namespace: pkg.config.addonRef,
-  updateURL: `https://github.com/{{owner}}/{{repo}}/releases/download/release/${
+  updateURL: `https://github.com/${releaseRepository}/releases/download/release/${
     pkg.version.includes("-") ? "update-beta.json" : "update.json"
   }`,
-  xpiDownloadLink:
-    "https://github.com/{{owner}}/{{repo}}/releases/download/v{{version}}/{{xpiName}}.xpi",
+  xpiDownloadLink: `https://github.com/${releaseRepository}/releases/download/v{{version}}/{{xpiName}}.xpi`,
+  release: {
+    github: {
+      repository: releaseRepository,
+    },
+  },
 
   build: {
     assets: ["addon/**/*.*"],
