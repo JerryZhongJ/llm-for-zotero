@@ -4,7 +4,7 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
-## Unreleased
+## 3.11.0 - 2026-09-14
 
 ### Added
 
