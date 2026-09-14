@@ -979,6 +979,7 @@ async function waitForPanelConversationChange(params: {
   previousConversationKind?: string;
   allowReusedDraft?: boolean;
   previousStatusText?: string;
+  previousMessageText?: string;
 }): Promise<WorkflowTestDiagnostics> {
   const startedAt = Date.now();
   // Generous deadline: the switch path does several DB round-trips, and a
@@ -993,9 +994,18 @@ async function waitForPanelConversationChange(params: {
     const kindChanged =
       params.previousConversationKind === undefined ||
       diagnostics.conversationKind !== params.previousConversationKind;
-    if (keyChanged && kindChanged) return diagnostics;
+    // The conversation key is computed from the mounted item and flips as
+    // soon as the new conversation is registered — before the chat box and
+    // context preview have re-rendered. Waiting for the rendered message
+    // text to move off the previous conversation keeps callers from
+    // asserting against the old conversation's DOM.
+    const contentSwitched =
+      params.previousMessageText === undefined ||
+      diagnostics.messageText !== params.previousMessageText;
+    if (keyChanged && kindChanged && contentSwitched) return diagnostics;
     if (
       params.allowReusedDraft &&
+      contentSwitched &&
       diagnostics.statusText !== params.previousStatusText &&
       /^(Reused existing new|Started new)/.test(diagnostics.statusText || "")
     ) {
@@ -1019,6 +1029,7 @@ async function startNewPanelConversation(
     previousConversationKey: before.conversationKey,
     allowReusedDraft: options?.allowReusedDraft,
     previousStatusText: before.statusText,
+    previousMessageText: before.messageText,
   });
 }
 
@@ -2035,7 +2046,11 @@ function readStandaloneDiagnostics(): WorkflowTestStandaloneDiagnostics {
       contentArea?.querySelectorAll(
         "#llm-paper-context-preview .llm-collection-chip-title",
       ) || [],
-    ).map((node) => ((node as Element).textContent || "").trim()),
+    )
+      // Ambient chips mirror the library-pane state; they are not
+      // user-attached context and never belong in these labels.
+      .filter((node) => !(node as Element).closest(".llm-ambient-context-chip"))
+      .map((node) => ((node as Element).textContent || "").trim()),
     composerTagLabels: Array.from(
       contentArea?.querySelectorAll(
         "#llm-paper-context-preview .llm-tag-chip-title",
@@ -2569,7 +2584,11 @@ async function getDiagnostics(
       body?.querySelectorAll(
         "#llm-paper-context-preview .llm-collection-chip-title",
       ) || [],
-    ).map((node) => ((node as Element).textContent || "").trim()),
+    )
+      // Ambient chips mirror the library-pane state; they are not
+      // user-attached context and never belong in these labels.
+      .filter((node) => !(node as Element).closest(".llm-ambient-context-chip"))
+      .map((node) => ((node as Element).textContent || "").trim()),
     composerTagLabels: Array.from(
       body?.querySelectorAll(
         "#llm-paper-context-preview .llm-tag-chip-title",
