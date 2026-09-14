@@ -1,11 +1,7 @@
 import { config } from "../../package.json";
 import { t } from "../utils/i18n";
 import { WEBCHAT_TARGETS } from "../webchat/types";
-import {
-  DEFAULT_MAX_TOKENS,
-  DEFAULT_SYSTEM_PROMPT,
-  DEFAULT_TEMPERATURE,
-} from "../utils/llmDefaults";
+import { DEFAULT_SYSTEM_PROMPT } from "../utils/llmDefaults";
 import { HTML_NS, el, iconBtn } from "../utils/domHelpers";
 import { registerAddonDialog } from "../utils/dialogRegistry";
 import {
@@ -2044,13 +2040,15 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
 
         const tempField = makeCompactField(
           t("Temperature"),
-          `${modelEntry.temperature ?? DEFAULT_TEMPERATURE}`,
-          `${DEFAULT_TEMPERATURE}`,
+          modelEntry.temperature !== undefined
+            ? `${modelEntry.temperature}`
+            : "",
+          "provider default",
         );
         const maxTokField = makeCompactField(
           t("Max tokens"),
-          `${modelEntry.maxTokens ?? DEFAULT_MAX_TOKENS}`,
-          `${DEFAULT_MAX_TOKENS}`,
+          modelEntry.maxTokens !== undefined ? `${modelEntry.maxTokens}` : "",
+          "provider default",
         );
         const inputCapField = makeCompactField(
           t("Input cap"),
@@ -2243,8 +2241,12 @@ export async function registerPrefsScripts(_window: Window | undefined | null) {
           )
             ? protocolFieldSelect.value
             : undefined;
-          tempField.input.value = `${modelEntry.temperature}`;
-          maxTokField.input.value = `${modelEntry.maxTokens}`;
+          tempField.input.value =
+            modelEntry.temperature !== undefined
+              ? `${modelEntry.temperature}`
+              : "";
+          maxTokField.input.value =
+            modelEntry.maxTokens !== undefined ? `${modelEntry.maxTokens}` : "";
           inputCapField.input.value =
             modelEntry.inputTokenCap !== undefined
               ? `${modelEntry.inputTokenCap}`

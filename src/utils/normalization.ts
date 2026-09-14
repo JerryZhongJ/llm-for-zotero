@@ -4,15 +4,13 @@
  * Accepts both `number` and `string` inputs so the same function can be used
  * by the LLM client (numbers), the preferences UI (strings), and the context
  * panel (strings).
+ *
+ * Unset values stay unset: the plugin imposes no sampling or output defaults,
+ * so an unset temperature/max-tokens is omitted from the request and the
+ * provider's own default applies.
  */
 
-import {
-  DEFAULT_MAX_TOKENS,
-  DEFAULT_TEMPERATURE,
-  DEFAULT_INPUT_TOKEN_CAP,
-  MAX_ALLOWED_TOKENS,
-  MAX_ALLOWED_INPUT_TOKEN_CAP,
-} from "./llmDefaults";
+import { MAX_ALLOWED_TOKENS, MAX_ALLOWED_INPUT_TOKEN_CAP } from "./llmDefaults";
 import {
   getModelOutputTokenLimit as getCatalogOutputTokenLimit,
   type ModelCapabilityIdentity,
@@ -25,56 +23,60 @@ export function getModelOutputTokenLimit(
   return getCatalogOutputTokenLimit(modelName || "", identity);
 }
 
-/** Clamp a temperature value to [0, 2], falling back to DEFAULT_TEMPERATURE. */
-export function normalizeTemperature(value?: number | string): number {
+/**
+ * The catalog returns MAX_ALLOWED_TOKENS as its "unknown" sentinel; treat that
+ * as no known limit rather than a usable number.
+ */
+export function isKnownOutputTokenLimit(value: number): boolean {
+  return Number.isFinite(value) && value > 0 && value < MAX_ALLOWED_TOKENS;
+}
+
+/** Clamp a temperature value to [0, 2], preserving an unset value. */
+export function normalizeTemperature(
+  value?: number | string | null,
+): number | undefined {
+  // Number(null) === 0, so null must be treated as unset, not as zero.
+  if (value === null || value === undefined) return undefined;
   const parsed =
     typeof value === "string" ? Number.parseFloat(value) : Number(value);
-  if (!Number.isFinite(parsed)) return DEFAULT_TEMPERATURE;
+  if (!Number.isFinite(parsed)) return undefined;
   return Math.min(2, Math.max(0, parsed));
 }
 
 /**
  * Resolve the temperature to send to a Gemini model, or undefined to omit it.
  *
- * Google's Gemini 3 guidance is to leave temperature at its server-side
- * default of 1.0 — lower values cause looping and degraded reasoning — so for
- * Gemini 3+ models an unset temperature is omitted from the payload instead
- * of falling back to DEFAULT_TEMPERATURE.  Explicit user values are always
- * respected, and older Gemini generations keep the existing default.
+ * An unset temperature is always omitted so Google's server-side default
+ * applies (Gemini 3 guidance: lower values cause looping and degraded
+ * reasoning). Explicit user values are always respected.
  */
 export function resolveGeminiTemperature(
-  model: string | undefined,
+  _model: string | undefined,
   value?: number | string,
 ): number | undefined {
-  const parsed =
-    typeof value === "string" ? Number.parseFloat(value) : Number(value);
-  if (Number.isFinite(parsed)) return Math.min(2, Math.max(0, parsed));
-  const generation = /(^|[/:@])gemini-(\d+)/i.exec(model || "");
-  if (generation && Number.parseInt(generation[2], 10) >= 3) return undefined;
-  return DEFAULT_TEMPERATURE;
+  return normalizeTemperature(value);
 }
 
-/** Clamp a max-tokens value to [1, MAX_ALLOWED_TOKENS], falling back to DEFAULT_MAX_TOKENS. */
-export function normalizeMaxTokens(value?: number | string): number {
+/** Clamp a max-tokens value to [1, MAX_ALLOWED_TOKENS], preserving an unset value. */
+export function normalizeMaxTokens(
+  value?: number | string | null,
+): number | undefined {
   const parsed =
     typeof value === "string"
       ? Number.parseInt(value, 10)
       : Math.floor(Number(value));
-  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_TOKENS;
+  if (!Number.isFinite(parsed) || parsed < 1) return undefined;
   return Math.min(parsed, MAX_ALLOWED_TOKENS);
 }
 
 /** Clamp max-tokens using a model-specific output limit when known. */
 export function normalizeMaxTokensForModel(
-  value?: number | string,
+  value?: number | string | null,
   modelName?: string,
   identity?: Omit<ModelCapabilityIdentity, "model">,
-): number {
-  const parsed =
-    typeof value === "string"
-      ? Number.parseInt(value, 10)
-      : Math.floor(Number(value));
-  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_TOKENS;
+): number | undefined {
+  const parsed = normalizeMaxTokens(value);
+  if (parsed === undefined) return undefined;
   return Math.min(
     parsed,
     getCatalogOutputTokenLimit(modelName || "", identity),
@@ -84,18 +86,18 @@ export function normalizeMaxTokensForModel(
 /** Clamp an input-token-cap value to [1, MAX_ALLOWED_INPUT_TOKEN_CAP], with configurable fallback. */
 export function normalizeInputTokenCap(
   value?: number | string,
-  fallback: number = DEFAULT_INPUT_TOKEN_CAP,
-): number {
+  fallback?: number,
+): number | undefined {
   const parsed =
     typeof value === "string"
       ? Number.parseInt(value, 10)
       : Math.floor(Number(value));
   const fallbackFloor = Math.floor(Number(fallback));
-  const normalizedFallback =
-    Number.isFinite(fallbackFloor) && fallbackFloor >= 1
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return Number.isFinite(fallbackFloor) && fallbackFloor >= 1
       ? Math.min(fallbackFloor, MAX_ALLOWED_INPUT_TOKEN_CAP)
-      : DEFAULT_INPUT_TOKEN_CAP;
-  if (!Number.isFinite(parsed) || parsed < 1) return normalizedFallback;
+      : undefined;
+  }
   return Math.min(parsed, MAX_ALLOWED_INPUT_TOKEN_CAP);
 }
 

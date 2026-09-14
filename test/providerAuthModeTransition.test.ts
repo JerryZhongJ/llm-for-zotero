@@ -181,8 +181,8 @@ describe("provider auth-mode transitions", function () {
     for (const next of [fromWebChat, fromDirect]) {
       assert.equal(next.authMode, "api_key");
       if (next.authMode !== "api_key") assert.fail("expected API provider");
-      assert.equal(next.models[0].temperature, 0.3);
-      assert.equal(next.models[0].maxTokens, 4096);
+      assert.isUndefined(next.models[0].temperature);
+      assert.isUndefined(next.models[0].maxTokens);
       assert.isUndefined(next.models[0].inputTokenCap);
       assert.isUndefined(next.models[0].profileOverride);
     }

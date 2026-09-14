@@ -401,11 +401,11 @@ describe("ollama native protocol", function () {
         -1,
         "a user options.* entry must not drop num_predict",
       );
-      assert.isNumber(
-        options.num_ctx,
-        "losing num_ctx silently reinstates context truncation",
-      );
-      assert.isNumber(options.temperature);
+      // The plugin imposes no default caps: with no model capability and no
+      // user setting, num_ctx and temperature are omitted and Ollama's own
+      // runtime defaults apply.
+      assert.isUndefined(options.num_ctx);
+      assert.isUndefined(options.temperature);
     });
 
     it("allocates Ollama num_ctx from the explicit qwen3.8-max input cap", async function () {

@@ -231,7 +231,9 @@ describe("modelProviders", function () {
     const entries = getRuntimeModelEntries();
 
     assert.isTrue(entries[0].advanced.maxTokensExplicit);
-    assert.isUndefined(entries[1].advanced.maxTokensExplicit);
+    // Any stored max-tokens is a deliberate choice now that the plugin has
+    // no default to compare against, so provenance round-trips as explicit.
+    assert.isTrue(entries[1].advanced.maxTokensExplicit);
     assert.equal(entries[2].advanced.maxTokens, 250000);
     assert.isTrue(entries[2].advanced.maxTokensExplicit);
     assert.equal(entries[3].advanced.maxTokens, 200000);
@@ -964,7 +966,9 @@ describe("modelProviders", function () {
         authMode: "codex_auth",
       },
     );
-    assert.equal(fallbackLimit.limitTokens, 256000);
+    // Unknown models carry no plugin-side cap any more — the provider
+    // enforces its own limit.
+    assert.equal(fallbackLimit.limitTokens, Number.POSITIVE_INFINITY);
     assert.equal(fallbackLimit.source, "default");
     await loadCodexDirectCatalog({
       authPath: "/test/codex/auth.json",
@@ -1005,8 +1009,8 @@ describe("modelProviders", function () {
     assert.equal(entries[0].catalogAvailability, "saved-unavailable");
     assert.equal(entries[1].catalogAvailability, "available");
     assert.equal(entries[1].providerLabel, "Codex Direct (Legacy)");
-    assert.equal(entries[1].advanced.temperature, 0.3);
-    assert.equal(entries[1].advanced.maxTokens, 4096);
+    assert.isUndefined(entries[1].advanced.temperature);
+    assert.isUndefined(entries[1].advanced.maxTokens);
     assert.isUndefined(entries[1].advanced.inputTokenCap);
     assert.notInclude(
       entries.map((entry) => entry.model),

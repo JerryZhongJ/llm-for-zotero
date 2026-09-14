@@ -1,5 +1,4 @@
 import { config } from "../../package.json";
-import { DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE } from "./llmDefaults";
 import {
   normalizeMaxTokens,
   normalizeOptionalInputTokenCap,
@@ -34,8 +33,9 @@ export type LegacyModelSlotKey =
   | "quaternary";
 
 export type AdvancedModelConfig = {
-  temperature: number;
-  maxTokens: number;
+  /** Unset means "follow the provider default" — the value is omitted from requests. */
+  temperature?: number;
+  maxTokens?: number;
   /** Distinguishes an untouched default from an explicit equal-valued choice. */
   maxTokensExplicit?: boolean;
   inputTokenCap?: number;
@@ -236,19 +236,12 @@ function normalizeAdvancedModelConfig(
   // enforced where the override is consumed — `applyProfileOverride` for
   // capabilities, `resolveUserExtraBody` for request parameters.
   const profileOverride = normalizeProfileOverride(value?.profileOverride);
-  const maxTokens = normalizeMaxTokens(
-    `${value?.maxTokens ?? DEFAULT_MAX_TOKENS}`,
-  );
+  const maxTokens = normalizeMaxTokens(value?.maxTokens ?? null);
   const maxTokensExplicit =
     value?.maxTokensExplicit === true ||
-    (value?.maxTokensExplicit === undefined &&
-      value?.maxTokens !== undefined &&
-      value?.maxTokens !== null &&
-      maxTokens !== DEFAULT_MAX_TOKENS);
+    (value?.maxTokensExplicit === undefined && maxTokens !== undefined);
   return {
-    temperature: normalizeTemperature(
-      `${value?.temperature ?? DEFAULT_TEMPERATURE}`,
-    ),
+    temperature: normalizeTemperature(value?.temperature ?? null),
     maxTokens,
     ...(maxTokensExplicit ? { maxTokensExplicit: true } : {}),
     inputTokenCap: normalizeOptionalInputTokenCap(value?.inputTokenCap),
@@ -618,8 +611,10 @@ function normalizeGroupModel(
   const modelName = normalizeString(rawModel.model);
   const advanced = normalizeAdvancedModelConfig(
     {
-      temperature: Number(rawModel.temperature),
-      maxTokens: Number(rawModel.maxTokens),
+      // Pass through as-is: Number(null) coerces a missing value to 0, which
+      // would silently become an explicit-looking setting instead of unset.
+      temperature: rawModel.temperature as number | string | null | undefined,
+      maxTokens: rawModel.maxTokens as number | string | null | undefined,
       maxTokensExplicit:
         typeof rawModel.maxTokensExplicit === "boolean"
           ? rawModel.maxTokensExplicit
@@ -761,12 +756,10 @@ function resolveLegacyModelSlot(
         ).trim()
       : getStringPref(`apiKey${suffix}`).trim();
   const temperature = normalizeTemperature(
-    getStringPref(`temperature${suffix}`) || `${DEFAULT_TEMPERATURE}`,
+    getStringPref(`temperature${suffix}`) || null,
   );
   const storedMaxTokens = getStringPref(`maxTokens${suffix}`);
-  const maxTokens = normalizeMaxTokens(
-    storedMaxTokens || `${DEFAULT_MAX_TOKENS}`,
-  );
+  const maxTokens = normalizeMaxTokens(storedMaxTokens || null);
   const inputTokenCap = normalizeOptionalInputTokenCap(
     getStringPref(`inputTokenCap${suffix}`),
   );
@@ -780,7 +773,7 @@ function resolveLegacyModelSlot(
     model: modelName,
     temperature,
     maxTokens,
-    ...(storedMaxTokens && maxTokens !== DEFAULT_MAX_TOKENS
+    ...(storedMaxTokens && maxTokens !== undefined
       ? { maxTokensExplicit: true }
       : {}),
     inputTokenCap,

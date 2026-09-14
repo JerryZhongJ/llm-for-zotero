@@ -106,11 +106,11 @@ describe("gemini temperature policy", function () {
     assert.equal(generationConfig.temperature, 0.5);
   });
 
-  it("keeps the default temperature for Gemini 2.5 chat requests", async function () {
+  it("omits an unset temperature for Gemini 2.5 chat requests", async function () {
     const captured = mockFetchCapturingBody();
     await callLLMStream(chatParams("gemini-2.5-flash"), () => undefined);
     const generationConfig = generationConfigOf(captured.bodies[0]);
-    assert.equal(generationConfig.temperature, 0.3);
+    assert.isUndefined(generationConfig.temperature);
   });
 
   const tools: ToolSpec[] = [
@@ -162,7 +162,7 @@ describe("gemini temperature policy", function () {
     assert.equal(generationConfig.temperature, 0.7);
   });
 
-  it("keeps the default temperature for Gemini 2.5 agent requests", async function () {
+  it("omits an unset temperature for Gemini 2.5 agent requests", async function () {
     const captured = mockFetchCapturingBody();
     const adapter = new GeminiNativeAgentAdapter();
     await adapter.runStep({
@@ -171,6 +171,6 @@ describe("gemini temperature policy", function () {
       tools,
     });
     const generationConfig = generationConfigOf(captured.bodies[0]);
-    assert.equal(generationConfig.temperature, 0.3);
+    assert.isUndefined(generationConfig.temperature);
   });
 });

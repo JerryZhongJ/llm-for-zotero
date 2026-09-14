@@ -33,7 +33,10 @@ describe("modelInputCap", function () {
       assert.equal(getModelInputTokenLimit("gemini-3-pro"), 1000000);
       assert.equal(getModelInputTokenLimit("qwen-long-latest"), 10000000);
       assert.equal(getModelInputTokenLimit("qwen3.8-max"), 1000000);
-      assert.equal(getModelInputTokenLimit("unknown-custom-model"), 256000);
+      assert.equal(
+        getModelInputTokenLimit("unknown-custom-model"),
+        Number.POSITIVE_INFINITY,
+      );
     });
   });
 

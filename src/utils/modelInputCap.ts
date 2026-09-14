@@ -6,7 +6,6 @@
  * failures before sending requests.
  */
 
-import { DEFAULT_INPUT_TOKEN_CAP } from "./llmDefaults";
 import {
   normalizeInputTokenCap,
   normalizeOptionalInputTokenCap,
@@ -65,7 +64,13 @@ export type ContextEstimateMessage = {
   }>;
 };
 
-export const DEFAULT_MODEL_INPUT_TOKEN_LIMIT = DEFAULT_INPUT_TOKEN_CAP;
+/**
+ * When neither the user nor the model capability catalog knows a model's
+ * input limit, no plugin-side cap is imposed — the provider is left to
+ * enforce its own limit. Infinity keeps the budget math total (estimates
+ * never exceed it) without inventing a number.
+ */
+export const DEFAULT_MODEL_INPUT_TOKEN_LIMIT = Number.POSITIVE_INFINITY;
 export const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
 
 const IMAGE_PART_ESTIMATED_TOKENS = 1_024;
@@ -436,14 +441,16 @@ export function resolveModelInputTokenLimit(
       : undefined;
   if (profileLimitTokens) {
     return {
-      limitTokens: normalizeInputTokenCap(profileLimitTokens),
+      limitTokens:
+        normalizeInputTokenCap(profileLimitTokens) ?? profileLimitTokens,
       source: "user",
       ...(detectedLimitTokens ? { detectedLimitTokens } : {}),
     };
   }
   if (detectedLimitTokens) {
     return {
-      limitTokens: normalizeInputTokenCap(detectedLimitTokens),
+      limitTokens:
+        normalizeInputTokenCap(detectedLimitTokens) ?? detectedLimitTokens,
       source: capabilities.provenance.limits || capabilities.source,
       detectedLimitTokens,
     };

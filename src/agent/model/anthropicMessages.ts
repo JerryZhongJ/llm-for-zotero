@@ -5,7 +5,10 @@ import {
   postWithReasoningFallback,
   type ReasoningSelection,
 } from "../../utils/llmClient";
-import { normalizeTemperature } from "../../utils/normalization";
+import {
+  normalizeMaxTokensForModel,
+  normalizeTemperature,
+} from "../../utils/normalization";
 import {
   buildProviderTransportHeaders,
   resolveProviderTransportEndpoint,
@@ -768,20 +771,32 @@ export class AnthropicMessagesAgentAdapter implements AgentModelAdapter {
         systemCacheControl,
       );
       const toolsPayload = buildAnthropicTools(params.tools, toolCacheControl);
+      // Anthropic requires max_tokens; an unset value falls back to the
+      // catalogued model limit and is only omitted when even that is
+      // unknown (the provider then reports it, no silent plugin default).
+      const anthropicMaxTokens =
+        maxTokens !== undefined
+          ? maxTokens
+          : normalizeMaxTokensForModel(Number.MAX_SAFE_INTEGER, request.model, {
+              apiBase: request.apiBase,
+              protocol: "anthropic_messages",
+              profileOverride: request.advanced?.profileOverride,
+            });
+      const temperature = normalizeTemperature(request.advanced?.temperature);
       return {
         model: request.model,
-        max_tokens: maxTokens,
+        ...(anthropicMaxTokens !== undefined
+          ? { max_tokens: anthropicMaxTokens }
+          : {}),
         messages: applyTailMessageCacheControl(messages, systemCacheControl),
         system,
         tools: toolsPayload,
         tool_choice: { type: "auto" },
         stream: true,
         ...reasoningPayload.extra,
-        ...(reasoningPayload.omitTemperature
+        ...(reasoningPayload.omitTemperature || temperature === undefined
           ? {}
-          : {
-              temperature: normalizeTemperature(request.advanced?.temperature),
-            }),
+          : { temperature }),
       };
     };
     const url = resolveProviderTransportEndpoint({

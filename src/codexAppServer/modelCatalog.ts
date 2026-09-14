@@ -1,5 +1,4 @@
 import type { RuntimeModelEntry } from "../utils/modelProviders";
-import { DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE } from "../utils/llmDefaults";
 import {
   buildCodexReasoningChoices,
   buildCodexRuntimeModelCandidates,
@@ -226,10 +225,9 @@ function createRuntimeModelEntry(params: {
     providerLabel: CODEX_APP_SERVER_PROVIDER_LABEL,
     providerOrder: -1,
     displayModelLabel: params.displayModelLabel,
-    advanced: {
-      temperature: DEFAULT_TEMPERATURE,
-      maxTokens: DEFAULT_MAX_TOKENS,
-    },
+    // Codex runs its own runtime; sampling/output limits are left unset so
+    // the runtime's defaults apply.
+    advanced: {},
   };
 }
 

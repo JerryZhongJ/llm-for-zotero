@@ -5,7 +5,7 @@
  */
 
 import { config } from "../../package.json";
-import { DEFAULT_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from "./llmDefaults";
+import { DEFAULT_SYSTEM_PROMPT } from "./llmDefaults";
 import {
   getAnthropicReasoningProfileForModel,
   getDeepseekReasoningProfileForModel,
@@ -61,6 +61,7 @@ import {
 import { pathToFileUrl } from "./localPath";
 import { fingerprintSecret } from "./secretFingerprint";
 import {
+  isKnownOutputTokenLimit,
   normalizeMaxTokens,
   normalizeTemperature,
   normalizeMaxTokensForModel,
@@ -1274,15 +1275,16 @@ export function estimateAvailableContextBudget(params: {
   const limitTokens = resolvedInputLimit.limitTokens;
   const modelLimitTokens = limitTokens;
   const softLimitTokens = Math.max(1, Math.floor(limitTokens * 0.9));
-  const outputReserveTokens = normalizeMaxTokensForRequest({
-    value: params.maxTokens,
-    maxTokensExplicit: params.maxTokensExplicit,
-    model: normalizedModel,
-    apiBase: params.apiBase,
-    protocol: params.providerProtocol,
-    authMode: params.authMode,
-    profileOverride: params.profileOverride,
-  });
+  const outputReserveTokens =
+    normalizeMaxTokensForRequest({
+      value: params.maxTokens,
+      maxTokensExplicit: params.maxTokensExplicit,
+      model: normalizedModel,
+      apiBase: params.apiBase,
+      protocol: params.providerProtocol,
+      authMode: params.authMode,
+      profileOverride: params.profileOverride,
+    }) ?? 0;
   const reasoningReserveTokens = getReasoningReserveTokens(params.reasoning);
 
   const baseMessages = buildMessages(
@@ -1525,14 +1527,45 @@ function resolveUnterminatedThought(state: ThoughtTagState): {
   return { asAnswer: !state.inThought, text };
 }
 
-function buildTokenParam(model: string, maxTokens: number) {
+function buildTokenParam(model: string, maxTokens: number | undefined) {
+  if (maxTokens === undefined) return {};
   return usesMaxCompletionTokens(model)
     ? { max_completion_tokens: maxTokens }
     : { max_tokens: maxTokens };
 }
 
-function buildResponsesTokenParam(maxTokens: number) {
+function buildResponsesTokenParam(maxTokens: number | undefined) {
+  if (maxTokens === undefined) return {};
   return { max_output_tokens: maxTokens };
+}
+
+/**
+ * Anthropic's Messages API requires max_tokens. When the user has not set
+ * one, use the model's catalogued output limit; if the catalog does not know
+ * the model either, the field is omitted and the provider's own validation
+ * tells the user to set it — no silent plugin default.
+ */
+function resolveAnthropicRequiredMaxTokens(
+  maxTokens: number | undefined,
+  model: string,
+  identity?: {
+    apiBase?: string;
+    profileOverride?: ModelProfileOverride;
+  },
+): number | undefined {
+  if (maxTokens !== undefined) return maxTokens;
+  const catalogLimit = normalizeMaxTokensForModel(
+    Number.MAX_SAFE_INTEGER,
+    model,
+    {
+      apiBase: identity?.apiBase,
+      protocol: "anthropic_messages",
+      profileOverride: identity?.profileOverride,
+    },
+  );
+  return catalogLimit !== undefined && isKnownOutputTokenLimit(catalogLimit)
+    ? catalogLimit
+    : undefined;
 }
 
 export function normalizeMaxTokensForRequest(params: {
@@ -1543,7 +1576,7 @@ export function normalizeMaxTokensForRequest(params: {
   protocol?: ProviderProtocol;
   authMode?: ModelProviderAuthMode;
   profileOverride?: ModelProfileOverride;
-}): number {
+}): number | undefined {
   if (params.maxTokensExplicit) return normalizeMaxTokens(params.value);
   const normalized = normalizeMaxTokensForModel(params.value, params.model, {
     provider: params.apiBase
@@ -2270,8 +2303,8 @@ function buildReasoningControlPayload(
 function buildAnthropicMessagesPayload(params: {
   model: string;
   messages: ChatMessage[];
-  effectiveMaxTokens: number;
-  effectiveTemperature: number;
+  effectiveMaxTokens: number | undefined;
+  effectiveTemperature: number | undefined;
   stream: boolean;
   reasoning?: ReasoningConfig;
   apiBase?: string;
@@ -2344,9 +2377,21 @@ function buildAnthropicMessagesPayload(params: {
       content,
     };
   });
+  // Anthropic's Messages API requires max_tokens; when unset, use the
+  // catalogued model limit, and only omit it when even that is unknown.
+  const anthropicMaxTokens = resolveAnthropicRequiredMaxTokens(
+    params.effectiveMaxTokens,
+    params.model,
+    {
+      apiBase: params.apiBase,
+      profileOverride: params.profileOverride,
+    },
+  );
   const payload: Record<string, unknown> = {
     model: params.model,
-    max_tokens: params.effectiveMaxTokens,
+    ...(anthropicMaxTokens !== undefined
+      ? { max_tokens: anthropicMaxTokens }
+      : {}),
     messages: nonSystemMessages,
   };
   const reasoningPayload = buildReasoningPayload(
@@ -2356,7 +2401,7 @@ function buildAnthropicMessagesPayload(params: {
     params.apiBase,
     "anthropic_messages",
     {
-      maxTokens: params.effectiveMaxTokens,
+      maxTokens: anthropicMaxTokens,
       anthropicModeOverride: params.anthropicModeOverride,
       profileOverride: params.profileOverride,
     },
@@ -2373,7 +2418,10 @@ function buildAnthropicMessagesPayload(params: {
       ? [{ type: "text", text: systemText, cache_control: cacheControl }]
       : systemText;
   }
-  if (!reasoningPayload.omitTemperature) {
+  if (
+    !reasoningPayload.omitTemperature &&
+    params.effectiveTemperature !== undefined
+  ) {
     payload.temperature = params.effectiveTemperature;
   }
   if (params.stream) {
@@ -2485,7 +2533,7 @@ function buildGeminiNativePayload(params: {
   model: string;
   apiBase?: string;
   messages: ChatMessage[];
-  effectiveMaxTokens: number;
+  effectiveMaxTokens: number | undefined;
   /** Omitted from the payload when undefined (Gemini 3 server default). */
   temperature: number | undefined;
   reasoning?: ReasoningConfig;
@@ -2551,7 +2599,9 @@ function buildGeminiNativePayload(params: {
     contents,
     generationConfig: {
       ...(isRecord(extraGenerationConfig) ? extraGenerationConfig : {}),
-      maxOutputTokens: params.effectiveMaxTokens,
+      ...(params.effectiveMaxTokens !== undefined
+        ? { maxOutputTokens: params.effectiveMaxTokens }
+        : {}),
       ...(params.temperature !== undefined
         ? { temperature: params.temperature }
         : {}),
@@ -2824,19 +2874,15 @@ export function buildOllamaChatPayload(params: {
 }
 
 /**
- * Ollama's own `num_predict` default is -1 (unlimited). The plugin's 4096
- * default is a hazard here: a thinking model can spend the entire budget
- * reasoning and return empty content. Treat the untouched plugin default as
- * "unset" and let the server decide; any other value is the user's explicit
- * choice and is honoured.
+ * Ollama's own `num_predict` default is -1 (unlimited). An unset
+ * max-tokens maps straight to the server default; an explicit value is the
+ * user's choice and is honoured.
  */
 export function resolveOllamaNumPredict(
-  effectiveMaxTokens: number,
-  maxTokensExplicit = false,
+  effectiveMaxTokens: number | undefined,
+  _maxTokensExplicit = false,
 ): number {
-  return !maxTokensExplicit && effectiveMaxTokens === DEFAULT_MAX_TOKENS
-    ? -1
-    : effectiveMaxTokens;
+  return effectiveMaxTokens ?? -1;
 }
 
 /**
@@ -2970,8 +3016,8 @@ function createChatPayloadBuilder(params: {
   authMode: ModelProviderAuthMode;
   apiBase: string;
   providerProtocol?: ProviderProtocol;
-  effectiveTemperature: number;
-  effectiveMaxTokens: number;
+  effectiveTemperature: number | undefined;
+  effectiveMaxTokens: number | undefined;
   stream: boolean;
   contextCache?: ContextCachePlan;
   profileOverride?: ModelProfileOverride;
@@ -3036,9 +3082,10 @@ function createChatPayloadBuilder(params: {
         profileOverride: params.profileOverride,
       },
     );
-    const temperatureParam = reasoningPayload.omitTemperature
-      ? {}
-      : { temperature: effectiveTemperature };
+    const temperatureParam =
+      reasoningPayload.omitTemperature || effectiveTemperature === undefined
+        ? {}
+        : { temperature: effectiveTemperature };
     const cachePayloadHints = buildPromptCachePayloadHints(contextCache);
 
     const payload = useResponses
@@ -3536,7 +3583,7 @@ async function callNativeProtocol(params: {
   apiKey: string;
   model: string;
   messages: ChatMessage[];
-  effectiveMaxTokens: number;
+  effectiveMaxTokens: number | undefined;
   maxTokensExplicit?: boolean;
   /** Raw request temperature; protocol-specific defaults are applied here. */
   rawTemperature?: number | string;

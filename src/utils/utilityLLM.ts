@@ -371,7 +371,7 @@ export async function callUtilityLLM(
     authMode: params.authMode,
     profileOverride: params.profileOverride,
   });
-  if (maxTokens < requiredBudget) {
+  if (maxTokens !== undefined && maxTokens < requiredBudget) {
     return {
       ok: false,
       reason: "budget_unavailable",
