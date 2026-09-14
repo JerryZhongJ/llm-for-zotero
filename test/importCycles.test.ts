@@ -19,6 +19,10 @@ function formatCycles(cycles: string[][]): string[] {
 
 describe("import cycles", function () {
   it("does not introduce cycles outside the current allowlist", function () {
+    // The check synchronously walks and parses the whole source tree; a
+    // cold CI filesystem can blow past mocha's 2s default even though the
+    // cycle graph is clean. The ceiling costs nothing when the scan is fast.
+    this.timeout(60000);
     const result = checkImportCycles(process.cwd());
     assert.deepEqual(formatCycles(result.unexpectedRuntime), []);
     assert.deepEqual(formatCycles(result.unexpectedStatic), []);
