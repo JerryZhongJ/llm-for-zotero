@@ -102,6 +102,7 @@ import {
 } from "../../modelCapabilities";
 import {
   applyModelInputTokenCap,
+  toContextBudgetLimitTokens,
   type ModelInputTokenLimitSource,
 } from "../../utils/modelInputCap";
 import { subscribeModelProviderGroups } from "../../utils/modelProviders";
@@ -1547,7 +1548,7 @@ function estimateHistoryContextUsageSnapshot(
   if (inputCap.estimatedAfterTokens <= 0) return undefined;
   return {
     contextTokens: inputCap.estimatedAfterTokens,
-    contextWindow: inputCap.limitTokens,
+    contextWindow: toContextBudgetLimitTokens(inputCap.limitTokens),
     inputLimitSource: inputCap.limitSource,
     estimated: true,
     source: "estimated",
@@ -4038,7 +4039,9 @@ async function prepareFinalContextPlanChatRequest(params: {
         strategy: params.contextPlan.strategy,
         systemMessages,
         inputCap: {
-          limitTokens: finalPrepared.inputCap.limitTokens,
+          limitTokens: toContextBudgetLimitTokens(
+            finalPrepared.inputCap.limitTokens,
+          ),
           limitSource: finalPrepared.inputCap.limitSource,
           estimatedAfterTokens: finalPrepared.inputCap.estimatedAfterTokens,
         },
@@ -8423,7 +8426,9 @@ export async function retryLatestAssistantResponse(
     }
     const estimatedContextSnapshot = setContextUsageSnapshot(conversationKey, {
       contextTokens: finalPrepared.inputCap.estimatedAfterTokens,
-      contextWindow: finalPrepared.inputCap.limitTokens,
+      contextWindow: toContextBudgetLimitTokens(
+        finalPrepared.inputCap.limitTokens,
+      ),
       inputLimitSource: finalPrepared.inputCap.limitSource,
       estimated: true,
       source: "estimated",
@@ -8456,7 +8461,9 @@ export async function retryLatestAssistantResponse(
       conversationKey,
       conversationGeneration,
       contextCache: contextPlan.contextCache,
-      fallbackContextWindow: finalPrepared.inputCap.limitTokens,
+      fallbackContextWindow: toContextBudgetLimitTokens(
+        finalPrepared.inputCap.limitTokens,
+      ),
       fallbackInputLimitSource: finalPrepared.inputCap.limitSource,
     });
     const codexScope = isCodexNativeTurn
@@ -11173,7 +11180,9 @@ export async function sendQuestion(
     }
     const estimatedContextSnapshot = setContextUsageSnapshot(conversationKey, {
       contextTokens: finalPrepared.inputCap.estimatedAfterTokens,
-      contextWindow: finalPrepared.inputCap.limitTokens,
+      contextWindow: toContextBudgetLimitTokens(
+        finalPrepared.inputCap.limitTokens,
+      ),
       inputLimitSource: finalPrepared.inputCap.limitSource,
       estimated: true,
       source: "estimated",
@@ -11196,7 +11205,9 @@ export async function sendQuestion(
       conversationKey,
       conversationGeneration,
       contextCache: contextPlan.contextCache,
-      fallbackContextWindow: finalPrepared.inputCap.limitTokens,
+      fallbackContextWindow: toContextBudgetLimitTokens(
+        finalPrepared.inputCap.limitTokens,
+      ),
       fallbackInputLimitSource: finalPrepared.inputCap.limitSource,
     });
     const codexScope = isCodexNativeTurn

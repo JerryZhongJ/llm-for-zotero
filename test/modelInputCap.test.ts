@@ -8,6 +8,8 @@ import {
   resolveModelInputTokenLimit,
   sliceTextToTokenBudget,
   resolveContextWindowTokens,
+  toContextBudgetLimitTokens,
+  UNKNOWN_MODEL_CONTEXT_BUDGET_TOKENS,
   type InputCapMessage,
 } from "../src/utils/modelInputCap";
 
@@ -37,6 +39,9 @@ describe("modelInputCap", function () {
         getModelInputTokenLimit("unknown-custom-model"),
         Number.POSITIVE_INFINITY,
       );
+      assert.equal(getModelInputTokenLimit("glm-4.6"), 200000);
+      assert.equal(getModelInputTokenLimit("glm-4.6-flash"), 200000);
+      assert.equal(getModelInputTokenLimit("glm-4.5-air"), 200000);
     });
   });
 
@@ -233,6 +238,20 @@ describe("estimateTextTokens per-script estimation", function () {
 
   it("returns zero for an empty string", function () {
     assert.equal(estimateTextTokens(""), 0);
+  });
+});
+
+describe("toContextBudgetLimitTokens", function () {
+  it("passes a finite limit through unchanged", function () {
+    assert.equal(toContextBudgetLimitTokens(200000), 200000);
+    assert.equal(toContextBudgetLimitTokens(1), 1);
+  });
+
+  it("maps an unknown limit (Infinity) to the conservative budget stand-in", function () {
+    assert.equal(
+      toContextBudgetLimitTokens(Number.POSITIVE_INFINITY),
+      UNKNOWN_MODEL_CONTEXT_BUDGET_TOKENS,
+    );
   });
 });
 

@@ -6,8 +6,8 @@ import {
   type ReasoningSelection,
 } from "../../utils/llmClient";
 import {
-  normalizeMaxTokensForModel,
   normalizeTemperature,
+  resolveAnthropicRequiredMaxTokens,
 } from "../../utils/normalization";
 import {
   buildProviderTransportHeaders,
@@ -772,16 +772,16 @@ export class AnthropicMessagesAgentAdapter implements AgentModelAdapter {
       );
       const toolsPayload = buildAnthropicTools(params.tools, toolCacheControl);
       // Anthropic requires max_tokens; an unset value falls back to the
-      // catalogued model limit and is only omitted when even that is
-      // unknown (the provider then reports it, no silent plugin default).
-      const anthropicMaxTokens =
-        maxTokens !== undefined
-          ? maxTokens
-          : normalizeMaxTokensForModel(Number.MAX_SAFE_INTEGER, request.model, {
-              apiBase: request.apiBase,
-              protocol: "anthropic_messages",
-              profileOverride: request.advanced?.profileOverride,
-            });
+      // catalogued model limit and is omitted when even that is unknown
+      // (the provider's own default then applies, no silent plugin default).
+      const anthropicMaxTokens = resolveAnthropicRequiredMaxTokens(
+        maxTokens,
+        request.model,
+        {
+          apiBase: request.apiBase,
+          profileOverride: request.advanced?.profileOverride,
+        },
+      );
       const temperature = normalizeTemperature(request.advanced?.temperature);
       return {
         model: request.model,

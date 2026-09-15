@@ -220,7 +220,7 @@ describe("model capability service", function () {
           return new Response(
             JSON.stringify({
               schemaVersion: 1,
-              revision: 4,
+              revision: 5,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },
@@ -287,7 +287,7 @@ describe("model capability service", function () {
           text: async () =>
             JSON.stringify({
               schemaVersion: 1,
-              revision: 4,
+              revision: 5,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },

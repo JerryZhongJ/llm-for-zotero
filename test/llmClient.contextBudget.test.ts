@@ -59,6 +59,22 @@ describe("llmClient context budget", function () {
     assert.equal(plan.outputReserveTokens, 4_000);
   });
 
+  it("computes a finite budget for a model unknown to the catalog", function () {
+    const plan = estimateAvailableContextBudget({
+      model: "uncatalogued-relay-model",
+      prompt: "Summarize the paper.",
+      history: [
+        { role: "user", content: "Previous question" },
+        { role: "assistant", content: "Previous answer" },
+      ],
+    });
+    // The request path stays uncapped, but the budget math must not see
+    // Infinity — compaction and planning ratios would never trigger.
+    assert.equal(plan.modelLimitTokens, Number.POSITIVE_INFINITY);
+    assert.equal(plan.softLimitTokens, Math.floor(128_000 * 0.9));
+    assert.isTrue(Number.isFinite(plan.contextBudgetTokens));
+  });
+
   it("uses one qwen3.8-max cap in planning and final preparation", function () {
     const previousZotero = globalThis.Zotero;
     (globalThis as typeof globalThis & { Zotero: typeof Zotero }).Zotero = {

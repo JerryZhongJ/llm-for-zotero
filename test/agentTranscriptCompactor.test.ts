@@ -23,6 +23,23 @@ describe("agent transcript compactor", function () {
     assert.equal(budget.targetTokens, 5_800);
   });
 
+  it("compacts against the conservative window for a model unknown to the catalog", function () {
+    // An unknown model resolves to an uncapped (Infinity) input limit; the
+    // ratio against Infinity is always 0, so compaction would never fire.
+    // The budget must use the conservative stand-in instead.
+    const messages = [
+      { role: "user", content: `${"evidence ".repeat(200_000)}` },
+    ];
+    const budget = buildAgentContextBudgetState({
+      messages,
+      model: "uncatalogued-relay-model",
+    });
+
+    assert.equal(budget.contextWindow, 128_000);
+    assert.isTrue(budget.shouldCompact);
+    assert.isTrue(budget.hardLimit);
+  });
+
   it("creates rehydratable handles for dropped tool messages", function () {
     const messages: AgentModelMessage[] = [
       { role: "user", content: "old catalog request" },

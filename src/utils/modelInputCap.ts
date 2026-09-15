@@ -71,6 +71,28 @@ export type ContextEstimateMessage = {
  * never exceed it) without inventing a number.
  */
 export const DEFAULT_MODEL_INPUT_TOKEN_LIMIT = Number.POSITIVE_INFINITY;
+
+/**
+ * Conservative stand-in for budget math when a model's input limit is
+ * unknown. The request path stays uncapped (the provider enforces its own
+ * limit), but compaction ratios and usage snapshots must see a finite
+ * window — against Infinity the ratio is always 0, compaction never
+ * triggers, and the prompt grows until the provider rejects it.
+ */
+export const UNKNOWN_MODEL_CONTEXT_BUDGET_TOKENS = 128_000;
+
+/**
+ * Map a resolved input limit to its budget-side value: an unknown limit
+ * (Infinity) becomes the conservative stand-in. Budget/compaction/usage
+ * consumers use this; the request trimming path must not — it keeps the
+ * true (uncapped) value.
+ */
+export function toContextBudgetLimitTokens(limitTokens: number): number {
+  return Number.isFinite(limitTokens)
+    ? limitTokens
+    : UNKNOWN_MODEL_CONTEXT_BUDGET_TOKENS;
+}
+
 export const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
 
 const IMAGE_PART_ESTIMATED_TOKENS = 1_024;

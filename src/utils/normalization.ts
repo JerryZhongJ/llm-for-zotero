@@ -14,6 +14,7 @@ import { MAX_ALLOWED_TOKENS, MAX_ALLOWED_INPUT_TOKEN_CAP } from "./llmDefaults";
 import {
   getModelOutputTokenLimit as getCatalogOutputTokenLimit,
   type ModelCapabilityIdentity,
+  type ModelProfileOverride,
 } from "../modelCapabilities";
 
 export function getModelOutputTokenLimit(
@@ -81,6 +82,37 @@ export function normalizeMaxTokensForModel(
     parsed,
     getCatalogOutputTokenLimit(modelName || "", identity),
   );
+}
+
+/**
+ * Anthropic's Messages API requires max_tokens. When the user has not set
+ * one, use the model's catalogued output limit; if the catalog does not know
+ * the model either, the field is omitted and the provider's own default
+ * applies — no silent plugin default. Shared by the direct-chat client and
+ * the agent-mode Anthropic adapter so neither can leak the catalog's
+ * "unknown" sentinel as a request value.
+ */
+export function resolveAnthropicRequiredMaxTokens(
+  maxTokens: number | undefined,
+  model: string | undefined,
+  identity?: {
+    apiBase?: string;
+    profileOverride?: ModelProfileOverride;
+  },
+): number | undefined {
+  if (maxTokens !== undefined) return maxTokens;
+  const catalogLimit = normalizeMaxTokensForModel(
+    Number.MAX_SAFE_INTEGER,
+    model,
+    {
+      apiBase: identity?.apiBase,
+      protocol: "anthropic_messages",
+      profileOverride: identity?.profileOverride,
+    },
+  );
+  return catalogLimit !== undefined && isKnownOutputTokenLimit(catalogLimit)
+    ? catalogLimit
+    : undefined;
 }
 
 /** Clamp an input-token-cap value to [1, MAX_ALLOWED_INPUT_TOKEN_CAP], with configurable fallback. */

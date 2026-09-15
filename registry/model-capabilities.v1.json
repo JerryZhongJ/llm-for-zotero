@@ -1,7 +1,29 @@
 {
   "schemaVersion": 1,
-  "revision": 3,
+  "revision": 4,
   "models": [
+    {
+      "match": {
+        "provider": "glm",
+        "prefix": "glm-4.6"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000,
+        "outputTokens": 131072
+      }
+    },
+    {
+      "match": {
+        "provider": "glm",
+        "prefix": "glm-4.5"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000,
+        "outputTokens": 131072
+      }
+    },
     {
       "match": {
         "provider": "kimi",

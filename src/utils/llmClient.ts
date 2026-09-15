@@ -61,10 +61,10 @@ import {
 import { pathToFileUrl } from "./localPath";
 import { fingerprintSecret } from "./secretFingerprint";
 import {
-  isKnownOutputTokenLimit,
   normalizeMaxTokens,
   normalizeTemperature,
   normalizeMaxTokensForModel,
+  resolveAnthropicRequiredMaxTokens,
   resolveGeminiTemperature,
 } from "./normalization";
 import {
@@ -97,6 +97,7 @@ import {
   applyModelInputTokenCap,
   estimateConversationTokens,
   resolveModelInputTokenLimit,
+  toContextBudgetLimitTokens,
   type InputCapResult,
 } from "./modelInputCap";
 import { resolveProviderCapabilities } from "../providers";
@@ -1274,7 +1275,13 @@ export function estimateAvailableContextBudget(params: {
   );
   const limitTokens = resolvedInputLimit.limitTokens;
   const modelLimitTokens = limitTokens;
-  const softLimitTokens = Math.max(1, Math.floor(limitTokens * 0.9));
+  // Budget-side view: an unknown input limit (Infinity) becomes the
+  // conservative stand-in so the budget stays finite — the request trimming
+  // path (applyModelInputTokenCap) is not affected by this.
+  const softLimitTokens = Math.max(
+    1,
+    Math.floor(toContextBudgetLimitTokens(limitTokens) * 0.9),
+  );
   const outputReserveTokens =
     normalizeMaxTokensForRequest({
       value: params.maxTokens,
@@ -1537,35 +1544,6 @@ function buildTokenParam(model: string, maxTokens: number | undefined) {
 function buildResponsesTokenParam(maxTokens: number | undefined) {
   if (maxTokens === undefined) return {};
   return { max_output_tokens: maxTokens };
-}
-
-/**
- * Anthropic's Messages API requires max_tokens. When the user has not set
- * one, use the model's catalogued output limit; if the catalog does not know
- * the model either, the field is omitted and the provider's own validation
- * tells the user to set it — no silent plugin default.
- */
-function resolveAnthropicRequiredMaxTokens(
-  maxTokens: number | undefined,
-  model: string,
-  identity?: {
-    apiBase?: string;
-    profileOverride?: ModelProfileOverride;
-  },
-): number | undefined {
-  if (maxTokens !== undefined) return maxTokens;
-  const catalogLimit = normalizeMaxTokensForModel(
-    Number.MAX_SAFE_INTEGER,
-    model,
-    {
-      apiBase: identity?.apiBase,
-      protocol: "anthropic_messages",
-      profileOverride: identity?.profileOverride,
-    },
-  );
-  return catalogLimit !== undefined && isKnownOutputTokenLimit(catalogLimit)
-    ? catalogLimit
-    : undefined;
 }
 
 export function normalizeMaxTokensForRequest(params: {

@@ -1,6 +1,7 @@
 import {
   estimateContextMessagesTokens,
   resolveContextWindowTokens,
+  toContextBudgetLimitTokens,
   type ContextEstimateMessage,
 } from "../../utils/modelInputCap";
 import type { ModelProfileOverride } from "../../modelCapabilities";
@@ -107,15 +108,16 @@ export function buildAgentContextBudgetState(params: {
   recentlyCompacted?: boolean;
 }): AgentContextBudgetState {
   const policy = resolveAgentContextBudgetPolicy(params.policy);
-  const contextWindow = resolveContextWindowTokens(
-    params.model || "",
-    params.inputTokenCap,
-    {
+  // Budget-side view: an unknown input limit (Infinity) must become the
+  // conservative stand-in here, or the ratio is always 0 and compaction
+  // never triggers for uncatalogued models.
+  const contextWindow = toContextBudgetLimitTokens(
+    resolveContextWindowTokens(params.model || "", params.inputTokenCap, {
       apiBase: params.apiBase,
       protocol: params.providerProtocol,
       authMode: params.authMode,
       profileOverride: params.profileOverride,
-    },
+    }),
   );
   const contextTokens = estimateContextMessagesTokens(params.messages);
   const ratio = contextWindow > 0 ? contextTokens / contextWindow : 0;

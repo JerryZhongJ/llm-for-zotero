@@ -979,6 +979,91 @@ describe("AnthropicMessagesAgentAdapter", function () {
     assert.equal(capturedBody?.max_tokens, 384000);
   });
 
+  it("omits max_tokens for an uncatalogued model instead of leaking the unknown sentinel", async function () {
+    const adapter = new AnthropicMessagesAgentAdapter();
+    let capturedBody: Record<string, unknown> | null = null;
+    (
+      globalThis as typeof globalThis & {
+        ztoolkit: { getGlobal: (name: string) => unknown };
+      }
+    ).ztoolkit = {
+      getGlobal: (name: string) => {
+        if (name !== "fetch") return undefined;
+        return async (_url: string, init?: RequestInit) => {
+          capturedBody = JSON.parse(String(init?.body || "{}")) as Record<
+            string,
+            unknown
+          >;
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: undefined,
+            json: async () => ({
+              content: [{ type: "text", text: "Done" }],
+            }),
+            text: async () => "",
+          };
+        };
+      },
+    };
+
+    await adapter.runStep({
+      request: makeRequest({
+        model: "uncatalogued-relay-model",
+        apiBase: "https://relay.example.com/anthropic",
+      }),
+      messages: [{ role: "user", content: "Hi" }],
+      tools,
+    });
+
+    // The catalog does not know this model; the request must omit the field
+    // (the provider default applies) rather than send the 1e8 "unknown"
+    // sentinel — GLM's Anthropic endpoint rejects anything over 131072.
+    assert.notProperty(capturedBody || {}, "max_tokens");
+  });
+
+  it("falls back to the catalogued output limit for GLM on bigmodel", async function () {
+    const adapter = new AnthropicMessagesAgentAdapter();
+    let capturedBody: Record<string, unknown> | null = null;
+    (
+      globalThis as typeof globalThis & {
+        ztoolkit: { getGlobal: (name: string) => unknown };
+      }
+    ).ztoolkit = {
+      getGlobal: (name: string) => {
+        if (name !== "fetch") return undefined;
+        return async (_url: string, init?: RequestInit) => {
+          capturedBody = JSON.parse(String(init?.body || "{}")) as Record<
+            string,
+            unknown
+          >;
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: undefined,
+            json: async () => ({
+              content: [{ type: "text", text: "Done" }],
+            }),
+            text: async () => "",
+          };
+        };
+      },
+    };
+
+    await adapter.runStep({
+      request: makeRequest({
+        model: "glm-4.6",
+        apiBase: "https://open.bigmodel.cn/api/anthropic",
+      }),
+      messages: [{ role: "user", content: "你好" }],
+      tools,
+    });
+
+    assert.equal(capturedBody?.max_tokens, 131072);
+  });
+
   it("downgrades Anthropic reasoning after provider rejections", async function () {
     const adapter = new AnthropicMessagesAgentAdapter();
     const requestBodies: Record<string, unknown>[] = [];
