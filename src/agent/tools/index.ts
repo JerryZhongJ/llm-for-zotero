@@ -274,7 +274,34 @@ function buildLibraryImportTraceSummary(content: unknown): string | null {
   }
   if (!importedCount) {
     const succeeded = Number(record.succeeded || 0);
-    return succeeded > 0 ? `Imported ${succeeded} item(s)` : null;
+    if (succeeded > 0) return `Imported ${succeeded} item(s)`;
+    // Zero imports is an outcome, not a completion — name the reason so the
+    // trace row never claims success over an empty result.
+    const notFound = items.filter(
+      (raw) =>
+        raw &&
+        typeof raw === "object" &&
+        (raw as { status?: unknown }).status === "not_found",
+    ).length;
+    const failed = Math.max(
+      Number(record.failed || 0),
+      items.filter(
+        (raw) =>
+          raw &&
+          typeof raw === "object" &&
+          (raw as { status?: unknown }).status === "error",
+      ).length,
+    );
+    if (notFound > 0 && failed > 0) {
+      return `No items imported — ${notFound} not found, ${failed} failed`;
+    }
+    if (notFound > 0) {
+      return `No items imported — ${notFound} not found`;
+    }
+    if (failed > 0) {
+      return `No items imported — ${failed} failed`;
+    }
+    return "No items imported";
   }
   const collectionName =
     typeof record.targetCollectionName === "string" &&
@@ -337,6 +364,8 @@ function createLibraryUpdateTool(tools: {
         kind: {
           type: "string",
           enum: ["tags", "collections", "metadata", "parent", "related", "tag"],
+          description:
+            "Required on every call. 'tags' for tags on items, 'collections' for collection membership, 'metadata' for item fields, 'parent' to move or detach a note/attachment, 'related' for Related links, 'tag' to act on the tag object itself across the library.",
         },
         action: {
           type: "string",
@@ -469,10 +498,28 @@ function createLibraryUpdateTool(tools: {
         return ok({ tool: tools.relateItems, args: delegateArgs });
       }
       return fail(
-        "kind must be one of: tags, collections, metadata, parent, related, tag",
+        "kind is required on every library_update call and must be one of: tags, collections, metadata, parent, related, tag",
       );
     },
   });
+}
+
+function inferLibraryImportKind(
+  args: Record<string, unknown>,
+): "identifiers" | "files" | "manual" | undefined {
+  const signals: string[] = [];
+  if (typeof args.identifier === "string" && args.identifier) {
+    signals.push("identifiers");
+  }
+  if (typeof args.filePath === "string" && args.filePath) {
+    signals.push("files");
+  }
+  if (Array.isArray(args.items) && args.items.length) {
+    signals.push("manual");
+  }
+  return signals.length === 1
+    ? (signals[0] as "identifiers" | "files" | "manual")
+    : undefined;
 }
 
 function createLibraryImportTool(tools: {
@@ -490,11 +537,12 @@ function createLibraryImportTool(tools: {
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      required: ["kind"],
       properties: {
         kind: {
           type: "string",
           enum: ["identifiers", "files", "manual"],
+          description:
+            "'identifiers' with identifier (DOI/ISBN/arXiv/URL lookup), 'files' with filePath (local file), 'manual' with items (create from scratch). Inferred from which of those fields is present when omitted.",
         },
         identifier: {
           type: "string",
@@ -531,26 +579,38 @@ function createLibraryImportTool(tools: {
       onPending: "Waiting for confirmation on import",
       onApproved: "Importing to Zotero",
       onDenied: "Import cancelled",
-      onSuccess: "Import completed",
+      // Fallback for payloads the summary hook cannot read; a readable
+      // outcome ("Imported N items" / "No items imported — …") owns the row
+      // whenever the result shape is recognized.
+      onSuccess: "Import finished",
     },
     buildTraceSummary: ({ content }) => buildLibraryImportTraceSummary(content),
     guidance: LIBRARY_IMPORT_GUIDANCE,
     chooseDelegate(args) {
       if (!validateObject<Record<string, unknown>>(args)) {
-        return fail("Expected an object with kind");
+        return fail("Expected an object");
       }
+      // The three payloads are mutually exclusive, so kind is a redundant
+      // discriminator: infer it from whichever field is present when the
+      // model omits it, and only fail when the call is ambiguous or empty.
+      const kind =
+        args.kind === undefined || args.kind === null
+          ? inferLibraryImportKind(args)
+          : args.kind;
       const delegateArgs = { ...args };
       delete delegateArgs.kind;
-      if (args.kind === "identifiers") {
+      if (kind === "identifiers") {
         return ok({ tool: tools.importIdentifiers, args: delegateArgs });
       }
-      if (args.kind === "files") {
+      if (kind === "files") {
         return ok({ tool: tools.importLocalFiles, args: delegateArgs });
       }
-      if (args.kind === "manual") {
+      if (kind === "manual") {
         return ok({ tool: tools.createItems, args: delegateArgs });
       }
-      return fail("kind must be one of: identifiers, files, manual");
+      return fail(
+        "Could not determine what to import: pass kind, or exactly one of identifier (DOI/ISBN/arXiv/URL), filePath (local file), or items (items to create manually)",
+      );
     },
   });
 }
@@ -575,6 +635,8 @@ function createLibraryDeleteTool(tools: {
         mode: {
           type: "string",
           enum: ["trash", "restore", "merge"],
+          description:
+            "Required on every call. 'trash' with itemIds, 'restore' with itemIds or collectionIds or savedSearchIds (one kind of object per call), 'merge' with masterItemId and otherItemIds.",
         },
         itemIds: {
           ...NUMBER_ARRAY_SCHEMA,
@@ -638,7 +700,9 @@ function createLibraryDeleteTool(tools: {
       if (args.mode === "merge") {
         return ok({ tool: tools.mergeItems, args: delegateArgs });
       }
-      return fail("mode must be one of: trash, restore, merge");
+      return fail(
+        "mode is required on every library_delete call and must be one of: trash, restore, merge",
+      );
     },
   });
 }

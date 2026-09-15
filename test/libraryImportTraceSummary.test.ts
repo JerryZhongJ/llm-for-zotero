@@ -78,10 +78,40 @@ describe("library import trace summary", function () {
 
   it("returns null for payloads without import outcomes", function () {
     assert.isNull(buildLibraryImportTraceSummaryForTests({}));
-    assert.isNull(
-      buildLibraryImportTraceSummaryForTests({
-        result: { operation: "import_identifiers", result: { succeeded: 0 } },
-      }),
+  });
+
+  it("names the reason when nothing was imported", function () {
+    const payload = (result: Record<string, unknown>) => ({
+      result: { operation: "import_identifiers", operationId: "op-z", result },
+    });
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        payload({
+          succeeded: 0,
+          failed: 0,
+          items: [
+            { identifier: "10.1/x", status: "not_found" },
+            { identifier: "10.1/y", status: "not_found" },
+          ],
+        }),
+      ),
+      "No items imported — 2 not found",
+    );
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        payload({
+          succeeded: 0,
+          failed: 1,
+          items: [{ identifier: "10.1/z", status: "error" }],
+        }),
+      ),
+      "No items imported — 1 failed",
+    );
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        payload({ succeeded: 0, failed: 0, items: [] }),
+      ),
+      "No items imported",
     );
   });
 });

@@ -116,9 +116,32 @@ export function createImportLocalFilesTool(
               ? (r.result as Record<string, unknown>)
               : {};
           const count = Number(inner.succeeded || r.succeeded || 0);
-          return count > 0
-            ? `Imported ${count} file${count === 1 ? "" : "s"}`
-            : "Import completed";
+          if (count > 0) {
+            return `Imported ${count} file${count === 1 ? "" : "s"}`;
+          }
+          // Zero imports is an outcome, not a completion — name the reason.
+          const rows = Array.isArray(inner.items)
+            ? (inner.items as unknown[])
+            : Array.isArray(r.items)
+              ? (r.items as unknown[])
+              : [];
+          const statusOf = (row: unknown): unknown =>
+            row && typeof row === "object"
+              ? (row as { status?: unknown }).status
+              : undefined;
+          const notFound = rows.filter(
+            (row) => statusOf(row) === "not_found",
+          ).length;
+          const failed = Math.max(
+            Number(inner.failed || r.failed || 0),
+            rows.filter((row) => statusOf(row) === "error").length,
+          );
+          if (notFound > 0 && failed > 0) {
+            return `No files imported — ${notFound} not found, ${failed} failed`;
+          }
+          if (notFound > 0) return `No files imported — ${notFound} not found`;
+          if (failed > 0) return `No files imported — ${failed} failed`;
+          return "No files imported";
         },
       },
     },
