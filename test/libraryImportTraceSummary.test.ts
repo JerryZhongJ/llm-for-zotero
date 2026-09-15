@@ -105,13 +105,82 @@ describe("library import trace summary", function () {
           items: [{ identifier: "10.1/z", status: "error" }],
         }),
       ),
-      "No items imported — 1 failed",
+      "Not imported — identifier failed to import",
+    );
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        payload({
+          succeeded: 0,
+          failed: 0,
+          items: [{ identifier: "10.1/w", status: "not_found" }],
+        }),
+      ),
+      "Not imported — identifier not found",
     );
     assert.equal(
       buildLibraryImportTraceSummaryForTests(
         payload({ succeeded: 0, failed: 0, items: [] }),
       ),
       "No items imported",
+    );
+  });
+
+  it("renders the singular outcome object (one status, produced items list)", function () {
+    const outcomePayload = (outcome: Record<string, unknown>) => ({
+      result: {
+        operation: "import_identifiers",
+        operationId: "op-s",
+        result: outcome,
+      },
+    });
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        outcomePayload({
+          status: "imported",
+          items: [{ itemId: 11, title: "Paper A" }],
+          targetCollectionName: "Reading List",
+        }),
+      ),
+      'Imported "Paper A" to Reading List',
+    );
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        outcomePayload({
+          status: "imported",
+          items: [
+            { itemId: 11, title: "Paper A" },
+            { itemId: 12, title: "Paper B" },
+            { itemId: 13, title: "Paper C" },
+            { itemId: 14, title: "Paper D" },
+          ],
+        }),
+      ),
+      'Imported "Paper A", "Paper B", "Paper C" +1 more',
+    );
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        outcomePayload({
+          status: "imported",
+          items: [{ itemId: 11 }, { itemId: 12 }],
+        }),
+      ),
+      "Imported 2 items",
+    );
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        outcomePayload({
+          status: "not_found",
+          items: [],
+          reason: "no DOI",
+        }),
+      ),
+      "Not imported — no DOI",
+    );
+    assert.equal(
+      buildLibraryImportTraceSummaryForTests(
+        outcomePayload({ status: "error", items: [], reason: "boom" }),
+      ),
+      "Not imported — boom",
     );
   });
 });

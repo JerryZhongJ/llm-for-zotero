@@ -354,6 +354,23 @@ describe("semantic tool surface", function () {
     ]);
   });
 
+  it("infers library_import kind from the mutually exclusive payload field", function () {
+    const registry = createTestBuiltInRegistry();
+    const tool = registry.getTool("library_import");
+    assert.exists(tool);
+    const validation = tool!.validate({ identifier: "doi1" });
+    assert.equal(validation.ok, true);
+    if (!validation.ok) return;
+    assert.equal(validation.value.delegateName, "import_identifiers");
+    const ambiguous = tool!.validate({
+      identifier: "doi1",
+      filePath: "/tmp/a.pdf",
+    });
+    assert.equal(ambiguous.ok, false);
+    if (ambiguous.ok) return;
+    assert.include(ambiguous.error, "Could not determine what to import");
+  });
+
   it("imports exactly one identifier per call", function () {
     const registry = createTestBuiltInRegistry();
     const tool = registry.getTool("library_import");
@@ -365,9 +382,7 @@ describe("semantic tool surface", function () {
     assert.equal(validation.ok, true);
     if (!validation.ok) return;
     assert.equal(validation.value.delegateName, "import_identifiers");
-    assert.deepEqual(validation.value.delegateInput.operation.identifiers, [
-      "doi1",
-    ]);
+    assert.equal(validation.value.delegateInput.operation.identifier, "doi1");
   });
 
   it("normalizes bracketed array strings for library delete and update", function () {

@@ -96,12 +96,14 @@ describe("import translation and identifier parsing", function () {
   describe("bibliography files", function () {
     it("reads a .ris through the translators instead of attaching it", async function () {
       install();
-      const result = await gateway().importLocalFiles({
-        filePaths: ["/Users/me/Downloads/refs.ris"],
+      const result = await gateway().importOneLocalFile({
+        filePath: "/Users/me/Downloads/refs.ris",
         libraryID: 1,
       });
 
-      assert.equal(result.succeeded, 1);
+      assert.equal(result.status, "imported");
+      // One .ris carrying two references: one outcome, two produced items.
+      assert.lengthOf(result.items, 2);
       assert.lengthOf(translated, 1, "the file must be translated");
       assert.deepEqual(attached, [], "and never attached");
       assert.include(result.items[0].title || "", "2 references");
@@ -114,8 +116,8 @@ describe("import translation and identifier parsing", function () {
         g as unknown as { getCollection: (id: number) => unknown }
       ).getCollection = (id: number) => ({ id, libraryID: 1, name: "Refs" });
 
-      await g.importLocalFiles({
-        filePaths: ["/tmp/refs.bib"],
+      await g.importOneLocalFile({
+        filePath: "/tmp/refs.bib",
         libraryID: 1,
         targetCollectionId: 42,
       });
@@ -128,32 +130,33 @@ describe("import translation and identifier parsing", function () {
     it("falls back to attaching when no translator recognises the file", async function () {
       install();
       translatorsAvailable = false;
-      const result = await gateway().importLocalFiles({
-        filePaths: ["/tmp/notes.txt"],
+      const result = await gateway().importOneLocalFile({
+        filePath: "/tmp/notes.txt",
         libraryID: 1,
       });
-      assert.equal(result.succeeded, 1);
+      assert.equal(result.status, "imported");
+      assert.lengthOf(result.items, 1);
       assert.lengthOf(attached, 1);
     });
 
     it("fails rather than attaching when translation was demanded", async function () {
       install();
       translatorsAvailable = false;
-      const result = await gateway().importLocalFiles({
-        filePaths: ["/tmp/notes.txt"],
+      const result = await gateway().importOneLocalFile({
+        filePath: "/tmp/notes.txt",
         libraryID: 1,
         mode: "translate",
       });
       // Silently attaching would answer a different question than the one
       // asked.
-      assert.equal(result.failed, 1);
+      assert.equal(result.status, "error");
       assert.deepEqual(attached, []);
     });
 
     it("attaches a bibliography file when explicitly told to", async function () {
       install();
-      await gateway().importLocalFiles({
-        filePaths: ["/tmp/refs.ris"],
+      await gateway().importOneLocalFile({
+        filePath: "/tmp/refs.ris",
         libraryID: 1,
         mode: "attach",
       });
@@ -165,8 +168,8 @@ describe("import translation and identifier parsing", function () {
   describe("PDF metadata recognition", function () {
     it("runs the lookup that four descriptions promised", async function () {
       install();
-      await gateway().importLocalFiles({
-        filePaths: ["/tmp/paper.pdf"],
+      await gateway().importOneLocalFile({
+        filePath: "/tmp/paper.pdf",
         libraryID: 1,
       });
       assert.lengthOf(recognized, 1);
@@ -174,8 +177,8 @@ describe("import translation and identifier parsing", function () {
 
     it("can be turned off", async function () {
       install();
-      await gateway().importLocalFiles({
-        filePaths: ["/tmp/paper.pdf"],
+      await gateway().importOneLocalFile({
+        filePath: "/tmp/paper.pdf",
         libraryID: 1,
         recognize: false,
       });
@@ -190,11 +193,12 @@ describe("import translation and identifier parsing", function () {
           },
         },
       });
-      const result = await gateway().importLocalFiles({
-        filePaths: ["/tmp/paper.pdf"],
+      const result = await gateway().importOneLocalFile({
+        filePath: "/tmp/paper.pdf",
         libraryID: 1,
       });
-      assert.equal(result.succeeded, 1);
+      assert.equal(result.status, "imported");
+      assert.lengthOf(result.items, 1);
     });
   });
 
@@ -308,13 +312,13 @@ describe("PDF fetch after identifier import", function () {
       },
     );
 
-    const result = await new ZoteroGateway().importPapersByIdentifiers([
-      "10.1000/example",
-    ]);
+    const gateway = new ZoteroGateway();
+    const result = await gateway.importOnePaperByIdentifier("10.1000/example");
+    await gateway.waitForPdfFetches();
 
-    assert.equal(result.succeeded, 1);
+    assert.equal(result.status, "imported");
+    assert.lengthOf(result.items, 1);
     assert.deepEqual(findCalls, [11]);
-    assert.equal(result.pdfsFetched, 1);
   });
 
   it("skips items that already have a PDF attachment", async function () {
@@ -345,13 +349,13 @@ describe("PDF fetch after identifier import", function () {
       },
     );
 
-    const result = await new ZoteroGateway().importPapersByIdentifiers([
-      "10.1000/example",
-    ]);
+    const gateway = new ZoteroGateway();
+    const result = await gateway.importOnePaperByIdentifier("10.1000/example");
+    await gateway.waitForPdfFetches();
 
-    assert.equal(result.succeeded, 1);
+    assert.equal(result.status, "imported");
+    assert.lengthOf(result.items, 1);
     assert.deepEqual(findCalls, []);
-    assert.equal(result.pdfsFetched, 0);
   });
 
   it("survives a failed PDF lookup without failing the import", async function () {
@@ -373,12 +377,12 @@ describe("PDF fetch after identifier import", function () {
       },
     );
 
-    const result = await new ZoteroGateway().importPapersByIdentifiers([
-      "10.1000/example",
-    ]);
+    const gateway = new ZoteroGateway();
+    const result = await gateway.importOnePaperByIdentifier("10.1000/example");
+    await gateway.waitForPdfFetches();
 
-    assert.equal(result.succeeded, 1);
-    assert.equal(result.pdfsFetched, 0);
+    assert.equal(result.status, "imported");
+    assert.lengthOf(result.items, 1);
   });
 });
 

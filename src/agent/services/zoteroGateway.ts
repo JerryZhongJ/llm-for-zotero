@@ -85,6 +85,20 @@ export type LibraryPaperTargetAttachment = {
   title: string;
 };
 
+/**
+ * One import operation's outcome: a single status plus the items it
+ * produced. Singular semantics live at the operation level — one call, one
+ * status, one undo — while `items` stays a list because one identifier or
+ * one bibliography file can legitimately produce several entries.
+ */
+export type ZoteroImportOutcome = {
+  status: "imported" | "not_found" | "error" | "unsupported";
+  items: Array<{ itemId: number; title?: string }>;
+  reason?: string;
+  /** Resolved name of the target collection, when one was given. */
+  targetCollectionName?: string;
+};
+
 export type LibraryPaperTarget = {
   itemId: number;
   libraryID?: number;
@@ -1234,6 +1248,13 @@ const FULLTEXT_INDEX_STATE_MAP: Record<
 };
 
 export class ZoteroGateway {
+  /**
+   * In-flight background PDF fetch started by importPapersByIdentifiers.
+   * Tracked only so waitForPdfFetches() can give tests a deterministic join
+   * point; the import result itself never reports PDF outcomes.
+   */
+  private pendingPdfFetch: Promise<unknown> | null = null;
+
   getItem(itemId: number | undefined): Zotero.Item | null {
     if (!Number.isFinite(itemId) || !itemId || itemId <= 0) return null;
     return Zotero.Items.get(Math.floor(itemId)) || null;
@@ -5992,8 +6013,8 @@ export class ZoteroGateway {
    * Import local files (PDFs, etc.) into the Zotero library.
    * Uses Zotero.Attachments.importFromFile to create items with attached files.
    */
-  async importLocalFiles(params: {
-    filePaths: string[];
+  async importOneLocalFile(params: {
+    filePath: string;
     libraryID?: number;
     targetCollectionId?: number;
     /**
@@ -6005,17 +6026,8 @@ export class ZoteroGateway {
     mode?: "auto" | "translate" | "attach";
     /** Run Zotero's PDF metadata recognition on imported PDFs. */
     recognize?: boolean;
-  }): Promise<{
-    succeeded: number;
-    failed: number;
-    items: Array<{
-      filePath: string;
-      status: "imported" | "error" | "not_found";
-      itemId?: number;
-      title?: string;
-      reason?: string;
-    }>;
-  }> {
+  }): Promise<ZoteroImportOutcome> {
+    const filePath = params.filePath;
     const targetLibraryID =
       params.libraryID ??
       (Zotero as unknown as { Libraries?: { userLibraryID?: number } })
@@ -6025,209 +6037,199 @@ export class ZoteroGateway {
       ? this.getCollection(params.targetCollectionId)
       : null;
 
-    let succeeded = 0;
-    let failed = 0;
-    const items: Array<{
-      filePath: string;
-      status: "imported" | "error" | "not_found";
-      itemId?: number;
-      title?: string;
-      reason?: string;
-    }> = [];
-
     const Attachments = (Zotero as any).Attachments;
 
-    for (const filePath of params.filePaths) {
-      try {
-        // Check file exists
-        const fileExists = await (async () => {
-          try {
-            const IOUtils = (globalThis as any).IOUtils;
-            if (IOUtils?.exists) return await IOUtils.exists(filePath);
-            const OSFile = (globalThis as any).OS?.File;
-            if (OSFile?.exists) return await OSFile.exists(filePath);
-            return true; // assume exists if we can't check
-          } catch {
-            return false;
-          }
-        })();
-
-        if (!fileExists) {
-          items.push({
-            filePath,
-            status: "not_found",
-            reason: "File not found",
-          });
-          failed++;
-          continue;
+    try {
+      // Check file exists
+      const fileExists = await (async () => {
+        try {
+          const IOUtils = (globalThis as any).IOUtils;
+          if (IOUtils?.exists) return await IOUtils.exists(filePath);
+          const OSFile = (globalThis as any).OS?.File;
+          if (OSFile?.exists) return await OSFile.exists(filePath);
+          return true; // assume exists if we can't check
+        } catch {
+          return false;
         }
+      })();
 
-        // Create a nsIFile reference
-        let nsFile: any;
-        const Components = (globalThis as any).Components;
-        if (Components?.classes) {
-          nsFile = Components.classes[
-            "@mozilla.org/file/local;1"
-          ].createInstance(Components.interfaces.nsIFile);
-          nsFile.initWithPath(filePath);
-        }
-
-        // Bibliography files are read, not attached. Handing a .ris to
-        // importFromFile produced one dead attachment row and reported
-        // success, so not a single reference reached the library.
-        const isBibliography =
-          /\.(ris|bib|bibtex|enw|nbib|rdf|xml|json|mods|refer|txt)$/i.test(
-            filePath,
-          );
-        const wantsTranslate =
-          params.mode === "translate" ||
-          (params.mode !== "attach" && isBibliography);
-        if (wantsTranslate) {
-          const translated = await this.importBibliographyFile({
-            filePath,
-            libraryID: targetLibraryID,
-            targetCollectionId: targetCollection?.id,
-          });
-          if (translated.status === "imported") {
-            items.push({
-              filePath,
-              status: "imported",
-              itemId: translated.itemIds[0],
-              title: `${translated.itemIds.length} reference${
-                translated.itemIds.length === 1 ? "" : "s"
-              } from ${filePath.split(/[\\/]/).pop()}`,
-            });
-            succeeded++;
-            continue;
-          }
-          if (params.mode === "translate") {
-            // Explicitly asked to translate, so falling back to attaching
-            // would answer a different question than the one asked.
-            items.push({
-              filePath,
-              status: "error",
-              reason: translated.reason || "No translator recognised the file",
-            });
-            failed++;
-            continue;
-          }
-          // Auto mode: an unrecognised file is still worth attaching.
-        }
-
-        let attachmentItem: any;
-
-        if (Attachments?.importFromFile && nsFile) {
-          // Primary: Zotero.Attachments.importFromFile({ file, libraryID })
-          attachmentItem = await Attachments.importFromFile({
-            file: nsFile,
-            libraryID: targetLibraryID,
-          });
-        } else if (Attachments?.importFromFile) {
-          // Try with path string
-          attachmentItem = await Attachments.importFromFile({
-            file: filePath,
-            libraryID: targetLibraryID,
-          });
-        } else {
-          items.push({
-            filePath,
-            status: "error",
-            reason: "Zotero.Attachments.importFromFile is not available",
-          });
-          failed++;
-          continue;
-        }
-
-        if (!attachmentItem) {
-          items.push({
-            filePath,
-            status: "error",
-            reason: "Import returned no item",
-          });
-          failed++;
-          continue;
-        }
-
-        const itemId = Number(attachmentItem.id);
-        const title = String(
-          attachmentItem.getField?.("title") ||
-            (attachmentItem as any).attachmentFilename ||
-            filePath.split(/[\\/]/).pop() ||
-            filePath,
-        );
-
-        // If there's a parent item (Zotero auto-created from metadata retrieval),
-        // use that for collection assignment
-        const parentId = attachmentItem.parentID;
-        const targetItem = parentId
-          ? this.getItem(parentId) || attachmentItem
-          : attachmentItem;
-
-        // importFromFile returns a top-level ATTACHMENT, so isRegularItem()
-        // is false and the gate silently dropped targetCollectionId for
-        // every local-file import. Zotero files top-level attachments into
-        // collections perfectly well.
-        if (targetCollection && !targetItem.parentID) {
-          targetItem.addToCollection(targetCollection.id);
-          await targetItem.saveTx();
-        }
-
-        // Metadata retrieval never ran for any file, PDFs included --
-        // Attachments.importFromFile has no recognition step, and Zotero
-        // wires autoRecognizeItems only to the UI drop handlers and the
-        // browser connector. The tool description promised it anyway, so a
-        // PDF import produced a bare attachment titled paper.pdf with no
-        // title, authors, year or DOI.
-        let recognizedParentId: number | undefined;
-        if (params.recognize !== false && attachmentItem.isPDFAttachment?.()) {
-          const recognizer = (
-            Zotero as unknown as {
-              RecognizeDocument?: {
-                recognizeItems?: (items: unknown[]) => Promise<unknown>;
-              };
-            }
-          ).RecognizeDocument;
-          if (recognizer?.recognizeItems) {
-            try {
-              await recognizer.recognizeItems([attachmentItem]);
-              const newParent = Number(attachmentItem.parentID);
-              if (Number.isFinite(newParent) && newParent > 0) {
-                recognizedParentId = newParent;
-              }
-            } catch {
-              // A failed lookup leaves a plain attachment, which is the old
-              // behaviour -- it must not fail the import.
-            }
-          }
-        }
-        // Recognition creates a parent item, and that is what belongs in the
-        // collection, not the attachment underneath it.
-        if (recognizedParentId && targetCollection) {
-          const parent = this.getItem(recognizedParentId);
-          if (parent) {
-            parent.addToCollection(targetCollection.id);
-            await parent.saveTx();
-          }
-        }
-
-        items.push({
-          filePath,
-          status: "imported",
-          itemId: recognizedParentId || parentId || itemId,
-          title,
-        });
-        succeeded++;
-      } catch (error) {
-        items.push({
-          filePath,
-          status: "error",
-          reason: error instanceof Error ? error.message : String(error),
-        });
-        failed++;
+      if (!fileExists) {
+        return {
+          status: "not_found",
+          items: [],
+          reason: "File not found",
+        };
       }
-    }
 
-    return { succeeded, failed, items };
+      // Create a nsIFile reference
+      let nsFile: any;
+      const Components = (globalThis as any).Components;
+      if (Components?.classes) {
+        nsFile = Components.classes["@mozilla.org/file/local;1"].createInstance(
+          Components.interfaces.nsIFile,
+        );
+        nsFile.initWithPath(filePath);
+      }
+
+      // Bibliography files are read, not attached. Handing a .ris to
+      // importFromFile produced one dead attachment row and reported
+      // success, so not a single reference reached the library.
+      const isBibliography =
+        /\.(ris|bib|bibtex|enw|nbib|rdf|xml|json|mods|refer|txt)$/i.test(
+          filePath,
+        );
+      const wantsTranslate =
+        params.mode === "translate" ||
+        (params.mode !== "attach" && isBibliography);
+      if (wantsTranslate) {
+        const translated = await this.importBibliographyFile({
+          filePath,
+          libraryID: targetLibraryID,
+          targetCollectionId: targetCollection?.id,
+        });
+        if (translated.status === "imported") {
+          const fileName = filePath.split(/[\\/]/).pop();
+          return {
+            status: "imported",
+            // One bibliography file legitimately produces several items —
+            // its references. The outcome is one status; the items are a list.
+            items: translated.itemIds.map((itemId, index) => ({
+              itemId,
+              title:
+                translated.itemIds.length === 1
+                  ? this.getItem(itemId)?.getDisplayTitle?.() || undefined
+                  : index === 0
+                    ? `${translated.itemIds.length} references from ${fileName}`
+                    : undefined,
+            })),
+            targetCollectionName: targetCollection
+              ? targetCollection.name || undefined
+              : undefined,
+          };
+        }
+        if (params.mode === "translate") {
+          // Explicitly asked to translate, so falling back to attaching
+          // would answer a different question than the one asked.
+          return {
+            status: "error",
+            items: [],
+            reason: translated.reason || "No translator recognised the file",
+          };
+        }
+        // Auto mode: an unrecognised file is still worth attaching.
+      }
+
+      let attachmentItem: any;
+
+      if (Attachments?.importFromFile && nsFile) {
+        // Primary: Zotero.Attachments.importFromFile({ file, libraryID })
+        attachmentItem = await Attachments.importFromFile({
+          file: nsFile,
+          libraryID: targetLibraryID,
+        });
+      } else if (Attachments?.importFromFile) {
+        // Try with path string
+        attachmentItem = await Attachments.importFromFile({
+          file: filePath,
+          libraryID: targetLibraryID,
+        });
+      } else {
+        return {
+          status: "error",
+          items: [],
+          reason: "Zotero.Attachments.importFromFile is not available",
+        };
+      }
+
+      if (!attachmentItem) {
+        return {
+          status: "error",
+          items: [],
+          reason: "Import returned no item",
+        };
+      }
+
+      const itemId = Number(attachmentItem.id);
+      const title = String(
+        attachmentItem.getField?.("title") ||
+          (attachmentItem as any).attachmentFilename ||
+          filePath.split(/[\\/]/).pop() ||
+          filePath,
+      );
+
+      // If there's a parent item (Zotero auto-created from metadata retrieval),
+      // use that for collection assignment
+      const parentId = attachmentItem.parentID;
+      const targetItem = parentId
+        ? this.getItem(parentId) || attachmentItem
+        : attachmentItem;
+
+      // importFromFile returns a top-level ATTACHMENT, so isRegularItem()
+      // is false and the gate silently dropped targetCollectionId for
+      // every local-file import. Zotero files top-level attachments into
+      // collections perfectly well.
+      if (targetCollection && !targetItem.parentID) {
+        targetItem.addToCollection(targetCollection.id);
+        await targetItem.saveTx();
+      }
+
+      // Metadata retrieval never ran for any file, PDFs included --
+      // Attachments.importFromFile has no recognition step, and Zotero
+      // wires autoRecognizeItems only to the UI drop handlers and the
+      // browser connector. The tool description promised it anyway, so a
+      // PDF import produced a bare attachment titled paper.pdf with no
+      // title, authors, year or DOI.
+      let recognizedParentId: number | undefined;
+      if (params.recognize !== false && attachmentItem.isPDFAttachment?.()) {
+        const recognizer = (
+          Zotero as unknown as {
+            RecognizeDocument?: {
+              recognizeItems?: (items: unknown[]) => Promise<unknown>;
+            };
+          }
+        ).RecognizeDocument;
+        if (recognizer?.recognizeItems) {
+          try {
+            await recognizer.recognizeItems([attachmentItem]);
+            const newParent = Number(attachmentItem.parentID);
+            if (Number.isFinite(newParent) && newParent > 0) {
+              recognizedParentId = newParent;
+            }
+          } catch {
+            // A failed lookup leaves a plain attachment, which is the old
+            // behaviour -- it must not fail the import.
+          }
+        }
+      }
+      // Recognition creates a parent item, and that is what belongs in the
+      // collection, not the attachment underneath it.
+      if (recognizedParentId && targetCollection) {
+        const parent = this.getItem(recognizedParentId);
+        if (parent) {
+          parent.addToCollection(targetCollection.id);
+          await parent.saveTx();
+        }
+      }
+
+      return {
+        status: "imported",
+        items: [
+          {
+            itemId: recognizedParentId || parentId || itemId,
+            title,
+          },
+        ],
+        targetCollectionName: targetCollection
+          ? targetCollection.name || undefined
+          : undefined,
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        items: [],
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   /**
@@ -6470,38 +6472,11 @@ export class ZoteroGateway {
    * CrossRef / arXiv translators and saves items to the target library.
    * Zotero will also attempt to attach a PDF if one is openly available.
    */
-  async importPapersByIdentifiers(
-    identifiers: string[],
+  async importOnePaperByIdentifier(
+    rawId: string,
     libraryID?: number,
     targetCollectionId?: number,
-  ): Promise<{
-    succeeded: number;
-    failed: number;
-    itemIds?: number[];
-    pdfsFetched?: number;
-    /** Resolved name of the target collection, when one was given. */
-    targetCollectionName?: string;
-    items: Array<{
-      identifier: string;
-      status: "imported" | "not_found" | "error";
-      itemId?: number;
-      /** Display title of the imported item — users read titles, not IDs. */
-      title?: string;
-      reason?: string;
-    }>;
-  }> {
-    let succeeded = 0;
-    let failed = 0;
-    const itemIds: number[] = [];
-    // Per-identifier rows: "10 of 50 failed" was previously unattributable,
-    // so a user had no way to know which ten to retry.
-    const rows: Array<{
-      identifier: string;
-      status: "imported" | "not_found" | "error";
-      itemId?: number;
-      title?: string;
-      reason?: string;
-    }> = [];
+  ): Promise<ZoteroImportOutcome> {
     const targetLibraryID =
       libraryID ??
       (Zotero as unknown as { Libraries?: { userLibraryID?: number } })
@@ -6514,137 +6489,151 @@ export class ZoteroGateway {
       throw new Error("Target collection not found");
     }
 
-    for (const rawId of identifiers) {
-      try {
-        const identifier = this.parseImportIdentifier(rawId);
+    try {
+      const identifier = this.parseImportIdentifier(rawId);
 
-        const translate = new (
-          Zotero as unknown as {
-            Translate: {
-              Search: new () => {
-                setIdentifier(id: Record<string, string>): void;
-                getTranslators(): Promise<unknown[]>;
-                setTranslator(t: unknown): void;
-                translate(opts?: { libraryID?: number }): Promise<unknown[]>;
-              };
+      const translate = new (
+        Zotero as unknown as {
+          Translate: {
+            Search: new () => {
+              setIdentifier(id: Record<string, string>): void;
+              getTranslators(): Promise<unknown[]>;
+              setTranslator(t: unknown): void;
+              translate(opts?: { libraryID?: number }): Promise<unknown[]>;
             };
-          }
-        ).Translate.Search();
+          };
+        }
+      ).Translate.Search();
 
-        translate.setIdentifier(identifier);
-        const translators = await translate.getTranslators();
-        if (!translators || translators.length === 0) {
-          failed++;
-          rows.push({
-            identifier: rawId,
-            status: "not_found",
-            reason:
-              this.describeUnresolvableIdentifier(rawId) ||
-              "No translator could resolve this identifier",
-          });
-          continue;
-        }
-        translate.setTranslator(translators);
-        const items = await translate.translate({ libraryID: targetLibraryID });
-        if (items && items.length > 0) {
-          const importedRegularItemIds = items
-            .map((item) =>
-              item && typeof item === "object"
-                ? Number((item as { id?: unknown }).id)
-                : NaN,
-            )
-            .filter((itemId) => Number.isFinite(itemId) && itemId > 0)
-            .map((itemId) => Math.floor(itemId))
-            .filter((itemId) => {
-              const importedItem = this.getItem(itemId);
-              return Boolean(importedItem?.isRegularItem?.());
-            });
-          if (targetCollection) {
-            for (const itemId of importedRegularItemIds) {
-              const importedItem = this.getItem(itemId);
-              if (
-                !importedItem ||
-                importedItem.inCollection?.(targetCollection.id)
-              ) {
-                continue;
-              }
-              importedItem.addToCollection(targetCollection.id);
-              await importedItem.saveTx();
-            }
-          }
-          itemIds.push(...importedRegularItemIds);
-          // Previously `|| items.length`, which reported success when the
-          // translator returned something but nothing survived the
-          // regular-item filter — so nothing was filed and it still counted.
-          if (importedRegularItemIds.length) {
-            succeeded += importedRegularItemIds.length;
-            for (const itemId of importedRegularItemIds) {
-              rows.push({
-                identifier: rawId,
-                status: "imported",
-                itemId,
-                title: this.getItem(itemId)?.getDisplayTitle?.() || undefined,
-              });
-            }
-          } else {
-            failed++;
-            rows.push({
-              identifier: rawId,
-              status: "error",
-              reason:
-                "The translator returned no regular item for this identifier",
-            });
-          }
-        } else {
-          failed++;
-          rows.push({
-            identifier: rawId,
-            status: "not_found",
-            reason: "The translator returned no items",
-          });
-        }
-      } catch (error) {
-        failed++;
-        rows.push({
-          identifier: rawId,
-          status: "error",
-          // Zotero rejects a translation with a bare STRING, not an Error
-          // ("No items returned from any translator"), so assuming Error
-          // flattened every real translator failure to the two words "Import
-          // failed" and told the user nothing.
+      translate.setIdentifier(identifier);
+      const translators = await translate.getTranslators();
+      if (!translators || translators.length === 0) {
+        return {
+          status: "not_found",
+          items: [],
           reason:
-            error instanceof Error
-              ? error.message
-              : typeof error === "string" && error.trim()
-                ? error.trim()
-                : "Import failed",
-        });
+            this.describeUnresolvableIdentifier(rawId) ||
+            "No translator could resolve this identifier",
+        };
+      }
+      translate.setTranslator(translators);
+      const items = await translate.translate({ libraryID: targetLibraryID });
+      if (items && items.length > 0) {
+        const importedRegularItemIds = items
+          .map((item) =>
+            item && typeof item === "object"
+              ? Number((item as { id?: unknown }).id)
+              : NaN,
+          )
+          .filter((itemId) => Number.isFinite(itemId) && itemId > 0)
+          .map((itemId) => Math.floor(itemId))
+          .filter((itemId) => {
+            const importedItem = this.getItem(itemId);
+            return Boolean(importedItem?.isRegularItem?.());
+          });
+        if (targetCollection) {
+          for (const itemId of importedRegularItemIds) {
+            const importedItem = this.getItem(itemId);
+            if (
+              !importedItem ||
+              importedItem.inCollection?.(targetCollection.id)
+            ) {
+              continue;
+            }
+            importedItem.addToCollection(targetCollection.id);
+            await importedItem.saveTx();
+          }
+        }
+        // Previously `|| items.length`, which reported success when the
+        // translator returned something but nothing survived the
+        // regular-item filter — so nothing was filed and it still counted.
+        if (!importedRegularItemIds.length) {
+          return {
+            status: "error" as const,
+            items: [],
+            reason:
+              "The translator returned no regular item for this identifier",
+          };
+        }
+        this.scheduleBackgroundPdfFetch(importedRegularItemIds);
+        return {
+          status: "imported",
+          // One identifier can still produce several items (a URL translator
+          // may resolve a list page into multiple entries) — the outcome is
+          // one status, the produced items are a list.
+          items: importedRegularItemIds.map((itemId) => ({
+            itemId,
+            title: this.getItem(itemId)?.getDisplayTitle?.() || undefined,
+          })),
+          targetCollectionName: targetCollection
+            ? targetCollection.name || undefined
+            : undefined,
+        };
+      }
+      return {
+        status: "not_found",
+        items: [],
+        reason: "The translator returned no items",
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        items: [],
+        // Zotero rejects a translation with a bare STRING, not an Error
+        // ("No items returned from any translator"), so assuming Error
+        // flattened every real translator failure to the two words "Import
+        // failed" and told the user nothing.
+        reason:
+          error instanceof Error
+            ? error.message
+            : typeof error === "string" && error.trim()
+              ? error.trim()
+              : "Import failed",
+      };
+    }
+  }
+
+  /**
+   * Resolves once every background PDF fetch started by an import has
+   * settled. The import result no longer reports PDF outcomes, so this
+   * exists for tests and shutdown paths that need determinism.
+   */
+  async waitForPdfFetches(): Promise<void> {
+    while (this.pendingPdfFetch) {
+      const current = this.pendingPdfFetch;
+      await current;
+      if (this.pendingPdfFetch === current) {
+        this.pendingPdfFetch = null;
       }
     }
+  }
 
-    // A follow-up library_search would not have seen the new items.
-
-    const pdfsFetched = await this.fetchMissingPdfAttachments(itemIds);
-
-    return {
-      succeeded,
-      failed,
-      itemIds,
-      pdfsFetched,
-      targetCollectionName: targetCollection
-        ? targetCollection.name || undefined
-        : undefined,
-      items: rows,
-    };
+  /** Fire-and-forget the background find-PDF pass for freshly imported items. */
+  private scheduleBackgroundPdfFetch(itemIds: number[]): void {
+    if (!itemIds.length) return;
+    // PDF fetching runs in the background so the import result returns as
+    // soon as the items land — the tool result deliberately says nothing
+    // about whether PDFs were fetched.
+    this.pendingPdfFetch = this.fetchMissingPdfAttachments(itemIds).catch(
+      (error) => {
+        // fetchMissingPdfAttachments is best-effort per item; this catch is
+        // only here so a fire-and-forget promise can never reject unhandled.
+        Zotero.debug(
+          `[llm-for-zotero] background findPDF pass failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      },
+    );
   }
 
   /**
    * Attach PDFs that Zotero's own "Find Available PDF" resolvers can locate —
    * the same machinery as the right-click menu entry (DOI landing pages,
    * Unpaywall mirror, custom resolvers). `addAvailableFile` is the Zotero 7
-   * name; `addAvailablePDF` is kept as a Zotero 6 fallback. Best-effort per
-   * item: a failed lookup is logged, never thrown, so it cannot break the
-   * import that precedes it.
+   * name; `addAvailablePDF` is kept as a Zotero 6 fallback. Runs in the
+   * background after an import returns; best-effort per item: a failed lookup
+   * is logged, never thrown, so it cannot break the import that precedes it.
    */
   private async fetchMissingPdfAttachments(itemIds: number[]): Promise<number> {
     const attachmentsApi = (

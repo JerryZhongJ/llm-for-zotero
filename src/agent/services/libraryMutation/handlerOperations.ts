@@ -1,7 +1,8 @@
 import type { AgentActionCapability, AgentToolContext } from "../../types";
-import type {
-  LibraryMutationOperation,
-  LibraryMutationState,
+import {
+  normalizeLegacyImportOperation,
+  type LibraryMutationOperation,
+  type LibraryMutationState,
 } from "./contracts";
 import { libraryMutationHandlers } from "./handlerRegistry";
 import type {
@@ -93,6 +94,7 @@ export function createdObjectIdsForLibraryMutation(
   collectionIds: number[];
   savedSearchIds: number[];
 } {
+  operation = normalizeLegacyImportOperation(operation);
   const handler = libraryMutationHandlers[operation.type];
   const payload = mutationResultPayload(executionResult);
   const normalize = (values: readonly number[]) => [
@@ -108,6 +110,7 @@ export function createdObjectIdsForLibraryMutation(
 export function mutationTargetCountFromHandler(
   operation: LibraryMutationOperation,
 ): number {
+  operation = normalizeLegacyImportOperation(operation);
   return libraryMutationHandlers[operation.type].targetCount(
     operation as never,
   );
@@ -117,6 +120,7 @@ export function mutationAffectedCountFromHandler(
   operation: LibraryMutationOperation,
   result: unknown,
 ): number {
+  operation = normalizeLegacyImportOperation(operation);
   return libraryMutationHandlers[operation.type].affectedCount(
     operation as never,
     result,
@@ -126,12 +130,14 @@ export function mutationAffectedCountFromHandler(
 export function atomizeMutationOperationFromHandler(
   operation: LibraryMutationOperation,
 ): LibraryMutationOperation[] {
+  operation = normalizeLegacyImportOperation(operation);
   return libraryMutationHandlers[operation.type].atomize(operation as never);
 }
 
 export function mutationUsesDeferredInverse(
   operation: LibraryMutationOperation,
 ): boolean {
+  operation = normalizeLegacyImportOperation(operation);
   return libraryMutationHandlers[operation.type].deferredInverse(
     operation as never,
   );
@@ -144,6 +150,7 @@ export function planMutationInverseFromHandler(
   inverseOperations?: LibraryMutationOperation[];
   reason?: string;
 }> {
+  operation = normalizeLegacyImportOperation(operation);
   return libraryMutationHandlers[operation.type].planInverse(
     operation as never,
     asMutationStateView(state),
@@ -154,6 +161,7 @@ export function mutationPostconditionIsSatisfied(
   operation: LibraryMutationOperation,
   state: LibraryMutationState | MutationStateView,
 ): boolean {
+  operation = normalizeLegacyImportOperation(operation);
   return libraryMutationHandlers[operation.type].postconditionSatisfied(
     operation as never,
     asMutationStateView(state),
@@ -165,6 +173,7 @@ export function executeMutationFromHandler(
   context: AgentToolContext,
   gateway: ZoteroGateway,
 ): Promise<ForwardExecution> {
+  operation = normalizeLegacyImportOperation(operation);
   return libraryMutationHandlers[operation.type].execute(
     operation as never,
     context,

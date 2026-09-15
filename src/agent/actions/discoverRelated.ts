@@ -514,13 +514,26 @@ export const discoverRelatedAction: AgentAction<
         `Importing ${identifier}`,
       );
       const importContent = importResult.content as Record<string, unknown>;
-      const resultObj = importContent.result as
-        | Record<string, unknown>
+      const outcome = importContent.result as
+        | {
+            status?: unknown;
+            items?: unknown;
+            reason?: unknown;
+          }
         | undefined;
-      if (importResult.ok && resultObj) {
-        importedCount += Number(
-          resultObj.succeeded || resultObj.importedCount || 0,
-        );
+      if (importResult.ok && outcome) {
+        // Singular outcome object: one status; the produced items list is
+        // the count (one identifier may resolve to several items).
+        if (outcome.status === "imported") {
+          importedCount += Array.isArray(outcome.items)
+            ? outcome.items.length
+            : 0;
+        } else if (!lastError) {
+          lastError =
+            typeof outcome.reason === "string" && outcome.reason.trim()
+              ? outcome.reason.trim()
+              : `identifier ${identifier} was not imported`;
+        }
       } else if (!importResult.ok) {
         lastError = String(importContent.error || "import failed");
       }

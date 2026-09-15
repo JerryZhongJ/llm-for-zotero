@@ -106,42 +106,41 @@ export function createImportLocalFilesTool(
         onPending: "Waiting for confirmation to import files",
         onApproved: "Importing files",
         onDenied: "Import cancelled",
+        // The singular outcome object: one status, the produced items as a
+        // list (a bibliography file can legitimately contain several
+        // references).
         onSuccess: ({ content }) => {
-          const r =
+          const outer =
             content && typeof content === "object"
               ? (content as Record<string, unknown>)
               : {};
-          const inner =
-            r.result && typeof r.result === "object"
-              ? (r.result as Record<string, unknown>)
-              : {};
-          const count = Number(inner.succeeded || r.succeeded || 0);
-          if (count > 0) {
-            return `Imported ${count} file${count === 1 ? "" : "s"}`;
+          const outcome =
+            outer.result && typeof outer.result === "object"
+              ? (outer.result as {
+                  status?: unknown;
+                  items?: unknown;
+                  reason?: unknown;
+                })
+              : null;
+          const produced = Array.isArray(outcome?.items)
+            ? outcome.items.length
+            : 0;
+          if (outcome?.status === "imported") {
+            return produced === 1
+              ? "Imported 1 item"
+              : `Imported ${produced} items`;
           }
-          // Zero imports is an outcome, not a completion — name the reason.
-          const rows = Array.isArray(inner.items)
-            ? (inner.items as unknown[])
-            : Array.isArray(r.items)
-              ? (r.items as unknown[])
-              : [];
-          const statusOf = (row: unknown): unknown =>
-            row && typeof row === "object"
-              ? (row as { status?: unknown }).status
-              : undefined;
-          const notFound = rows.filter(
-            (row) => statusOf(row) === "not_found",
-          ).length;
-          const failed = Math.max(
-            Number(inner.failed || r.failed || 0),
-            rows.filter((row) => statusOf(row) === "error").length,
-          );
-          if (notFound > 0 && failed > 0) {
-            return `No files imported — ${notFound} not found, ${failed} failed`;
+          if (outcome?.status === "not_found") {
+            return "Not imported — file not found";
           }
-          if (notFound > 0) return `No files imported — ${notFound} not found`;
-          if (failed > 0) return `No files imported — ${failed} failed`;
-          return "No files imported";
+          if (outcome?.status) {
+            return `Not imported — ${
+              typeof outcome.reason === "string" && outcome.reason.trim()
+                ? outcome.reason.trim()
+                : "file failed to import"
+            }`;
+          }
+          return "Import finished";
         },
       },
     },
@@ -163,7 +162,7 @@ export function createImportLocalFilesTool(
       }
       const operation: ImportLocalFilesOperation = {
         type: "import_local_files",
-        filePaths: [filePath],
+        filePath,
         targetCollectionId: normalizePositiveInt(args.targetCollectionId),
         libraryID: normalizePositiveInt(args.libraryID),
         mode:
@@ -177,7 +176,7 @@ export function createImportLocalFilesTool(
 
     createPendingAction(input) {
       const { operation } = input;
-      const path = operation.filePaths[0] || "";
+      const path = operation.filePath || "";
       const fileName = path.split(/[\\/]/).pop() || path;
 
       return {

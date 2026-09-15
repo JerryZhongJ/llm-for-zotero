@@ -12,6 +12,7 @@ import {
   resultCount,
   resultId,
   resultIds,
+  resultImportedItemCount,
   resultRowIds,
   resultStatus,
   sameMembers,
@@ -689,30 +690,28 @@ export const libraryMutationHandlers = {
     destinationCollectionIds: (operation) =>
       operation.targetCollectionId ? [operation.targetCollectionId] : [],
     actionParameters: (operation) => ({
-      identifiers: operation.identifiers,
+      identifier: operation.identifier,
       destinationCollectionId: operation.targetCollectionId,
     }),
     stateSections: ["items"],
     deferredInverse: () => true,
-    createdItemIds: (result) => resultIds(result, "itemIds"),
+    createdItemIds: (result) =>
+      resultRowIds({ result, rowsKey: "items", idKey: "itemId" }),
     executionDomain: "attachments-imports",
     postconditionSatisfied: (operation, state) => {
       const items = (state.items || []).filter((item) => item.exists);
       return (
-        items.length >= operation.identifiers.length &&
+        items.length > 0 &&
         (!operation.targetCollectionId ||
           items.every((item) =>
             (item.collectionIds || []).includes(operation.targetCollectionId!),
           ))
       );
     },
-    targetCount: (operation) => operation.identifiers.length,
-    affectedCount: (_operation, result) => resultCount(result, "succeeded"),
-    atomize: (operation) =>
-      onePer(operation, operation.identifiers, (identifier) => ({
-        ...operation,
-        identifiers: [identifier],
-      })),
+    // One operation, one identifier: the target count is constant, and the
+    // affected count reads the singular outcome object's produced items.
+    targetCount: () => 1,
+    affectedCount: (_operation, result) => resultImportedItemCount(result),
   }),
   trash_items: defineHandler("trash_items", {
     actionCapability: "zotero.trash",
@@ -911,35 +910,28 @@ export const libraryMutationHandlers = {
     destinationCollectionIds: (operation) =>
       operation.targetCollectionId ? [operation.targetCollectionId] : [],
     actionParameters: (operation) => ({
-      filePaths: operation.filePaths,
+      filePath: operation.filePath,
       destinationCollectionId: operation.targetCollectionId,
     }),
     stateSections: ["items"],
     deferredInverse: () => true,
     createdItemIds: (result) =>
-      resultRowIds({
-        result,
-        rowsKey: "items",
-        idKey: "itemId",
-        status: "imported",
-      }),
+      resultRowIds({ result, rowsKey: "items", idKey: "itemId" }),
     executionDomain: "attachments-imports",
     postconditionSatisfied: (operation, state) => {
       const items = (state.items || []).filter((item) => item.exists);
       return (
-        items.length >= operation.filePaths.length &&
+        items.length > 0 &&
         (!operation.targetCollectionId ||
           items.every((item) =>
             (item.collectionIds || []).includes(operation.targetCollectionId!),
           ))
       );
     },
-    targetCount: (operation) => operation.filePaths.length,
-    affectedCount: (_operation, result) => resultCount(result, "succeeded"),
-    atomize: (operation) =>
-      onePer(operation, operation.filePaths, (filePath) => ({
-        ...operation,
-        filePaths: [filePath],
-      })),
+    // One operation, one file: the target count is constant, and the
+    // affected count reads the singular outcome object's produced items
+    // (a bibliography file may legitimately produce several).
+    targetCount: () => 1,
+    affectedCount: (_operation, result) => resultImportedItemCount(result),
   }),
 } satisfies LibraryMutationHandlerRegistry;

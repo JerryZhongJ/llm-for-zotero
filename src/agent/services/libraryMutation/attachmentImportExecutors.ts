@@ -9,12 +9,12 @@ type DomainOperation =
 
 export const attachmentImportExecutors = {
   import_identifiers: async (operation, context, zoteroGateway) => {
-    const result = await zoteroGateway.importPapersByIdentifiers(
-      operation.identifiers,
+    const result = await zoteroGateway.importOnePaperByIdentifier(
+      operation.identifier,
       operation.libraryID,
       operation.targetCollectionId,
     );
-    const importedIds = result.itemIds || [];
+    const importedIds = result.items.map((item) => item.itemId);
     return {
       result: {
         operation: operation.type,
@@ -24,7 +24,9 @@ export const attachmentImportExecutors = {
       // Previously no undo at all — so after "create a collection, import
       // 50 papers into it", the top of the undo stack was the *collection
       // creation*. "Undo that" deleted the folder and left all 50 items
-      // behind, which is worse than a no-op.
+      // behind, which is worse than a no-op. One identifier can still
+      // produce several items, so the inverse stays a list-bearing action
+      // that reverts them all atomically.
       inverse: importedIds.length
         ? {
             inverseOperations: [
@@ -120,8 +122,8 @@ export const attachmentImportExecutors = {
     };
   },
   import_local_files: async (operation, context, zoteroGateway) => {
-    const result = await zoteroGateway.importLocalFiles({
-      filePaths: operation.filePaths,
+    const result = await zoteroGateway.importOneLocalFile({
+      filePath: operation.filePath,
       libraryID: operation.libraryID,
       targetCollectionId: operation.targetCollectionId,
       mode: operation.mode,
@@ -134,18 +136,16 @@ export const attachmentImportExecutors = {
         result,
       },
       inverse:
-        result.succeeded > 0
+        result.status === "imported"
           ? {
               inverseOperations: [
                 {
                   type: "trash_items" as const,
-                  itemIds: result.items
-                    .filter((item) => item.status === "imported" && item.itemId)
-                    .map((item) => item.itemId as number),
+                  itemIds: result.items.map((item) => item.itemId),
                 },
               ],
-              description: `Trash ${result.succeeded} imported item${
-                result.succeeded === 1 ? "" : "s"
+              description: `Trash the ${result.items.length} imported item${
+                result.items.length === 1 ? "" : "s"
               }`,
             }
           : null,

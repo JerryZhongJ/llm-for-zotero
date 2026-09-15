@@ -8,20 +8,11 @@ import {
   type ImportIdentifiersOperation,
 } from "../../services/libraryMutationService";
 import type { ZoteroGateway } from "../../services/zoteroGateway";
-import {
-  ok,
-  fail,
-  validateObject,
-  normalizePositiveInt,
-  normalizeStringArray,
-} from "../shared";
+import { ok, fail, validateObject, normalizePositiveInt } from "../shared";
 import {
   executeAndRecordUndo,
-  normalizeChecklistSelectionFromResolution,
   planLibraryMutations,
 } from "./mutateLibraryShared";
-
-const IDENTIFIERS_CHECKLIST_FIELD_ID = "identifiersChecklist";
 
 type ImportIdentifiersInput = {
   operation: ImportIdentifiersOperation;
@@ -67,21 +58,44 @@ export function createImportIdentifiersTool(
         onPending: "Waiting for confirmation to import papers",
         onApproved: "Importing papers",
         onDenied: "Paper import cancelled",
+        // The singular outcome object: one status, the produced items as a
+        // list (a URL identifier can legitimately resolve to several).
         onSuccess: ({ content }) => {
-          const result =
+          const outer =
             content && typeof content === "object"
               ? (content as Record<string, unknown>)
               : {};
-          const resultInner =
-            result.result && typeof result.result === "object"
-              ? (result.result as Record<string, unknown>)
-              : {};
-          const count = Number(
-            resultInner.importedCount || result.importedCount || 0,
-          );
-          return count > 0
-            ? `Imported ${count} paper${count === 1 ? "" : "s"}`
-            : "Papers imported";
+          const outcome =
+            outer.result && typeof outer.result === "object"
+              ? (outer.result as {
+                  status?: unknown;
+                  items?: unknown;
+                  reason?: unknown;
+                })
+              : null;
+          const produced = Array.isArray(outcome?.items)
+            ? outcome.items.length
+            : 0;
+          if (outcome?.status === "imported") {
+            return produced === 1
+              ? "Imported 1 paper"
+              : `Imported ${produced} papers`;
+          }
+          if (outcome?.status === "not_found") {
+            return `Not imported — identifier not found${
+              typeof outcome.reason === "string" && outcome.reason.trim()
+                ? ` (${outcome.reason.trim()})`
+                : ""
+            }`;
+          }
+          if (outcome?.status) {
+            return `Not imported — ${
+              typeof outcome.reason === "string" && outcome.reason.trim()
+                ? outcome.reason.trim()
+                : "import failed"
+            }`;
+          }
+          return "Import finished";
         },
       },
     },
@@ -89,10 +103,12 @@ export function createImportIdentifiersTool(
     validate(args: unknown) {
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail(
-          'Expected an object with identifiers. Example: { identifiers: ["10.1234/example"] }',
+          'Expected an object with identifier. Example: { identifier: "10.1234/example" }',
         );
       }
 
+      // Legacy plural input (from old transcripts) still resolves to its
+      // first entry so a hand-written call keeps working.
       const identifier =
         typeof args.identifier === "string" && args.identifier.trim()
           ? args.identifier.trim()
@@ -108,7 +124,7 @@ export function createImportIdentifiersTool(
 
       const operation: ImportIdentifiersOperation = {
         type: "import_identifiers",
-        identifiers: [identifier],
+        identifier,
         targetCollectionId:
           normalizePositiveInt(args.targetCollectionId) ||
           normalizePositiveInt(args.collectionId),
@@ -120,7 +136,6 @@ export function createImportIdentifiersTool(
 
     createPendingAction(input) {
       const operation = input.operation;
-      const identifier = operation.identifiers[0] || "";
       const collection = operation.targetCollectionId
         ? zoteroGateway.getCollectionSummary(operation.targetCollectionId)
         : null;
@@ -131,51 +146,17 @@ export function createImportIdentifiersTool(
         ? `Import into "${collectionLabel}".`
         : `Import into the library.`;
 
+      // One paper per call — a plain confirmation card; the checklist this
+      // tool used to show existed only to filter a batch that can no longer
+      // arrive.
       return {
         toolName: "import_identifiers",
-        title: "Import papers",
-        description,
+        title: "Import paper",
+        description: `${description} Identifier: ${operation.identifier}`,
         confirmLabel: "Import",
         cancelLabel: "Cancel",
-        fields: [
-          {
-            type: "checklist" as const,
-            id: IDENTIFIERS_CHECKLIST_FIELD_ID,
-            label: "Identifier to import",
-            items: [{ id: "0", label: identifier, checked: true }],
-          },
-        ],
+        fields: [],
       };
-    },
-
-    applyConfirmation(input, resolutionData) {
-      const selected = normalizeChecklistSelectionFromResolution(
-        resolutionData,
-        IDENTIFIERS_CHECKLIST_FIELD_ID,
-      );
-      // No resolution — auto_approve / non-HITL path.
-      if (selected === undefined) {
-        return ok(input);
-      }
-      if (!selected.length) {
-        return fail(
-          "No identifiers were left checked, so nothing was imported. Check the identifiers you want to import, or cancel the operation.",
-        );
-      }
-      // Row ids are indices into operation.identifiers, so "0" is a valid id.
-      const chosen = new Set(selected);
-      const identifiers = input.operation.identifiers.filter((_, index) =>
-        chosen.has(String(index)),
-      );
-      if (!identifiers.length) {
-        return fail(
-          "The confirmed selection did not match any of the identifiers in this request. Nothing was imported.",
-        );
-      }
-      return ok({
-        ...input,
-        operation: { ...input.operation, identifiers },
-      });
     },
 
     planMutation: (input, context) =>

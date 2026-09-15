@@ -260,6 +260,56 @@ function buildLibraryImportTraceSummary(content: unknown): string | null {
     !Array.isArray((outer as { result?: unknown }).result)
       ? ((outer as { result?: unknown }).result as Record<string, unknown>)
       : (outer as Record<string, unknown>);
+  // Singular outcome object: one status plus the produced items list.
+  // (Distinguished from the legacy batch shape below by having a top-level
+  // status and no succeeded/failed counters.)
+  if (typeof record.status === "string" && record.succeeded === undefined) {
+    const reason =
+      typeof record.reason === "string" && record.reason.trim()
+        ? record.reason.trim()
+        : "";
+    const collectionName =
+      typeof record.targetCollectionName === "string" &&
+      record.targetCollectionName.trim()
+        ? record.targetCollectionName.trim()
+        : undefined;
+    if (record.status === "imported") {
+      const items = Array.isArray(record.items) ? record.items : [];
+      const titles = items
+        .map((raw) =>
+          raw && typeof raw === "object"
+            ? (raw as { title?: unknown }).title
+            : undefined,
+        )
+        .filter(
+          (title): title is string =>
+            typeof title === "string" && title.trim().length > 0,
+        )
+        .map((title) => title.trim());
+      const suffix = collectionName ? ` to ${collectionName}` : "";
+      if (titles.length === 1) return `Imported "${titles[0]}"${suffix}`;
+      if (titles.length > 1) {
+        const MAX_LISTED_TITLES = 3;
+        const listed = titles
+          .slice(0, MAX_LISTED_TITLES)
+          .map((title) => `"${title}"`);
+        const unlisted = titles.length - listed.length;
+        return `Imported ${
+          unlisted > 0
+            ? `${listed.join(", ")} +${unlisted} more`
+            : listed.join(", ")
+        }${suffix}`;
+      }
+      const count = items.length;
+      return `Imported ${count} item${count === 1 ? "" : "s"}${suffix}`;
+    }
+    if (record.status === "not_found") {
+      return `Not imported — ${reason || "not found"}`;
+    }
+    return `Not imported — ${reason || "import failed"}`;
+  }
+  // Legacy batch shape: conversations stored before the singular-import
+  // refactor still render their historical tool results.
   const items = Array.isArray(record.items) ? (record.items as unknown[]) : [];
   const importedTitles: string[] = [];
   let importedCount = 0;
@@ -292,6 +342,15 @@ function buildLibraryImportTraceSummary(content: unknown): string | null {
           (raw as { status?: unknown }).status === "error",
       ).length,
     );
+    // The tool imports one paper per call, so the single-item wording is the
+    // common case; multi-row results only come from legacy plural calls or
+    // the MCP gateway path.
+    if (notFound === 1 && failed === 0) {
+      return "Not imported — identifier not found";
+    }
+    if (failed === 1 && notFound === 0) {
+      return "Not imported — identifier failed to import";
+    }
     if (notFound > 0 && failed > 0) {
       return `No items imported — ${notFound} not found, ${failed} failed`;
     }

@@ -164,48 +164,45 @@ describe("destructive checklist consent", function () {
   });
 
   describe("import_identifiers (single identifier per call)", function () {
-    function validated() {
+    it("validates a singular identifier into a singular operation", function () {
       const tool = createImportIdentifiersTool(fakeGateway);
-      const result = tool.validate({
-        identifier: "10.1/aaa",
-      });
+      const result = tool.validate({ identifier: "10.1/aaa" });
       assert.isTrue(result.ok, "fixture should validate");
-      if (!result.ok) throw new Error("unreachable");
-      return { tool, input: result.value };
-    }
-
-    it("imports when the single identifier stays checked", function () {
-      const { tool, input } = validated();
-      const applied = tool.applyConfirmation?.(input, {
-        identifiersChecklist: ["0"],
-      });
-      assert.isTrue(applied?.ok);
-      if (!applied?.ok) return;
-      assert.deepEqual(
-        (applied.value as { operation: { identifiers: string[] } }).operation
-          .identifiers,
-        ["10.1/aaa"],
-      );
+      if (!result.ok) return;
+      assert.equal(result.value.operation.identifier, "10.1/aaa");
+      // One paper per call — a plain approve/deny card, no batch checklist.
+      const action = tool.createPendingAction?.(result.value, {
+        request: { conversationKey: 1 },
+      } as never);
+      assert.deepEqual(action?.fields, []);
     });
 
-    it("fails when the identifier is unchecked", function () {
-      const { tool, input } = validated();
-      const applied = tool.applyConfirmation?.(input, {
-        identifiersChecklist: [],
+    it("keeps legacy plural input working by importing its first entry", function () {
+      const tool = createImportIdentifiersTool(fakeGateway);
+      const result = tool.validate({
+        identifiers: ["10.1/aaa", "10.1/bbb"],
       });
-      assert.isFalse(applied?.ok);
+      assert.isTrue(result.ok);
+      if (!result.ok) return;
+      assert.equal(result.value.operation.identifier, "10.1/aaa");
+    });
+
+    it("rejects input without any identifier", function () {
+      const tool = createImportIdentifiersTool(fakeGateway);
+      assert.isFalse(tool.validate({}).ok);
+      assert.isFalse(tool.validate({ identifiers: [] }).ok);
     });
   });
 
   describe("import_local_files (one file per call)", function () {
-    it("validates a singular filePath into a one-entry operation", function () {
+    it("validates a singular filePath into a singular operation", function () {
       const tool = createImportLocalFilesTool(fakeGateway);
       const result = tool.validate({ filePath: "/tmp/a.pdf" });
       assert.isTrue(result.ok);
       if (!result.ok) return;
-      assert.deepEqual(result.value.operation.filePaths, ["/tmp/a.pdf"]);
+      assert.equal(result.value.operation.filePath, "/tmp/a.pdf");
       // A plain approve/deny card: no checklist, since there is exactly one
-      // file to consent to and the batch card carries the per-call rows.
+      // file to consent to.
       const action = tool.createPendingAction?.(result.value, {
         request: { conversationKey: 1 },
       } as never);
@@ -217,7 +214,7 @@ describe("destructive checklist consent", function () {
       const result = tool.validate({ filePaths: ["/tmp/a.pdf", "/tmp/b.pdf"] });
       assert.isTrue(result.ok);
       if (!result.ok) return;
-      assert.deepEqual(result.value.operation.filePaths, ["/tmp/a.pdf"]);
+      assert.equal(result.value.operation.filePath, "/tmp/a.pdf");
     });
 
     it("rejects input without any path", function () {

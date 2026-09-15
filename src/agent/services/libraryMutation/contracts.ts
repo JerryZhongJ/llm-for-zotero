@@ -132,6 +132,11 @@ export type SetItemTagsOperation = {
   assignments: Array<{ itemId: number; tags: string[] }>;
 };
 
+/**
+ * Journal-history compatibility only: no tool produces this operation any
+ * more (note writes go one note per SaveNoteOperation), but persisted undo
+ * journals may still contain it and must stay replayable.
+ */
 export type SaveNotesBatchOperation = {
   id?: string;
   type: "save_notes_batch";
@@ -281,10 +286,10 @@ export type RelinkAttachmentOperation = {
 export type ImportLocalFilesOperation = {
   id?: string;
   type: "import_local_files";
-  filePaths: string[];
+  filePath: string;
   libraryID?: number;
   targetCollectionId?: number;
-  /** See ZoteroGateway.importLocalFiles. */
+  /** See ZoteroGateway.importOneLocalFile. */
   mode?: "auto" | "translate" | "attach";
   recognize?: boolean;
 };
@@ -292,7 +297,7 @@ export type ImportLocalFilesOperation = {
 export type ImportIdentifiersOperation = {
   id?: string;
   type: "import_identifiers";
-  identifiers: string[];
+  identifier: string;
   libraryID?: number;
   targetCollectionId?: number;
 };
@@ -330,6 +335,54 @@ export type LibraryMutationInverse = {
   inverseOperations?: LibraryMutationOperation[];
   irreversibleReason?: string;
 };
+
+/**
+ * Journal-history compatibility: undo journals persisted before the
+ * singular-import refactor store array-form operations
+ * (`identifiers: string[]` / `filePaths: string[]`). Handlers only accept
+ * the singular contract now, so normalize legacy shapes (first element
+ * wins) before any handler sees a journal-read operation. Idempotent:
+ * singular operations pass through unchanged.
+ */
+export function normalizeLegacyImportOperation(
+  operation: LibraryMutationOperation,
+): LibraryMutationOperation {
+  if (operation.type === "import_identifiers") {
+    const record = operation as unknown as {
+      identifier?: unknown;
+      identifiers?: unknown;
+    };
+    if (record.identifier === undefined) {
+      const legacy = Array.isArray(record.identifiers)
+        ? record.identifiers
+        : [];
+      const { identifiers: _drop, ...rest } = record;
+      void _drop;
+      return {
+        ...rest,
+        type: "import_identifiers",
+        identifier: String(legacy[0] ?? ""),
+      } as ImportIdentifiersOperation;
+    }
+  }
+  if (operation.type === "import_local_files") {
+    const record = operation as unknown as {
+      filePath?: unknown;
+      filePaths?: unknown;
+    };
+    if (record.filePath === undefined) {
+      const legacy = Array.isArray(record.filePaths) ? record.filePaths : [];
+      const { filePaths: _drop, ...rest } = record;
+      void _drop;
+      return {
+        ...rest,
+        type: "import_local_files",
+        filePath: String(legacy[0] ?? ""),
+      } as ImportLocalFilesOperation;
+    }
+  }
+  return operation;
+}
 
 export type LibraryMutationExecutionResult = {
   operation: LibraryMutationOperation["type"];

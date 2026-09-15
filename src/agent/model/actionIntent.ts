@@ -110,11 +110,13 @@ function parseParameters(value: unknown): AgentActionParameters | undefined {
     ...(stringValue("savedSearchName")
       ? { savedSearchName: stringValue("savedSearchName") }
       : {}),
-    ...(stringArray("identifiers")
-      ? { identifiers: stringArray("identifiers") }
+    // Imports are one paper / one file per call; a legacy array parameter
+    // normalizes to its first entry rather than reaching a singular tool.
+    ...(stringArray("identifiers")?.[0]
+      ? { identifier: stringArray("identifiers")![0] }
       : {}),
-    ...(stringArray("filePaths")
-      ? { filePaths: stringArray("filePaths") }
+    ...(stringArray("filePaths")?.[0]
+      ? { filePath: stringArray("filePaths")![0] }
       : {}),
     ...(stringValue("contentHash")
       ? { contentHash: stringValue("contentHash") }

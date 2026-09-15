@@ -9,6 +9,12 @@ export const resultCount = (result: unknown, key: string): number => {
 export const resultStatus = (result: unknown, status: string): number =>
   (result as { status?: unknown } | null)?.status === status ? 1 : 0;
 
+/** Affected count for singular import operations (one outcome object). */
+export const resultImportedItemCount = (result: unknown): number => {
+  if ((result as { status?: unknown } | null)?.status !== "imported") return 0;
+  return resultRowIds({ result, rowsKey: "items", idKey: "itemId" }).length;
+};
+
 export function resultId(result: unknown, key: string): number[] {
   const value =
     result && typeof result === "object"

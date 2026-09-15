@@ -154,9 +154,9 @@ describe("action compatibility after tool refactors", function () {
           importCalls.push(input);
           return {
             result: {
-              succeeded: 1,
-              failed: 1,
-              itemIds: [501],
+              // Singular outcome object: one status, produced items list.
+              status: "imported",
+              items: [{ itemId: 501 }],
             },
           };
         },
