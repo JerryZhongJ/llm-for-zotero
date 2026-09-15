@@ -4,6 +4,20 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
+## 3.11.1 - 2026-09-15
+
+### Fixed
+
+- GLM via open.bigmodel.cn's Anthropic-compatible endpoint no longer fails
+  with `max_tokens 参数非法`: an unset max-tokens fell back to the
+  catalog's internal "unknown" sentinel and was sent as-is. Unset values
+  now fall back to the catalogued model limit (GLM 4.6/4.5 added to the
+  capability registry) or are omitted so the provider default applies.
+- Compaction and context-usage budgeting now assume a conservative 128k
+  window for models unknown to the capability catalog — previously the
+  uncapped limit meant the compaction ratio was always zero and
+  long conversations grew until the provider rejected them.
+
 ## 3.11.0 - 2026-09-14
 
 ### Added
