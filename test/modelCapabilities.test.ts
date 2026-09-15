@@ -220,7 +220,7 @@ describe("model capability service", function () {
           return new Response(
             JSON.stringify({
               schemaVersion: 1,
-              revision: 5,
+              revision: 6,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },
@@ -287,7 +287,7 @@ describe("model capability service", function () {
           text: async () =>
             JSON.stringify({
               schemaVersion: 1,
-              revision: 5,
+              revision: 6,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },
@@ -526,6 +526,26 @@ describe("model capability service", function () {
     assert.equal(capabilities.reasoning.defaultOptionId, "max");
     const compiled = compileReasoningControls(capabilities, { level: "low" });
     assert.deepEqual(compiled?.extra, { reasoning_effort: "low" });
+  });
+
+  it("compiles glm-5.3 forced-thinking reasoning as the top-level reasoning_effort field", function () {
+    const identity = {
+      provider: "glm" as const,
+      apiBase: "https://open.bigmodel.cn/api/anthropic",
+      protocol: "anthropic_messages" as const,
+    };
+    const flash = getModelCapabilities({ ...identity, model: "glm-5.3-flash" });
+    assert.equal(flash.reasoning.kind, "select");
+    assert.equal(flash.reasoning.defaultOptionId, "max");
+    assert.equal(flash.limits.contextWindowTokens, 1_048_576);
+    assert.equal(flash.limits.outputTokens, 131_072);
+    assert.deepEqual(compileReasoningControls(flash, { level: "low" })?.extra, {
+      reasoning_effort: "low",
+    });
+    const full = getModelCapabilities({ ...identity, model: "glm-5.3" });
+    assert.deepEqual(compileReasoningControls(full, { level: "high" })?.extra, {
+      reasoning_effort: "high",
+    });
   });
 
   it("maps Kimi-for-Coding model ids onto the K3 capability entries", function () {

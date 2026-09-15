@@ -1,7 +1,51 @@
 {
   "schemaVersion": 1,
-  "revision": 4,
+  "revision": 5,
   "models": [
+    {
+      "match": {
+        "provider": "glm",
+        "prefix": "glm-5.3"
+      },
+      "limits": {
+        "contextWindowTokens": 1048576,
+        "inputTokens": 1048576,
+        "outputTokens": 131072
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "max",
+        "options": [
+          {
+            "id": "low",
+            "label": "Low",
+            "controls": {
+              "body": {
+                "reasoning_effort": "low"
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "High",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              }
+            }
+          },
+          {
+            "id": "max",
+            "label": "Max",
+            "controls": {
+              "body": {
+                "reasoning_effort": "max"
+              }
+            }
+          }
+        ]
+      }
+    },
     {
       "match": {
         "provider": "glm",

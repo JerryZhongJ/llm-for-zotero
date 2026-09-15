@@ -4,6 +4,14 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
+## Unreleased
+
+### Added
+
+- **GLM-5.3 capability registry entry** — glm-5.3 and glm-5.3-flash get their
+  real limits (1M context, 131072 output) plus a thinking-effort selector
+  (max / high / low) matching the model's forced-thinking behavior.
+
 ## 3.11.1 - 2026-09-15
 
 ### Fixed

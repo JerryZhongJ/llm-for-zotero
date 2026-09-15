@@ -42,6 +42,8 @@ describe("modelInputCap", function () {
       assert.equal(getModelInputTokenLimit("glm-4.6"), 200000);
       assert.equal(getModelInputTokenLimit("glm-4.6-flash"), 200000);
       assert.equal(getModelInputTokenLimit("glm-4.5-air"), 200000);
+      assert.equal(getModelInputTokenLimit("glm-5.3"), 1048576);
+      assert.equal(getModelInputTokenLimit("glm-5.3-flash"), 1048576);
     });
   });
 
