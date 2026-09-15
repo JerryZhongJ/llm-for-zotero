@@ -240,7 +240,6 @@ export function createSearchLiteratureOnlineTool(
     presentation: {
       label: "Search Literature Online",
       traceIcon: "library",
-      mergeResultIntoCallTrace: true,
       buildTraceDetails: ({ args, content }) =>
         buildLiteratureTraceDetails(args, content),
       summaries: {

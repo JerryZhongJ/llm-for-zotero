@@ -2622,110 +2622,69 @@ function toolLabelFromName(name: string): string {
     .join(" ");
 }
 
-function buildAgentTraceToolChips(
-  toolName: string,
-  args: unknown,
-  userMessage: Message | null | undefined,
-): AgentTraceChip[] {
-  const requestSummary = buildAgentTraceRequestSummary(userMessage);
-  const customChips = getToolDefinition(toolName)?.presentation?.buildChips?.({
-    args,
-    request: requestSummary,
-  });
-  if (Array.isArray(customChips) && customChips.length) {
-    return customChips;
-  }
+type AgentTraceToolParamInfo = {
+  /** Compact key parameters to append to the row text itself. */
+  textParts: string[];
+  /** Full parameter values for the row's expandable details. */
+  details: AgentTraceDetail[];
+};
 
+/**
+ * Key call parameters flow into the row text itself — no separate parameter
+ * pills. At most the two most identifying values join the text (query first,
+ * then paper title / pattern / URL); every parameter lands in the expandable
+ * details with its full value.
+ */
+function buildAgentTraceToolParamInfo(args: unknown): AgentTraceToolParamInfo {
   const record = isAgentTraceRecord(args) ? args : null;
-  const chips: AgentTraceChip[] = [];
+  const details: AgentTraceDetail[] = [];
+  const textParts: string[] = [];
+
+  const collect = (
+    label: string,
+    value: unknown,
+    options: {
+      kind?: AgentTraceDetail["kind"];
+      inText?: boolean;
+    } = {},
+  ) => {
+    const compact = compactAgentTraceText(value);
+    if (!compact) return;
+    const detail = normalizeAgentTraceDetail(
+      label,
+      compact,
+      options.kind || "text",
+    );
+    if (detail) details.push(detail);
+    if (options.inText) {
+      textParts.push(
+        compact.length > 64 ? `${compact.slice(0, 61)}…` : compact,
+      );
+    }
+  };
+
   const paperContext = isAgentTraceRecord(record?.paperContext)
     ? record?.paperContext
     : null;
-  if (paperContext) {
-    const paperTitle =
-      readAgentTraceText(paperContext.title) ||
-      `Paper ${paperContext.itemId ?? ""}`.trim();
-    chips.push({
-      iconName: "paper",
-      label: "Paper",
-      title: paperTitle,
-      detail: normalizeAgentTraceDetail("Paper", paperTitle) || undefined,
-    });
-  }
-
-  const query = readAgentTraceText(record?.query);
-  if (query) {
-    chips.push({
-      icon: "⌕",
-      label: "Query",
-      title: query,
-      detail: normalizeAgentTraceDetail("Query", query) || undefined,
-    });
-  }
-
-  const url = readAgentTraceText(record?.url);
-  if (url) {
-    chips.push({
-      icon: "↗",
-      label: "URL",
-      title: url,
-      detail: normalizeAgentTraceDetail("URL", url, "url") || undefined,
-    });
-  }
-
-  const pattern = readAgentTraceText(record?.pattern);
-  if (pattern) {
-    chips.push({
-      icon: "⌕",
-      label: "Pattern",
-      title: pattern,
-      detail: normalizeAgentTraceDetail("Pattern", pattern) || undefined,
-    });
-  }
-
-  const attachmentName = readAgentTraceText(record?.name);
-  if (attachmentName) {
-    chips.push({
-      iconName: /\.pdf$/i.test(attachmentName) ? "pdf" : "file",
-      label: "File",
-      title: attachmentName,
-      detail: normalizeAgentTraceDetail("File", attachmentName) || undefined,
-    });
-  }
-
-  const status = readAgentTraceText(record?.status);
-  if (status) {
-    chips.push({
-      icon: "•",
-      label: "Status",
-      title: `status: ${status}`,
-      detail: normalizeAgentTraceDetail("Status", status) || undefined,
-    });
-  }
-
+  collect(
+    "Paper",
+    paperContext
+      ? readAgentTraceText(paperContext.title) ||
+          `Paper ${paperContext.itemId ?? ""}`.trim()
+      : "",
+    { inText: true },
+  );
+  collect("Query", record?.query, { inText: true });
+  collect("Pattern", record?.pattern, { inText: true });
+  collect("URL", record?.url, { kind: "url", inText: true });
+  collect("File", record?.name);
+  collect("Status", record?.status);
   const saved =
     readAgentTraceText(record?.saved) || readAgentTraceText(record?.savedPath);
-  if (saved) {
-    chips.push({
-      iconName: "image",
-      label: "Saved",
-      title: saved,
-      detail: normalizeAgentTraceDetail("Saved", saved) || undefined,
-    });
-  }
-
-  const path = !saved ? readAgentTraceText(record?.path) : null;
-  if (path) {
-    chips.push({
-      iconName: "image",
-      label: "Path",
-      title: path,
-      detail: normalizeAgentTraceDetail("Path", path) || undefined,
-    });
-  }
-
+  collect("Saved", saved);
+  if (!saved) collect("Path", record?.path);
   const pages =
-    Array.isArray(record?.pages) && record?.pages.length
+    Array.isArray(record?.pages) && record.pages.length
       ? record.pages
       : readAgentTraceText(record?.pages)
         ? [record?.pages]
@@ -2738,21 +2697,20 @@ function buildAgentTraceToolChips(
           : compactAgentTraceText(entry),
       )
       .join(", ");
-    if (labels) {
-      chips.push({
-        icon: "§",
-        label: "Pages",
-        title: labels,
-        detail: normalizeAgentTraceDetail("Pages", labels) || undefined,
-      });
-    }
+    collect("Pages", labels);
   }
 
-  if (!chips.length && toolName === "get_active_context") {
-    return buildAgentTraceRequestChips(userMessage);
-  }
+  return { textParts: textParts.slice(0, 2), details };
+}
 
-  return chips;
+/** Append key parameters to the row text, skipping values it already names. */
+function appendAgentTraceParamParts(
+  row: AgentTraceSummaryRow,
+  textParts: string[],
+): AgentTraceSummaryRow {
+  const fresh = textParts.filter((part) => part && !row.text.includes(part));
+  if (!fresh.length) return row;
+  return { ...row, text: `${row.text} — ${fresh.join(" · ")}` };
 }
 
 function detailLabelFromChip(chip: AgentTraceChip): string {
@@ -3162,7 +3120,7 @@ function buildWriteOutcomeDetails(content: unknown): AgentTraceDetail[] {
       }
     }
   }
-  for (const key of ["succeeded", "failed", "importedCount", "pdfsFetched"]) {
+  for (const key of ["succeeded", "failed", "importedCount"]) {
     const value = result[key];
     if (typeof value === "number") lines.push(`${key}: ${value}`);
   }
@@ -3575,6 +3533,8 @@ type AgentTraceAdapterContext = {
     string,
     Extract<AgentRunEventRecord["payload"], { type: "tool_result" }>
   >;
+  /** callIds of every tool_call event — a result with no call row is legacy. */
+  toolCallIds: Set<string>;
   announcedWriting: boolean;
   lastMeaningfulStatus: string | null;
   reasoningLabels: Map<string, string>;
@@ -3769,6 +3729,34 @@ function appendLegacyAgentTraceEvent(
         } else {
           row = { ...row, transient: true };
         }
+      } else if (resultEvent) {
+        // Read tools follow the same single-row lifecycle: once the result
+        // arrives the call row BECOMES the outcome instead of leaving the
+        // attempt text behind and adding a second result row. The lookup is
+        // keyed by callId, so parallel calls each update their own row.
+        if (hookSummary) {
+          row = {
+            ...row,
+            kind: resultEvent.ok ? "ok" : "skip",
+            icon: resultEvent.ok ? "✓" : "!",
+          };
+        } else {
+          const outcomeRow = summarizeAgentTraceToolResult(
+            entry.payload.name,
+            resultEvent.ok,
+            resultEvent.content,
+            resultEvent.effect,
+            ctx.requestSummary,
+          );
+          if (outcomeRow) {
+            row = {
+              ...row,
+              kind: outcomeRow.kind,
+              icon: outcomeRow.icon,
+              text: outcomeRow.text,
+            };
+          }
+        }
       }
       // Attach the inline Undo affordance to this main action row — the one
       // carrying the summary text, chips, and expandable details — whenever
@@ -3777,14 +3765,14 @@ function appendLegacyAgentTraceEvent(
       if (undoActionId) {
         row = { ...row, undoActionId };
       }
+      // Key parameters ride in the row text itself; full values expand from
+      // the row (no separate parameter pills).
+      const paramInfo = buildAgentTraceToolParamInfo(entry.payload.args);
+      row = appendAgentTraceParamParts(row, paramInfo.textParts);
+      details.push(...paramInfo.details);
       ctx.items.push({
         type: "action",
         row,
-        chips: buildAgentTraceToolChips(
-          entry.payload.name,
-          entry.payload.args,
-          ctx.userMessage,
-        ),
         details: dedupeAgentTraceDetails(details),
         detailKey: `tool-call:${entry.payload.callId}`,
       });
@@ -3795,52 +3783,45 @@ function appendLegacyAgentTraceEvent(
       appendReasoningTraceItem(ctx, entry.payload);
       return true;
     case "tool_result": {
-      if (
-        entry.payload.ok &&
-        getToolDefinition(entry.payload.name)?.presentation
-          ?.mergeResultIntoCallTrace
-      ) {
-        return true;
-      }
-      // Write outcomes render on the tool-call row (highlighted, persistent);
-      // a second bare result row here would only duplicate it.
-      if (getToolDefinition(entry.payload.name)?.spec.mutability === "write") {
-        return true;
-      }
-      const row = summarizeAgentTraceToolResult(
-        entry.payload.name,
-        entry.payload.ok,
-        entry.payload.content,
-        entry.payload.effect,
-        ctx.requestSummary,
-      );
-      if (row) {
-        ctx.items.push({
-          type: "action",
-          row,
-        });
-        if (entry.payload.ok) {
-          try {
-            const cards =
-              getToolDefinition(
-                entry.payload.name,
-              )?.presentation?.buildResultCards?.(entry.payload.content) ??
-              null;
-            if (cards && cards.length > 0) {
-              ctx.items.push({ type: "card_list", cards });
-            }
-          } catch {
-            // card generation errors must not crash the trace
-          }
+      // Every outcome renders on its tool-call row (keyed by callId — parallel
+      // calls each own one row); a bare result row here would only duplicate
+      // it. Results whose call event is missing (legacy stored traces) still
+      // need a visible outcome row of their own.
+      const hasCallRow = ctx.toolCallIds.has(entry.payload.callId);
+      let row: AgentTraceSummaryRow | null = null;
+      if (!hasCallRow) {
+        row = summarizeAgentTraceToolResult(
+          entry.payload.name,
+          entry.payload.ok,
+          entry.payload.content,
+          entry.payload.effect,
+          ctx.requestSummary,
+        );
+        if (row) {
+          ctx.items.push({
+            type: "action",
+            row,
+          });
         }
       }
       if (entry.payload.ok) {
+        try {
+          const cards =
+            getToolDefinition(
+              entry.payload.name,
+            )?.presentation?.buildResultCards?.(entry.payload.content) ?? null;
+          if (cards && cards.length > 0) {
+            ctx.items.push({ type: "card_list", cards });
+          }
+        } catch {
+          // card generation errors must not crash the trace
+        }
         const hasImageGrid = appendImageArtifactGrid(
           ctx,
           entry.payload.artifacts,
           `tool-result:${entry.payload.callId}`,
         );
-        if (hasImageGrid && !row) {
+        if (hasImageGrid && !row && !hasCallRow) {
           const inserted = ctx.items.pop();
           ctx.items.push({
             type: "action",
@@ -3901,27 +3882,27 @@ function appendCodexAgentTraceEvent(
           : []),
         ...buildAgentTraceArgsDetails(toolName, entry.payload.args),
       ].filter((detail): detail is AgentTraceDetail => Boolean(detail));
+      const codexRow = summarizeCodexToolActivity({
+        phase: entry.payload.phase,
+        toolName,
+        toolLabel: entry.payload.toolLabel,
+        serverName: entry.payload.serverName,
+        args: entry.payload.args,
+        ok: entry.payload.ok,
+        text: entry.payload.text,
+        codeBlock: entry.payload.codeBlock,
+        artifacts: entry.payload.artifacts,
+      });
+      // Same parameter presentation as native tool calls: key values in the
+      // row text, full values in the expandable details.
+      const codexParamInfo = buildAgentTraceToolParamInfo(entry.payload.args);
       ctx.items.push({
         type: "action",
-        row: summarizeCodexToolActivity({
-          phase: entry.payload.phase,
-          toolName,
-          toolLabel: entry.payload.toolLabel,
-          serverName: entry.payload.serverName,
-          args: entry.payload.args,
-          ok: entry.payload.ok,
-          text: entry.payload.text,
-          codeBlock: entry.payload.codeBlock,
-          artifacts: entry.payload.artifacts,
-        }),
-        chips: toolName
-          ? buildAgentTraceToolChips(
-              toolName,
-              entry.payload.args,
-              ctx.userMessage,
-            )
-          : undefined,
-        details,
+        row: appendAgentTraceParamParts(codexRow, codexParamInfo.textParts),
+        details: dedupeAgentTraceDetails([
+          ...details,
+          ...codexParamInfo.details,
+        ]),
         detailKey: `codex:${entry.payload.itemId}`,
       });
       if (entry.payload.phase === "completed" && entry.payload.ok !== false) {
@@ -4032,9 +4013,12 @@ export function buildAgentTraceDisplayItems(
     string,
     Extract<AgentRunEventRecord["payload"], { type: "tool_result" }>
   >();
+  const toolCallIds = new Set<string>();
   for (const entry of compactedEvents) {
     if (entry.payload.type === "tool_result") {
       toolResultsByCallId.set(entry.payload.callId, entry.payload);
+    } else if (entry.payload.type === "tool_call") {
+      toolCallIds.add(entry.payload.callId);
     }
   }
   const isInterleaved = hasInterleavedTextAndTools(events, {
@@ -4050,6 +4034,7 @@ export function buildAgentTraceDisplayItems(
     userMessage,
     pendingActions: new Map<string, AgentPendingAction>(),
     toolResultsByCallId,
+    toolCallIds,
     announcedWriting: false,
     lastMeaningfulStatus: null,
     reasoningLabels: new Map<string, string>(),

@@ -303,35 +303,6 @@ export function createLibraryRetrieveTool(
           return `Retrieved ${snippets} snippets; inspected metadata ${metadata}/${total}, scanned indexed/searchable text ${indexedScanned}/${indexedAvailable}, expanded snippets from ${expanded} papers`;
         },
       },
-      buildChips: ({ args }) => {
-        const record = validateObject<Record<string, unknown>>(args)
-          ? args
-          : {};
-        const chips = [
-          {
-            label: `depth:${typeof record.depth === "string" ? record.depth : "evidence"}`,
-          },
-        ];
-        if (typeof record.intent === "string") {
-          chips.push({ label: `intent:${record.intent}` });
-        }
-        const scope = validateObject<Record<string, unknown>>(record.scope)
-          ? record.scope
-          : {};
-        const collectionIds = Array.isArray(scope.collectionIds)
-          ? scope.collectionIds
-          : [];
-        if (collectionIds.length) {
-          chips.push({ label: `${collectionIds.length} collections` });
-        }
-        const tagNames = Array.isArray(scope.tagNames) ? scope.tagNames : [];
-        const tagScopes = Array.isArray(scope.tagScopes) ? scope.tagScopes : [];
-        const tagCount = tagNames.length + tagScopes.length;
-        if (tagCount) {
-          chips.push({ label: `${tagCount} tags` });
-        }
-        return chips;
-      },
     },
     validate(args) {
       const input = normalizeLibraryRetrieveArgs(args);

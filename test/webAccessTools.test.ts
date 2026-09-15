@@ -356,7 +356,6 @@ describe("web access agent tools", function () {
     };
     const result = await search.execute(args, context());
     assert.equal(search.presentation?.traceIcon, "web");
-    assert.isTrue(search.presentation?.mergeResultIntoCallTrace);
     assert.equal(
       search.presentation?.buildTraceSummary?.({ args, content: result }),
       "Searched web · Depth: advanced",

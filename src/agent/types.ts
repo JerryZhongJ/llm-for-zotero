@@ -826,16 +826,10 @@ export type AgentToolPresentation = {
     onEmpty?: AgentToolPresentationSummary;
     onError?: AgentToolPresentationSummary;
   };
-  buildChips?: (params: {
-    args: unknown;
-    request?: AgentTraceRequestSummary;
-  }) => AgentTraceChip[];
   buildTraceDetails?: (params: {
     args: unknown;
     content?: unknown;
   }) => AgentTraceDetail[];
-  /** Merge a successful result into its expandable call row in the trace. */
-  mergeResultIntoCallTrace?: boolean;
   /**
    * One-step trace row text for this tool's call. The renderer stays
    * open/closed: it only invokes this hook, so a new operation ships its own

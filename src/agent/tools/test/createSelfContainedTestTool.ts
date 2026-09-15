@@ -41,13 +41,6 @@ export function createSelfContainedTestTool(): AgentWriteToolDefinition<
         onDenied: "Self-contained demo cancelled",
         onSuccess: "Completed the self-contained demo",
       },
-      buildChips: () => [
-        {
-          icon: "◇",
-          label: "Self-contained",
-          title: "Custom chip from the tool definition",
-        },
-      ],
     },
     validate: (args) => {
       if (!validateObject<Record<string, unknown>>(args)) {

@@ -260,7 +260,6 @@ export function createWebSearchTool(
     presentation: {
       label: "Search Web",
       traceIcon: "web",
-      mergeResultIntoCallTrace: true,
       buildTraceSummary: ({ args, content }) => {
         const input = validateWebSearchInput(args);
         const result = content as Partial<WebSearchToolResult> | undefined;

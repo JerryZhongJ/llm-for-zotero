@@ -201,7 +201,6 @@ describe("search_literature_online tool", function () {
     assert.equal(results[0].title, "Related Paper");
     assert.equal(results[0].doi, "10.1000/related");
     assert.equal(tool.presentation?.traceIcon, "library");
-    assert.isTrue(tool.presentation?.mergeResultIntoCallTrace);
     assert.deepEqual(
       tool.presentation?.buildTraceDetails?.({
         args: validated.value,

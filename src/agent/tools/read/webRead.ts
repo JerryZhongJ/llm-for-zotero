@@ -148,7 +148,6 @@ export function createWebReadTool(
     presentation: {
       label: "Read Web Pages",
       traceIcon: "web",
-      mergeResultIntoCallTrace: true,
       buildTraceSummary: ({ args, content }) => {
         const input = validateWebReadInput(args);
         const result = content as Partial<WebReadToolResult> | undefined;

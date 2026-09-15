@@ -2624,7 +2624,10 @@ describe("agentTrace render", function () {
       events,
     }) as unknown as FakeElement;
 
-    assert.deepInclude(getCodexTraceActionTexts(events), "Extracted 2 figures");
+    assert.deepInclude(
+      getCodexTraceActionTexts(events),
+      "Extracted 2 figures — Figure 1",
+    );
     assert.deepEqual(
       trace
         .findAllByClass("llm-assistant-generated-image")
@@ -3509,17 +3512,16 @@ describe("agentTrace render", function () {
     assert.include(values, command);
     assert.isEmpty(trace.findAllByClass("llm-at-expand"));
 
-    const chipLabels = trace
-      .findAllByClass("llm-agent-process-chip-label")
+    const detailLabels = trace
+      .findAllByClass("llm-agent-process-detail-label")
       .map(collectFakeText);
-    assert.includeMembers(chipLabels, [
+    assert.includeMembers(detailLabels, [
       "Query",
       "URL",
       "Pattern",
       "Path",
       "Status",
     ]);
-    assert.isFalse(chipLabels.some((label) => label.includes("...")));
   });
 
   it("makes Claude Read calls with empty arguments distinguishable and expandable", function () {
@@ -5546,6 +5548,129 @@ describe("agentTrace render", function () {
 
     assert.include(actionTexts, "Invoked Skill: evidence-based-qa");
     assert.notInclude(actionTexts, "Using Skill: evidence-based-qa");
+  });
+
+  it("keeps an in-flight tool call on one row with its key parameter in the text", function () {
+    const events: AgentRunEventRecord[] = [
+      {
+        runId: "run-1",
+        seq: 1,
+        eventType: "tool_call",
+        payload: {
+          type: "tool_call",
+          callId: "call-1",
+          name: "probe_tool",
+          args: { query: "attention mechanisms" },
+        },
+        createdAt: 1,
+      },
+    ];
+
+    const { items } = buildAgentTraceDisplayItems(events, null);
+    const toolRows = items.filter(
+      (item): item is Extract<(typeof items)[number], { type: "action" }> =>
+        item.type === "action" && Boolean(item.row.toolName),
+    );
+    assert.lengthOf(toolRows, 1);
+    // The key parameter rides in the row text — no separate parameter pills.
+    assert.equal(
+      toolRows[0]?.row.text,
+      "Using Probe Tool — attention mechanisms",
+    );
+  });
+
+  it("replaces the call row with its outcome instead of adding a second row", function () {
+    const events: AgentRunEventRecord[] = [
+      {
+        runId: "run-1",
+        seq: 1,
+        eventType: "tool_call",
+        payload: {
+          type: "tool_call",
+          callId: "call-1",
+          name: "probe_tool",
+          args: { query: "attention mechanisms" },
+        },
+        createdAt: 1,
+      },
+      {
+        runId: "run-1",
+        seq: 2,
+        eventType: "tool_result",
+        payload: {
+          type: "tool_result",
+          callId: "call-1",
+          name: "probe_tool",
+          ok: false,
+          content: { error: "boom" },
+        },
+        createdAt: 2,
+      },
+    ];
+
+    const { items } = buildAgentTraceDisplayItems(events, null);
+    const toolRows = items.filter(
+      (item): item is Extract<(typeof items)[number], { type: "action" }> =>
+        item.type === "action" && Boolean(item.row.toolName),
+    );
+    // One row per operation: the call row became the outcome.
+    assert.lengthOf(toolRows, 1);
+    assert.equal(toolRows[0]?.row.kind, "skip");
+    assert.equal(
+      toolRows[0]?.row.text,
+      "Could not complete Probe Tool: boom — attention mechanisms",
+    );
+  });
+
+  it("keeps parallel tool calls on their own outcome rows", function () {
+    const call = (callId: string, query: string, seq: number, at: number) => [
+      {
+        runId: "run-1",
+        seq,
+        eventType: "tool_call",
+        payload: {
+          type: "tool_call",
+          callId,
+          name: "probe_tool",
+          args: { query },
+        },
+        createdAt: at,
+      },
+      {
+        runId: "run-1",
+        seq: seq + 1,
+        eventType: "tool_result",
+        payload: {
+          type: "tool_result",
+          callId,
+          name: "probe_tool",
+          ok: false,
+          content: { error: "boom" },
+        },
+        createdAt: at + 1,
+      },
+    ];
+    const events: AgentRunEventRecord[] = [
+      ...call("call-1", "attention mechanisms", 1, 1),
+      ...call("call-2", "sparse retrieval", 3, 3),
+    ];
+
+    const { items } = buildAgentTraceDisplayItems(events, null);
+    const toolRows = items
+      .filter(
+        (item): item is Extract<(typeof items)[number], { type: "action" }> =>
+          item.type === "action" && Boolean(item.row.toolName),
+      )
+      .map((item) => item.row.text);
+    assert.lengthOf(toolRows, 2);
+    assert.include(
+      toolRows,
+      "Could not complete Probe Tool: boom — attention mechanisms",
+    );
+    assert.include(
+      toolRows,
+      "Could not complete Probe Tool: boom — sparse retrieval",
+    );
   });
 });
 
