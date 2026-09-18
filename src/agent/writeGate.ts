@@ -28,28 +28,98 @@ export function canUseWriteGateModel(
   return Boolean(request.apiBase);
 }
 
-function parseVerdict(raw: string): WriteGateVerdict {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0]) as {
-        allow?: unknown;
-        reason?: unknown;
-      };
-      const reason =
-        typeof parsed.reason === "string" && parsed.reason.trim()
-          ? parsed.reason.trim()
-          : undefined;
-      if (parsed.allow === true) return { kind: "allow", reason };
-      if (parsed.allow === false)
-        return {
-          kind: "refuse",
-          reason: reason || "not covered by the user's request",
-        };
-    } catch {
-      // fall through to the conservative refusal below
+function interpretAllow(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+}
+
+function verdictFromObject(value: unknown): WriteGateVerdict | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const record = value as { allow?: unknown; reason?: unknown };
+  const allow = interpretAllow(record.allow);
+  if (allow === undefined) return undefined;
+  const reason =
+    typeof record.reason === "string" && record.reason.trim()
+      ? record.reason.trim()
+      : undefined;
+  return allow
+    ? { kind: "allow", reason }
+    : { kind: "refuse", reason: reason || "not covered by the user's request" };
+}
+
+/**
+ * Every balanced top-level `{...}` span, in order of appearance.
+ *
+ * A single greedy `\{[\s\S]*\}` spans from the first brace to the last, so a
+ * reply that quotes any brace-bearing text around the verdict JSON — and the
+ * gate summary for `zotero_script` is 2400 chars of script source, which the
+ * judging model routinely quotes back — parsed as one invalid blob and every
+ * verdict became "could not interpret". Trying each span separately, latest
+ * first (the verdict is the reply's payload, not its preamble), recovers the
+ * object even when it is surrounded by prose.
+ */
+function balancedObjectSpans(raw: string): string[] {
+  const spans: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      if (inString) escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) spans.push(raw.slice(start, index + 1));
     }
   }
+  return spans;
+}
+
+function logUnparsableVerdict(raw: string): void {
+  // Parse failures used to be silent, so a model that never produced strict
+  // JSON was indistinguishable from one that was never asked. The log is the
+  // only place the raw reply ever surfaces.
+  (
+    globalThis as typeof globalThis & {
+      Zotero?: { debug?: (message: string) => void };
+    }
+  ).Zotero?.debug?.(
+    `[llm-for-zotero] write gate could not parse verdict: ${raw.slice(0, 300)}`,
+  );
+}
+
+function parseVerdict(raw: string): WriteGateVerdict {
+  const spans = balancedObjectSpans(raw);
+  for (let index = spans.length - 1; index >= 0; index -= 1) {
+    try {
+      const verdict = verdictFromObject(JSON.parse(spans[index]));
+      if (verdict) return verdict;
+    } catch {
+      // Not this span; try the next candidate.
+    }
+  }
+  logUnparsableVerdict(raw);
   return {
     kind: "refuse",
     reason: "the gate could not interpret its verdict",
@@ -91,7 +161,9 @@ export async function judgeIrreversibleWrite(params: {
     authMode: request.authMode,
     providerProtocol: request.providerProtocol,
     profileOverride: request.advanced?.profileOverride,
-    jsonBudget: 120,
+    // Generous on purpose: a reply that hits the cap mid-JSON loses its
+    // closing brace and no parser can recover a verdict from it.
+    jsonBudget: 256,
     temperature: 0,
     timeoutMs: 15000,
     llmCall: params.llmCall,
