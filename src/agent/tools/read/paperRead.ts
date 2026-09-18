@@ -945,8 +945,14 @@ export function createPaperReadTool(
               { type: "number" },
               { type: "array", items: { type: "number" } },
             ],
+            description:
+              "1-based page numbers (e.g. 17, [16,17,18], or '16-20'). When set, bypasses relevance ranking entirely and returns the raw text of exactly those pages — use it whenever the target location is known (a specific table/figure/section) instead of rephrasing the query. Mentioning page numbers inside 'query' has no effect on ranking.",
           },
-          neighborPages: { type: "number" },
+          neighborPages: {
+            type: "number",
+            description:
+              "With 'pages': also include this many adjacent pages before and after each requested page.",
+          },
           maxChars: { type: "number" },
           topK: { type: "number" },
         },
