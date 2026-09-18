@@ -358,7 +358,10 @@ describe("semantic tool surface", function () {
     const registry = createTestBuiltInRegistry();
     const tool = registry.getTool("library_import");
     assert.exists(tool);
-    const validation = tool!.validate({ identifier: "doi1" });
+    const validation = tool!.validate({
+      identifier: "doi1",
+      targetCollectionId: 7,
+    });
     assert.equal(validation.ok, true);
     if (!validation.ok) return;
     assert.equal(validation.value.delegateName, "import_identifiers");
@@ -378,6 +381,7 @@ describe("semantic tool surface", function () {
     const validation = tool!.validate({
       kind: "identifiers",
       identifier: "doi1",
+      targetCollectionId: 7,
     });
     assert.equal(validation.ok, true);
     if (!validation.ok) return;

@@ -31,7 +31,7 @@ export function createImportIdentifiersTool(
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["identifier"],
+        required: ["identifier", "targetCollectionId"],
         properties: {
           identifier: {
             type: "string",
@@ -39,7 +39,8 @@ export function createImportIdentifiersTool(
           },
           targetCollectionId: {
             type: "number",
-            description: "Collection to add imported items to.",
+            description:
+              "Required. Destination collection for the imported item — every import names its destination explicitly. The collection currently open in the Zotero pane is listed in the turn context as 'ambient context (current collection)'; use its collectionId unless the user asks for another destination.",
           },
           libraryID: {
             type: "number",
@@ -118,7 +119,20 @@ export function createImportIdentifiersTool(
             : "";
       if (!identifier) {
         return fail(
-          'identifier is required. Example: { identifier: "10.1234/example" }',
+          'identifier is required. Example: { identifier: "10.1234/example", targetCollectionId: 5 }',
+        );
+      }
+
+      // Destination is deliberately never defaulted: an import that silently
+      // lands in the library root is almost never what the user meant. The
+      // model must name the collection — the one currently open is in the
+      // turn context — so the confirmation card states a real destination.
+      if (
+        !normalizePositiveInt(args.targetCollectionId) &&
+        !normalizePositiveInt(args.collectionId)
+      ) {
+        return fail(
+          "targetCollectionId is required: every import names its destination collection. The collection currently open in the Zotero pane appears in the turn context as 'ambient context (current collection)' — use its collectionId unless the user asks for another destination; ask the user when no collection is open.",
         );
       }
 

@@ -39,7 +39,7 @@ export function createImportLocalFilesTool(
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["filePath"],
+        required: ["filePath", "targetCollectionId"],
         properties: {
           filePath: {
             type: "string",
@@ -61,7 +61,8 @@ export function createImportLocalFilesTool(
           },
           targetCollectionId: {
             type: "number",
-            description: "Optional collection ID to add imported items to.",
+            description:
+              "Required. Destination collection for the imported items — every import names its destination explicitly. The collection currently open in the Zotero pane is listed in the turn context as 'ambient context (current collection)'; use its collectionId unless the user asks for another destination.",
           },
           libraryID: {
             type: "number",
@@ -158,6 +159,15 @@ export function createImportLocalFilesTool(
       if (!filePath) {
         return fail(
           "filePath must be the absolute path of the ONE file to import, e.g. '/Users/me/Desktop/paper.pdf' or 'C:\\Users\\me\\Desktop\\paper.pdf'",
+        );
+      }
+      // Destination is deliberately never defaulted: an import that silently
+      // lands in the library root is almost never what the user meant. The
+      // model must name the collection — the one currently open is in the
+      // turn context — so the confirmation card states a real destination.
+      if (!normalizePositiveInt(args.targetCollectionId)) {
+        return fail(
+          "targetCollectionId is required: every import names its destination collection. The collection currently open in the Zotero pane appears in the turn context as 'ambient context (current collection)' — use its collectionId unless the user asks for another destination; ask the user when no collection is open.",
         );
       }
       const operation: ImportLocalFilesOperation = {

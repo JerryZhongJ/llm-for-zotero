@@ -57,8 +57,8 @@ For each paper that doesn't already have a DOI:
 
 ### Importing
 
-- Import ONE paper per call: `library_import({ kind:'identifiers', identifier:'<DOI>' })`. Multiple papers = multiple calls — each import is separately journalled and separately undoable.
-- If the user specified a target collection, include `targetCollectionId`.
+- Import ONE paper per call: `library_import({ kind:'identifiers', identifier:'<DOI>', targetCollectionId:<id> })`. Multiple papers = multiple calls — each import is separately journalled and separately undoable.
+- Every import call carries `targetCollectionId`. The collection currently open in the Zotero pane is listed in the turn context as 'ambient context (current collection)' — use its collectionId unless the user names another destination; ask the user when no collection is open.
 
 ### Key rules
 

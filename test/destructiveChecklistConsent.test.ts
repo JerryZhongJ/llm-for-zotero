@@ -34,6 +34,8 @@ describe("destructive checklist consent", function () {
       id,
       getField: (name: string) => (name === "title" ? `Item ${id}` : ""),
     }),
+    // The import confirmation card names the destination collection.
+    getCollectionSummary: (id: number) => ({ name: `Collection ${id}` }),
   } as never;
 
   describe("trash_items", function () {
@@ -166,7 +168,10 @@ describe("destructive checklist consent", function () {
   describe("import_identifiers (single identifier per call)", function () {
     it("validates a singular identifier into a singular operation", function () {
       const tool = createImportIdentifiersTool(fakeGateway);
-      const result = tool.validate({ identifier: "10.1/aaa" });
+      const result = tool.validate({
+        identifier: "10.1/aaa",
+        targetCollectionId: 7,
+      });
       assert.isTrue(result.ok, "fixture should validate");
       if (!result.ok) return;
       assert.equal(result.value.operation.identifier, "10.1/aaa");
@@ -181,6 +186,7 @@ describe("destructive checklist consent", function () {
       const tool = createImportIdentifiersTool(fakeGateway);
       const result = tool.validate({
         identifiers: ["10.1/aaa", "10.1/bbb"],
+        targetCollectionId: 7,
       });
       assert.isTrue(result.ok);
       if (!result.ok) return;
@@ -197,7 +203,10 @@ describe("destructive checklist consent", function () {
   describe("import_local_files (one file per call)", function () {
     it("validates a singular filePath into a singular operation", function () {
       const tool = createImportLocalFilesTool(fakeGateway);
-      const result = tool.validate({ filePath: "/tmp/a.pdf" });
+      const result = tool.validate({
+        filePath: "/tmp/a.pdf",
+        targetCollectionId: 7,
+      });
       assert.isTrue(result.ok);
       if (!result.ok) return;
       assert.equal(result.value.operation.filePath, "/tmp/a.pdf");
@@ -211,7 +220,10 @@ describe("destructive checklist consent", function () {
 
     it("keeps legacy plural input working by importing its first entry", function () {
       const tool = createImportLocalFilesTool(fakeGateway);
-      const result = tool.validate({ filePaths: ["/tmp/a.pdf", "/tmp/b.pdf"] });
+      const result = tool.validate({
+        filePaths: ["/tmp/a.pdf", "/tmp/b.pdf"],
+        targetCollectionId: 7,
+      });
       assert.isTrue(result.ok);
       if (!result.ok) return;
       assert.equal(result.value.operation.filePath, "/tmp/a.pdf");

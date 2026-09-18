@@ -152,7 +152,7 @@ const LIBRARY_IMPORT_GUIDANCE: ToolGuidance = {
       request.userText || "",
     ),
   instruction:
-    "Use library_import with kind:'files' to import local files from the user's filesystem into Zotero. First use run_command to list files when paths are unknown, then call library_import once per file with kind:'files' and filePath — each import is its own journalled action with its own undo, and multiple calls in one reply share a single batch confirmation. A bibliography file (.ris, .bib, .enw, .nbib, RDF) has its references imported as real items; other files are attached, and PDFs go through Zotero's metadata lookup so they arrive with a title and authors. Optionally specify a targetCollectionId to file the results into a collection." +
+    "Use library_import with kind:'files' to import local files from the user's filesystem into Zotero. First use run_command to list files when paths are unknown, then call library_import once per file with kind:'files' and filePath — each import is its own journalled action with its own undo, and multiple calls in one reply share a single batch confirmation. A bibliography file (.ris, .bib, .enw, .nbib, RDF) has its references imported as real items; other files are attached, and PDFs go through Zotero's metadata lookup so they arrive with a title and authors. Every import call must carry targetCollectionId: the collection currently open in the Zotero pane is listed in the turn context as 'ambient context (current collection)' — use its collectionId unless the user asks for another destination." +
     "\n\nkind:'identifiers' resolves DOIs, ISBNs, PMIDs, arXiv IDs and ADS bibcodes. It cannot import from a page URL — Zotero has no translator path for that — so take the DOI or arXiv ID off the page instead.",
 };
 
@@ -621,7 +621,8 @@ function createLibraryImportTool(tools: {
         },
         targetCollectionId: {
           type: "number",
-          description: "Collection to add imported items to.",
+          description:
+            "Required for kind:'identifiers' and kind:'files': every import names its destination collection. The collection currently open in the Zotero pane is listed in the turn context as 'ambient context (current collection)'; use its collectionId unless the user asks for another destination.",
         },
         collectionId: {
           type: "number",

@@ -127,7 +127,13 @@ describe("mutation-plan confirmation policy", function () {
       getItem: () => null,
       getCollection: () => null,
     } as never);
-    const validated = tool.validate({ identifier: "10.1/abc" });
+    // targetCollectionId is part of the import contract — every import names
+    // its destination explicitly instead of silently landing in the library
+    // root.
+    const validated = tool.validate({
+      identifier: "10.1/abc",
+      targetCollectionId: 7,
+    });
     assert.isTrue(validated.ok);
     if (!validated.ok) return;
     const plan = await tool.planMutation?.(validated.value, context);
@@ -136,6 +142,21 @@ describe("mutation-plan confirmation policy", function () {
     assert.equal(plan.reversibility, "full");
     assert.isFalse(writePlanRequiresConfirmation(plan, "semi_auto", false));
     assert.isTrue(writePlanRequiresConfirmation(plan, "manual", false));
+  });
+
+  it("refuses an import that does not name a destination collection", async function () {
+    // No silent library-root fallback: the model must state where the paper
+    // goes, and the error tells it where to find the currently open
+    // collection instead of leaving it to guess.
+    const tool = createImportIdentifiersTool({
+      getItem: () => null,
+      getCollection: () => null,
+    } as never);
+    const validated = tool.validate({ identifier: "10.1/abc" });
+    assert.isFalse(validated.ok);
+    if (validated.ok) return;
+    assert.include(validated.error, "targetCollectionId is required");
+    assert.include(validated.error, "ambient context (current collection)");
   });
 
   it("defaults a future write without a planner to irreversible", async function () {
