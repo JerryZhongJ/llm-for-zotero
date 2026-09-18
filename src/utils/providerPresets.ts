@@ -1,16 +1,20 @@
 import type { ProviderProtocol } from "./providerProtocol";
+import {
+  PROVIDER_HOSTS,
+  PROVIDER_IDS,
+  isLocalHostname,
+  isLocalModelApiBase,
+  normalizeApiBase,
+  parseApiBase,
+  type ProviderId,
+} from "./provider";
 
+// Hosted preset ids derive from the provider identity list; the three
+// special-surface ids (device-login Copilot, Ollama's native protocol, and
+// the generic local OpenAI-compatible server) are preset concepts, not model
+// families, and stay here.
 export type SupportedProviderPresetId =
-  | "openai"
-  | "gemini"
-  | "anthropic"
-  | "minimax"
-  | "glm"
-  | "deepseek"
-  | "grok"
-  | "qwen"
-  | "kimi"
-  | "mimo"
+  | ProviderId
   | "copilot"
   | "ollama"
   | "local_openai";
@@ -51,98 +55,23 @@ const CUSTOMIZED_API_KEY_PROTOCOL_OPTIONS: ProviderProtocol[] = [
   "gemini_native",
 ];
 
-type ParsedApiBase = {
-  hostname: string;
-  pathname: string;
-  port: string;
-};
-
-function normalizeApiBase(apiBase: string): string {
-  return typeof apiBase === "string" ? apiBase.trim().replace(/\/+$/, "") : "";
-}
-
-function parseApiBase(apiBase: string): ParsedApiBase | null {
-  const normalized = normalizeApiBase(apiBase);
-  if (!normalized) return null;
-  try {
-    const parsed = new URL(normalized);
-    return {
-      hostname: parsed.hostname.trim().toLowerCase(),
-      pathname: parsed.pathname.replace(/\/+$/, "") || "/",
-      port: parsed.port,
-    };
-  } catch (_err) {
-    return null;
-  }
-}
-
-/** Private IPv4 ranges (RFC1918) plus link-local, for LAN-hosted runtimes. */
-function isPrivateIPv4(hostname: string): boolean {
-  const octets = hostname.split(".");
-  if (octets.length !== 4) return false;
-  const parts = octets.map((part) => Number(part));
-  if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return false;
-  }
-  const [a, b] = parts;
-  if (a === 10) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  // 169.254.0.0/16 link-local, e.g. a directly attached inference box.
-  if (a === 169 && b === 254) return true;
-  return false;
-}
-
-function isLocalHostname(hostname: string): boolean {
-  if (!hostname) return false;
-  if (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "0.0.0.0" ||
-    hostname === "::1" ||
-    hostname === "[::1]" ||
-    hostname === "host.docker.internal"
-  ) {
-    return true;
-  }
-  // 127.0.0.0/8 loopback and *.localhost both resolve to the local machine.
-  if (hostname.startsWith("127.")) return isPrivateOrLoopbackIPv4(hostname);
-  if (hostname.endsWith(".localhost")) return true;
-  // mDNS names published by a machine on the same LAN.
-  if (hostname.endsWith(".local")) return true;
-  return isPrivateIPv4(hostname);
-}
-
-function isPrivateOrLoopbackIPv4(hostname: string): boolean {
-  const octets = hostname.split(".");
-  if (octets.length !== 4) return false;
-  return octets.every((part) => {
-    const value = Number(part);
-    return Number.isInteger(value) && value >= 0 && value <= 255;
-  });
-}
-
-/**
- * True when an API base points at a model server on this machine or the local
- * network. Used to decide that an API key is optional and that requests may go
- * over plain HTTP — never to override which provider family a model belongs
- * to, since `deepseek-r1:8b` served by Ollama is still DeepSeek's weights.
- */
-export function isLocalModelApiBase(apiBase: string): boolean {
-  const parsed = parseApiBase(apiBase);
-  return parsed ? isLocalHostname(parsed.hostname) : false;
-}
+// URL parsing and local-host detection live in src/utils/provider.ts; the
+// re-export keeps every existing consumer's import path working.
+export { isLocalModelApiBase };
 
 function matchesPaths(pathname: string, paths: string[]): boolean {
   return paths.includes(pathname);
 }
 
-function isHost(parsed: ParsedApiBase | null, hosts: string[]): boolean {
+function isHost(
+  parsed: ReturnType<typeof parseApiBase>,
+  hosts: readonly string[],
+): boolean {
   if (!parsed) return false;
   return hosts.includes(parsed.hostname);
 }
 
-function makeHostAndPathMatcher(hosts: string[], paths: string[]) {
+function makeHostAndPathMatcher(hosts: readonly string[], paths: string[]) {
   return (apiBase: string) => {
     const parsed = parseApiBase(apiBase);
     if (!parsed) return false;
@@ -240,44 +169,47 @@ function matchesLocalOpenAIBase(apiBase: string): boolean {
   return isLocalModelApiBase(apiBase);
 }
 
-export const PROVIDER_PRESETS: ProviderPreset[] = [
-  {
+// One preset per hosted family, keyed so the compiler enforces full coverage
+// when a family is added. Matcher hostnames come from PROVIDER_HOSTS so the
+// preset matcher and the family inference cannot drift apart.
+const PROVIDER_PRESETS_BY_ID: Record<ProviderId, ProviderPreset> = {
+  openai: {
     id: "openai",
     label: "OpenAI",
     defaultApiBase: "https://api.openai.com/v1/responses",
     defaultProtocol: "responses_api",
     supportedProtocols: ["responses_api", "openai_chat_compat"],
     helperText: "Preset uses OpenAI's official Responses endpoint.",
-    matches: makeHostAndPathMatcher(["api.openai.com"], OPENAI_PATHS),
+    matches: makeHostAndPathMatcher(PROVIDER_HOSTS.openai.hosts, OPENAI_PATHS),
     supportsResponsesEndpoint: true,
     supportsEmbeddings: true,
     defaultEmbeddingModel: "text-embedding-3-small",
   },
-  {
+  gemini: {
     id: "gemini",
     label: "Gemini",
     defaultApiBase: "https://generativelanguage.googleapis.com/v1beta",
     defaultProtocol: "gemini_native",
     supportedProtocols: ["gemini_native", "openai_chat_compat"],
     helperText: "Preset uses Gemini's native generateContent endpoint.",
-    matches: makeHostAndPathMatcher(
-      ["generativelanguage.googleapis.com"],
-      GEMINI_PATHS,
-    ),
+    matches: makeHostAndPathMatcher(PROVIDER_HOSTS.gemini.hosts, GEMINI_PATHS),
     supportsEmbeddings: true,
     defaultEmbeddingModel: "gemini-embedding-001",
   },
-  {
+  anthropic: {
     id: "anthropic",
     label: "Anthropic",
     defaultApiBase: "https://api.anthropic.com/v1",
     defaultProtocol: "anthropic_messages",
     supportedProtocols: ["anthropic_messages", "openai_chat_compat"],
     helperText: "Preset uses Anthropic's native Messages API.",
-    matches: makeHostAndPathMatcher(["api.anthropic.com"], ANTHROPIC_PATHS),
+    matches: makeHostAndPathMatcher(
+      PROVIDER_HOSTS.anthropic.hosts,
+      ANTHROPIC_PATHS,
+    ),
     supportsEmbeddings: false,
   },
-  {
+  minimax: {
     id: "minimax",
     label: "MiniMax",
     defaultApiBase: "https://api.minimax.io/anthropic",
@@ -286,12 +218,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     helperText:
       "Preset uses MiniMax's recommended Anthropic-compatible endpoint.",
     matches: makeHostAndPathMatcher(
-      ["api.minimax.io", "api.minimaxi.com"],
+      PROVIDER_HOSTS.minimax.hosts,
       MINIMAX_PATHS,
     ),
     supportsEmbeddings: false,
   },
-  {
+  glm: {
     id: "glm",
     label: "GLM",
     defaultApiBase: "https://open.bigmodel.cn/api/anthropic",
@@ -299,10 +231,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     supportedProtocols: ["anthropic_messages", "openai_chat_compat"],
     helperText:
       "Preset uses GLM's Claude-compatible endpoint for agent tool use.",
-    matches: makeHostAndPathMatcher(["open.bigmodel.cn"], GLM_PATHS),
+    matches: makeHostAndPathMatcher(PROVIDER_HOSTS.glm.hosts, GLM_PATHS),
     supportsEmbeddings: false,
   },
-  {
+  deepseek: {
     id: "deepseek",
     label: "DeepSeek",
     defaultApiBase: "https://api.deepseek.com/anthropic",
@@ -310,41 +242,37 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     supportedProtocols: ["anthropic_messages", "openai_chat_compat"],
     helperText:
       "Preset uses DeepSeek's Anthropic-compatible endpoint for reliable agent tool use.",
-    matches: makeHostAndPathMatcher(["api.deepseek.com"], DEEPSEEK_PATHS),
+    matches: makeHostAndPathMatcher(
+      PROVIDER_HOSTS.deepseek.hosts,
+      DEEPSEEK_PATHS,
+    ),
     supportsEmbeddings: true,
     defaultEmbeddingModel: "deepseek-embedding",
   },
-  {
+  grok: {
     id: "grok",
     label: "Grok",
     defaultApiBase: "https://api.x.ai/v1/responses",
     defaultProtocol: "responses_api",
     supportedProtocols: ["responses_api", "openai_chat_compat"],
     helperText: "Preset uses xAI's official Responses endpoint.",
-    matches: makeHostAndPathMatcher(["api.x.ai"], GROK_PATHS),
+    matches: makeHostAndPathMatcher(PROVIDER_HOSTS.grok.hosts, GROK_PATHS),
     supportsResponsesEndpoint: true,
     supportsEmbeddings: false,
   },
-  {
+  qwen: {
     id: "qwen",
     label: "Qwen",
     defaultApiBase: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultProtocol: "openai_chat_compat",
     supportedProtocols: ["openai_chat_compat", "responses_api"],
     helperText: "Preset uses DashScope's compatible-mode API base (v1).",
-    matches: makeHostAndPathMatcher(
-      [
-        "dashscope.aliyuncs.com",
-        "dashscope-intl.aliyuncs.com",
-        "dashscope-us.aliyuncs.com",
-      ],
-      QWEN_PATHS,
-    ),
+    matches: makeHostAndPathMatcher(PROVIDER_HOSTS.qwen.hosts, QWEN_PATHS),
     supportsResponsesEndpoint: true,
     supportsEmbeddings: true,
     defaultEmbeddingModel: "text-embedding-v4",
   },
-  {
+  kimi: {
     id: "kimi",
     label: "Kimi",
     defaultApiBase: "https://api.moonshot.ai/v1",
@@ -353,64 +281,71 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     helperText:
       "Moonshot platform keys use api.moonshot.ai (api.moonshot.cn for China). " +
       "Kimi coding-plan keys only work with https://api.kimi.com/coding/v1.",
-    matches: makeHostAndPathMatcher(
-      ["api.moonshot.cn", "api.moonshot.ai", "api.kimi.com"],
-      KIMI_PATHS,
-    ),
+    matches: makeHostAndPathMatcher(PROVIDER_HOSTS.kimi.hosts, KIMI_PATHS),
     supportsEmbeddings: false,
   },
-  {
+  mimo: {
     id: "mimo",
     label: "Xiaomi MiMo",
     defaultApiBase: "https://api.xiaomimimo.com/v1",
     defaultProtocol: "openai_chat_compat",
     supportedProtocols: ["openai_chat_compat"],
     helperText: "Preset uses Xiaomi MiMo's OpenAI-compatible API base (v1).",
-    matches: makeHostAndPathMatcher(["api.xiaomimimo.com"], MIMO_PATHS),
+    matches: makeHostAndPathMatcher(PROVIDER_HOSTS.mimo.hosts, MIMO_PATHS),
     supportsEmbeddings: false,
   },
-  {
-    id: "copilot",
-    label: "GitHub Copilot",
-    defaultApiBase: "https://api.githubcopilot.com",
-    defaultProtocol: "openai_chat_compat",
-    supportedProtocols: ["openai_chat_compat", "responses_api"],
-    helperText:
-      "Uses GitHub Copilot via device login. Requires an active Copilot subscription.",
-    matches: makeHostAndPathMatcher(["api.githubcopilot.com"], COPILOT_PATHS),
-    supportsEmbeddings: false,
-  },
-  // Local runtimes go last: their matchers accept broad local hosts, so a
-  // hosted preset must get the chance to claim the base first. Within the pair,
-  // ollama must precede local_openai — detectProviderPreset returns the first
-  // match and local_openai accepts every local host.
-  {
-    id: "ollama",
-    label: "Ollama (local)",
-    defaultApiBase: "http://localhost:11434",
-    defaultProtocol: "ollama_native",
-    supportedProtocols: ["ollama_native", "openai_chat_compat"],
-    helperText:
-      "Preset uses Ollama's native /api/chat endpoint, which separates thinking " +
-      "from the answer and honours the think parameter. No API key required.",
-    matches: matchesOllamaBase,
-    supportsEmbeddings: true,
-    defaultEmbeddingModel: "nomic-embed-text",
-    requiresApiKey: false,
-  },
-  {
-    id: "local_openai",
-    label: "Local (OpenAI-compatible)",
-    defaultApiBase: "http://localhost:1234/v1",
-    defaultProtocol: "openai_chat_compat",
-    supportedProtocols: ["openai_chat_compat", "responses_api"],
-    helperText:
-      "For LM Studio, llama.cpp, vLLM, Jan and other local OpenAI-compatible " +
-      "servers. No API key required.",
-    matches: matchesLocalOpenAIBase,
-    supportsEmbeddings: true,
-    requiresApiKey: false,
-  },
+};
+
+// Local runtimes go last: their matchers accept broad local hosts, so a
+// hosted preset must get the chance to claim the base first. Within the pair,
+// ollama must precede local_openai — detectProviderPreset returns the first
+// match and local_openai accepts every local host.
+const COPILOT_PRESET: ProviderPreset = {
+  id: "copilot",
+  label: "GitHub Copilot",
+  defaultApiBase: "https://api.githubcopilot.com",
+  defaultProtocol: "openai_chat_compat",
+  supportedProtocols: ["openai_chat_compat", "responses_api"],
+  helperText:
+    "Uses GitHub Copilot via device login. Requires an active Copilot subscription.",
+  matches: makeHostAndPathMatcher(["api.githubcopilot.com"], COPILOT_PATHS),
+  supportsEmbeddings: false,
+};
+
+const OLLAMA_PRESET: ProviderPreset = {
+  id: "ollama",
+  label: "Ollama (local)",
+  defaultApiBase: "http://localhost:11434",
+  defaultProtocol: "ollama_native",
+  supportedProtocols: ["ollama_native", "openai_chat_compat"],
+  helperText:
+    "Preset uses Ollama's native /api/chat endpoint, which separates thinking " +
+    "from the answer and honours the think parameter. No API key required.",
+  matches: matchesOllamaBase,
+  supportsEmbeddings: true,
+  defaultEmbeddingModel: "nomic-embed-text",
+  requiresApiKey: false,
+};
+
+const LOCAL_OPENAI_PRESET: ProviderPreset = {
+  id: "local_openai",
+  label: "Local (OpenAI-compatible)",
+  defaultApiBase: "http://localhost:1234/v1",
+  defaultProtocol: "openai_chat_compat",
+  supportedProtocols: ["openai_chat_compat", "responses_api"],
+  helperText:
+    "For LM Studio, llama.cpp, vLLM, Jan and other local OpenAI-compatible " +
+    "servers. No API key required.",
+  matches: matchesLocalOpenAIBase,
+  supportsEmbeddings: true,
+  requiresApiKey: false,
+};
+
+export const PROVIDER_PRESETS: ProviderPreset[] = [
+  ...PROVIDER_IDS.map((id) => PROVIDER_PRESETS_BY_ID[id]),
+  COPILOT_PRESET,
+  OLLAMA_PRESET,
+  LOCAL_OPENAI_PRESET,
 ];
 
 /** True when the preset serves unauthenticated, so a blank API key is valid. */

@@ -7,18 +7,20 @@
 import { config } from "../../package.json";
 import { DEFAULT_SYSTEM_PROMPT } from "./llmDefaults";
 import {
-  getAnthropicReasoningProfileForModel,
-  getDeepseekReasoningProfileForModel,
-  getGeminiReasoningProfileForModel,
-  getGrokReasoningProfileForModel,
-  getMimoReasoningProfileForModel,
-  getOpenAIReasoningProfileForModel,
-  getQwenReasoningProfileForModel,
-  getReasoningDefaultLevelForModel,
   getRuntimeReasoningOptionsForModel,
+  REASONING_RESERVE_TOKENS_BY_LEVEL,
   supportsReasoningForModel,
   withGeminiThoughtSummaries,
 } from "./reasoningProfiles";
+import { REASONING_ADAPTERS } from "./reasoning";
+import { geminiThinkingConfigFromProfile } from "./reasoning/gemini";
+import { getAnthropicRecoverySelection } from "./reasoning/anthropic";
+import {
+  emptyReasoningPayload,
+  type AnthropicReasoningModeOverride,
+  type ReasoningPayload,
+} from "./reasoning/types";
+export { ReasoningBudgetError } from "./reasoning/anthropic";
 import type {
   ReasoningProvider,
   ReasoningLevel,
@@ -110,6 +112,7 @@ import {
   compileReasoningControls,
   ensureModelCapabilities,
   getModelCapabilities,
+  getModelReasoningDefaultLevel,
   isRecord,
   isReservedRequestKey,
   profileOverrideAppliesTo,
@@ -1222,24 +1225,7 @@ export async function preflightRequestModelCapabilities(
 
 function getReasoningReserveTokens(reasoning?: ReasoningConfig): number {
   const level = reasoning?.level || "none";
-  switch (level) {
-    case "minimal":
-      return 512;
-    case "low":
-      return 1_024;
-    case "default":
-      return 1_024;
-    case "medium":
-      return 2_048;
-    case "high":
-      return 4_096;
-    case "xhigh":
-    case "ultra":
-    case "max":
-      return 8_192;
-    default:
-      return 256;
-  }
+  return REASONING_RESERVE_TOKENS_BY_LEVEL[level] ?? 256;
 }
 
 export function estimateAvailableContextBudget(params: {
@@ -1568,26 +1554,6 @@ export function normalizeMaxTokensForRequest(params: {
   return normalized;
 }
 
-const OPENAI_EFFORT_ORDER: OpenAIReasoningEffort[] = [
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-];
-
-const REASONING_LEVEL_ALIAS_MAP: Partial<
-  Record<ReasoningLevel, ReasoningLevel>
-> = {
-  minimal: "low",
-  xhigh: "high",
-};
-
-function getReasoningLevelAlias(level: ReasoningLevel): ReasoningLevel | null {
-  return REASONING_LEVEL_ALIAS_MAP[level] || null;
-}
-
 // Re-export reasoning profile helpers so consumers can import from llmClient
 // without coupling directly to reasoningProfiles.
 export type {
@@ -1614,217 +1580,6 @@ export {
   getAnthropicReasoningProfileForModel as getAnthropicReasoningProfile,
   getQwenReasoningProfileForModel as getQwenReasoningProfile,
 } from "./reasoningProfiles";
-
-// Local aliases for internal use (re-exports above don't create local bindings)
-const getOpenAIReasoningProfile = getOpenAIReasoningProfileForModel;
-const getGrokReasoningProfile = getGrokReasoningProfileForModel;
-const getGeminiReasoningProfile = getGeminiReasoningProfileForModel;
-const getAnthropicReasoningProfile = getAnthropicReasoningProfileForModel;
-const getQwenReasoningProfile = getQwenReasoningProfileForModel;
-
-function resolveOpenAIReasoningEffort(
-  provider: "openai" | "grok",
-  level: ReasoningLevel,
-  modelName?: string,
-  apiBase?: string,
-): OpenAIReasoningEffort | null {
-  const profile =
-    provider === "grok"
-      ? getGrokReasoningProfile(modelName)
-      : getOpenAIReasoningProfile(modelName);
-  const direct = profile.levelToEffort[level];
-  if (direct !== undefined) {
-    return direct;
-  }
-
-  const requestedAlias = getReasoningLevelAlias(level);
-  if (requestedAlias) {
-    const aliasValue = profile.levelToEffort[requestedAlias];
-    if (aliasValue !== undefined) {
-      return aliasValue;
-    }
-  }
-
-  for (const candidate of OPENAI_EFFORT_ORDER) {
-    if (profile.supportedEfforts.includes(candidate)) {
-      return candidate;
-    }
-  }
-
-  const defaultEffort = profile.levelToEffort[profile.defaultLevel];
-  if (defaultEffort !== undefined) {
-    return defaultEffort;
-  }
-
-  return null;
-}
-
-function resolveAnthropicThinkingBudget(
-  level: ReasoningLevel,
-  profile: AnthropicReasoningProfile,
-): number {
-  const direct = profile.levelToBudgetTokens[level];
-  if (Number.isFinite(direct)) {
-    return Number(direct);
-  }
-
-  const aliasLevel = getReasoningLevelAlias(level);
-  if (aliasLevel) {
-    const aliasBudget = profile.levelToBudgetTokens[aliasLevel];
-    if (Number.isFinite(aliasBudget)) {
-      return Number(aliasBudget);
-    }
-  }
-
-  const defaultBudget = profile.levelToBudgetTokens[profile.defaultLevel];
-  if (Number.isFinite(defaultBudget)) {
-    return Number(defaultBudget);
-  }
-
-  return profile.defaultBudgetTokens;
-}
-
-function resolveAnthropicAdaptiveEffort(
-  level: ReasoningLevel,
-  profile: AnthropicReasoningProfile,
-): AnthropicAdaptiveEffort | null {
-  const direct = profile.levelToEffort[level];
-  if (direct) return direct;
-
-  const aliasLevel = getReasoningLevelAlias(level);
-  if (aliasLevel) {
-    const aliasEffort = profile.levelToEffort[aliasLevel];
-    if (aliasEffort) return aliasEffort;
-  }
-
-  const defaultEffort = profile.levelToEffort[profile.defaultLevel];
-  return defaultEffort || null;
-}
-
-function resolveAnthropicThinkingMode(params: {
-  profile: AnthropicReasoningProfile;
-  override?: AnthropicReasoningModeOverride;
-}): AnthropicReasoningModeOverride | null {
-  if (
-    params.override === "adaptive" &&
-    params.profile.supportsAdaptiveThinking
-  ) {
-    return "adaptive";
-  }
-  if (params.override === "manual" && params.profile.supportsManualThinking) {
-    return "manual";
-  }
-  if (
-    params.profile.preferredMode === "adaptive" &&
-    params.profile.supportsAdaptiveThinking
-  ) {
-    return "adaptive";
-  }
-  if (
-    params.profile.preferredMode === "manual" &&
-    params.profile.supportsManualThinking
-  ) {
-    return "manual";
-  }
-  return null;
-}
-
-/** A local validation failure for a main request's selected reasoning mode. */
-export class ReasoningBudgetError extends Error {
-  readonly code = "reasoning_budget_too_small" as const;
-
-  constructor(message: string) {
-    super(message);
-    this.name = "ReasoningBudgetError";
-  }
-}
-
-function resolveAnthropicManualBudget(params: {
-  level: ReasoningLevel;
-  profile: AnthropicReasoningProfile;
-  maxTokens?: number;
-  modelName?: string;
-}): number {
-  const requested = Math.max(
-    1024,
-    Math.floor(resolveAnthropicThinkingBudget(params.level, params.profile)),
-  );
-  const maxTokens = Math.floor(Number(params.maxTokens));
-  if (!Number.isFinite(maxTokens) || maxTokens < 1) {
-    return requested;
-  }
-
-  const reservedAnswerTokens = 1024;
-  const maxBudgetTokens = maxTokens - reservedAnswerTokens;
-  if (maxBudgetTokens < 1024) {
-    const label = (params.modelName || "the selected Anthropic model").trim();
-    throw new ReasoningBudgetError(
-      `${label} extended thinking requires max_tokens of at least 2048 so budget_tokens can be less than max_tokens while leaving room for the answer. Increase max tokens or turn thinking off.`,
-    );
-  }
-  return Math.min(requested, maxBudgetTokens);
-}
-
-function resolveQwenEnableThinking(
-  level: ReasoningLevel,
-  profile: QwenReasoningProfile,
-): boolean | null {
-  const direct = profile.levelToEnableThinking[level];
-  if (typeof direct === "boolean" || direct === null) {
-    return direct;
-  }
-
-  const aliasLevel = getReasoningLevelAlias(level);
-  if (aliasLevel) {
-    const aliasValue = profile.levelToEnableThinking[aliasLevel];
-    if (typeof aliasValue === "boolean" || aliasValue === null) {
-      return aliasValue;
-    }
-  }
-
-  const defaultValue = profile.levelToEnableThinking[profile.defaultLevel];
-  if (typeof defaultValue === "boolean" || defaultValue === null) {
-    return defaultValue;
-  }
-
-  return profile.defaultEnableThinking;
-}
-
-function isDashScopeApiBase(apiBase?: string): boolean {
-  const normalized = (apiBase || "").trim().toLowerCase();
-  if (!normalized) return false;
-  return /dashscope(?:-intl)?\.aliyuncs\.com/.test(normalized);
-}
-
-function resolveGeminiReasoningOption(
-  level: ReasoningLevel,
-  profile: GeminiReasoningProfile,
-): GeminiReasoningOption {
-  const direct = profile.levelToValue[level];
-  if (direct !== undefined) {
-    return { level, value: direct };
-  }
-
-  const aliasLevel = getReasoningLevelAlias(level);
-  if (aliasLevel) {
-    const aliasValue = profile.levelToValue[aliasLevel];
-    if (aliasValue !== undefined) {
-      return { level: aliasLevel, value: aliasValue };
-    }
-  }
-
-  const defaultMapped = profile.levelToValue[profile.defaultLevel];
-  if (defaultMapped !== undefined) {
-    return { level: profile.defaultLevel, value: defaultMapped };
-  }
-
-  const byDefaultValue = profile.options.find(
-    (option) => option.value === profile.defaultValue,
-  );
-  if (byDefaultValue) return byDefaultValue;
-
-  return profile.options[0] || { level: "medium", value: profile.defaultValue };
-}
 
 function stringifyContent(content: MessageContent): string {
   if (typeof content === "string") return content;
@@ -1961,14 +1716,7 @@ function buildResponsesInput(
   };
 }
 
-function emptyReasoningPayload() {
-  return { extra: {}, omitTemperature: false } as const;
-}
-
-export type AnthropicReasoningModeOverride = Exclude<
-  AnthropicThinkingMode,
-  "none"
->;
+export type { AnthropicReasoningModeOverride } from "./reasoning/types";
 
 export type ReasoningPayloadOptions = {
   maxTokens?: number;
@@ -2051,6 +1799,18 @@ export function stripReservedRequestKeys(
   return Object.keys(kept).length ? kept : undefined;
 }
 
+/**
+ * Dispatch a reasoning selection to its provider adapter.
+ *
+ * Order matters and is load-bearing: (1) a hand-typed effort string on the
+ * openai/grok families bypasses everything, so a registry option that happens
+ * to share the id cannot shadow it; (2) declarative registry controls
+ * (compileReasoningControls) outrank the imperative adapters, which are the
+ * legacy fallback for families whose levels are not yet registered; (3) with
+ * neither source claiming the level, nothing is encoded. The adapter itself
+ * decides protocol forks (responses vs chat, anthropic_messages), apiBase
+ * forks (DashScope), and the anthropic budget clamp.
+ */
 function buildReasoningControlPayload(
   reasoning: ReasoningConfig | undefined,
   useResponses: boolean,
@@ -2058,27 +1818,24 @@ function buildReasoningControlPayload(
   apiBase?: string,
   providerProtocol?: ProviderProtocol,
   options?: ReasoningPayloadOptions,
-): { extra: Record<string, unknown>; omitTemperature: boolean } {
+): ReasoningPayload {
   if (!reasoning) {
     return emptyReasoningPayload();
   }
-  const exactEffort = reasoning.effort?.trim();
-  if (
-    exactEffort &&
-    (reasoning.provider === "openai" || reasoning.provider === "grok")
-  ) {
-    return {
-      extra: useResponses
-        ? { reasoning: { effort: exactEffort, summary: "detailed" } }
-        : { reasoning_effort: exactEffort },
-      omitTemperature: reasoning.provider === "openai",
-    };
-  }
+  const adapter = REASONING_ADAPTERS[reasoning.provider];
+  const exact = adapter?.tryExactEffort?.({ reasoning, useResponses });
+  if (exact) return exact;
+  // Legacy call sites may pass only the useResponses flag. Protocol-keyed
+  // registry controls need a protocol either way, so derive the OpenAI pair
+  // from the flag; every other family ignores the derivation because its
+  // entries carry no protocol overrides (or none at all).
+  const effectiveProtocol =
+    providerProtocol ?? (useResponses ? "responses_api" : "openai_chat_compat");
   const capabilities = getModelCapabilities({
     provider: reasoning.provider,
     model: modelName || "",
     apiBase,
-    protocol: providerProtocol,
+    protocol: effectiveProtocol,
     profileOverride: options?.profileOverride,
   });
   const declarativeControls = compileReasoningControls(capabilities, reasoning);
@@ -2089,193 +1846,16 @@ function buildReasoningControlPayload(
   ) {
     return emptyReasoningPayload();
   }
-
-  if (reasoning.provider === "openai" || reasoning.provider === "grok") {
-    const effort = resolveOpenAIReasoningEffort(
-      reasoning.provider,
-      reasoning.level,
-      modelName,
-      apiBase,
-    );
-    const omitTemperature = reasoning.provider === "openai";
-    if (useResponses) {
-      const responseReasoning: Record<string, unknown> = {
-        summary: "detailed",
-      };
-      if (effort) {
-        responseReasoning.effort = effort;
-      }
-      return {
-        extra: {
-          reasoning: responseReasoning,
-        },
-        // GPT-5 families may reject temperature when reasoning is configured.
-        omitTemperature,
-      };
-    }
-    return {
-      extra: effort ? { reasoning_effort: effort } : {},
-      omitTemperature,
-    };
-  }
-
-  if (reasoning.provider === "gemini") {
-    const profile = getGeminiReasoningProfile(modelName);
-    const resolvedOption = resolveGeminiReasoningOption(
-      reasoning.level,
-      profile,
-    );
-
-    // Keep request valid if a stale/unsupported level is selected.
-    const thinkingConfig: Record<string, unknown> = {
-      include_thoughts: true,
-    };
-    if (profile.param === "thinking_budget") {
-      thinkingConfig.thinking_budget =
-        typeof resolvedOption.value === "number" ? resolvedOption.value : 8192;
-    } else {
-      thinkingConfig.thinking_level =
-        resolvedOption.value === "minimal" ||
-        resolvedOption.value === "low" ||
-        resolvedOption.value === "medium" ||
-        resolvedOption.value === "high"
-          ? resolvedOption.value
-          : "medium";
-    }
-
-    return {
-      extra: {
-        extra_body: {
-          google: {
-            thinking_config: thinkingConfig,
-          },
-        },
-      },
-      omitTemperature: false,
-    };
-  }
-
-  if (reasoning.provider === "qwen") {
-    const profile = getQwenReasoningProfile(modelName);
-    const enableThinking = resolveQwenEnableThinking(reasoning.level, profile);
-    if (enableThinking === null) {
-      return emptyReasoningPayload();
-    }
-    if (isDashScopeApiBase(apiBase)) {
-      return {
-        extra: {
-          enable_thinking: enableThinking,
-        },
-        omitTemperature: false,
-      };
-    }
-    return {
-      extra: {
-        chat_template_kwargs: {
-          enable_thinking: enableThinking,
-        },
-      },
-      omitTemperature: false,
-    };
-  }
-
-  if (reasoning.provider === "deepseek") {
-    const profile = getDeepseekReasoningProfileForModel(modelName);
-    const thinkingType =
-      profile.levelToThinkingType[reasoning.level] ??
-      profile.defaultThinkingType;
-    if (!thinkingType) {
-      return emptyReasoningPayload();
-    }
-    const reasoningEffort =
-      profile.levelToReasoningEffort[reasoning.level] ??
-      profile.defaultReasoningEffort;
-    const extra: Record<string, unknown> = {
-      thinking: {
-        type: thinkingType,
-      },
-    };
-    if (thinkingType === "enabled" && reasoningEffort) {
-      if (providerProtocol === "anthropic_messages") {
-        extra.output_config = { effort: reasoningEffort };
-      } else {
-        extra.reasoning_effort = reasoningEffort;
-      }
-    }
-    return {
-      extra,
-      omitTemperature:
-        thinkingType === "enabled" && profile.omitTemperatureWhenThinking,
-    };
-  }
-
-  if (reasoning.provider === "mimo") {
-    const profile = getMimoReasoningProfileForModel(modelName);
-    const thinkingType =
-      profile.levelToThinkingType[reasoning.level] ??
-      profile.levelToThinkingType[profile.defaultLevel] ??
-      null;
-    if (!thinkingType) {
-      return emptyReasoningPayload();
-    }
-    return {
-      extra: { thinking: { type: thinkingType } },
-      omitTemperature: false,
-    };
-  }
-
-  if (reasoning.provider === "kimi") {
-    // Kimi k2/k2.5: "default" = thinking enabled, "minimal" = thinking disabled
-    const thinkingType = reasoning.level === "minimal" ? "disabled" : "enabled";
-    return {
-      extra: { thinking: { type: thinkingType } },
-      omitTemperature: false,
-    };
-  }
-
-  if (reasoning.provider === "anthropic") {
-    if (providerProtocol !== "anthropic_messages") {
-      return emptyReasoningPayload();
-    }
-    const profile = getAnthropicReasoningProfile(modelName);
-    const mode = resolveAnthropicThinkingMode({
-      profile,
-      override: options?.anthropicModeOverride,
-    });
-    if (!mode) {
-      return emptyReasoningPayload();
-    }
-    if (mode === "adaptive") {
-      const effort = resolveAnthropicAdaptiveEffort(reasoning.level, profile);
-      return {
-        extra: {
-          thinking: {
-            type: "adaptive",
-          },
-          ...(effort ? { output_config: { effort } } : {}),
-        },
-        omitTemperature: true,
-      };
-    }
-
-    const budgetTokens = resolveAnthropicManualBudget({
-      level: reasoning.level,
-      profile,
-      maxTokens: options?.maxTokens,
-      modelName,
-    });
-    return {
-      extra: {
-        thinking: {
-          type: "enabled",
-          budget_tokens: budgetTokens,
-        },
-      },
-      omitTemperature: true,
-    };
-  }
-
-  return emptyReasoningPayload();
+  if (!adapter) return emptyReasoningPayload();
+  return adapter.encode({
+    reasoning,
+    modelName,
+    apiBase,
+    protocol: providerProtocol,
+    useResponses,
+    maxTokens: options?.maxTokens,
+    anthropicModeOverride: options?.anthropicModeOverride,
+  });
 }
 
 function buildAnthropicMessagesPayload(params: {
@@ -2618,27 +2198,8 @@ function buildGeminiNativePayload(params: {
       generationConfig.thinkingConfig =
         withGeminiThoughtSummaries(declarativeConfig);
     } else {
-      const profile = getGeminiReasoningProfile(params.model);
-      const value =
-        profile.levelToValue[params.reasoning.level] ??
-        profile.levelToValue[profile.defaultLevel] ??
-        profile.defaultValue;
       (payload.generationConfig as Record<string, unknown>).thinkingConfig =
-        profile.param === "thinking_budget"
-          ? {
-              includeThoughts: true,
-              thinkingBudget: typeof value === "number" ? value : 8192,
-            }
-          : {
-              includeThoughts: true,
-              thinkingLevel:
-                value === "minimal" ||
-                value === "low" ||
-                value === "medium" ||
-                value === "high"
-                  ? value
-                  : "medium",
-            };
+        geminiThinkingConfigFromProfile(params.model, params.reasoning.level);
     }
     if (declarative?.omitTemperature) delete generationConfig.temperature;
   }
@@ -3379,10 +2940,10 @@ function getReasoningRecoverySelection(params: {
 }): ReasoningSelection | undefined | null {
   const { currentReasoning, modelName } = params;
   if (!currentReasoning) return null;
-  const defaultLevel = getReasoningDefaultLevelForModel(
-    currentReasoning.provider,
-    modelName,
-  );
+  const defaultLevel = getModelReasoningDefaultLevel({
+    provider: currentReasoning.provider,
+    model: modelName || "",
+  });
   if (defaultLevel && currentReasoning.level !== defaultLevel) {
     return {
       provider: currentReasoning.provider,
@@ -3413,19 +2974,11 @@ export function getAnthropicMessagesReasoningRecoverySelection(params: {
   if (currentReasoning.provider !== "anthropic") {
     return getReasoningRecoverySelection(params);
   }
-  const profile = getAnthropicReasoningProfile(modelName);
-  const currentMode = resolveAnthropicThinkingMode({
-    profile,
-    override: currentReasoning.anthropicModeOverride,
+  return getAnthropicRecoverySelection({
+    currentLevel: currentReasoning.level,
+    anthropicModeOverride: currentReasoning.anthropicModeOverride,
+    modelName,
   });
-  if (currentMode === "adaptive" && profile.supportsManualThinking) {
-    return {
-      provider: "anthropic",
-      level: currentReasoning.level,
-      anthropicModeOverride: "manual",
-    };
-  }
-  return undefined;
 }
 
 export async function postWithReasoningFallback(params: {

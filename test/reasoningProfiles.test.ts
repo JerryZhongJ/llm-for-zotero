@@ -8,76 +8,118 @@ import {
   getRuntimeReasoningOptionsForModel,
   supportsReasoningForModel,
 } from "../src/utils/reasoningProfiles";
+import {
+  getModelReasoningDefaultLevel,
+  getRuntimeReasoningOptions as getRegistryReasoningOptions,
+} from "../src/modelCapabilities";
 import { buildReasoningPayload } from "../src/utils/llmClient";
 
 describe("reasoningProfiles", function () {
   describe("OpenAI GPT-5 family profiles", function () {
     it("supports xhigh reasoning for gpt-5.4", function () {
-      const options = getRuntimeReasoningOptionsForModel("openai", "gpt-5.4");
+      // The ladder lives in the registry; the level→effort contract is the
+      // compiled wire payload, asserted per level.
       assert.deepEqual(
-        options.map((option) => option.level),
+        getRegistryReasoningOptions({
+          provider: "openai",
+          model: "gpt-5.4",
+        }).map((option) => option.level),
         ["default", "low", "medium", "high", "xhigh"],
       );
-
-      const profile = getOpenAIReasoningProfileForModel("gpt-5.4");
-      assert.equal(profile.defaultLevel, "default");
-      assert.deepEqual(profile.levelToEffort, {
-        default: null,
-        low: "low",
-        medium: "medium",
-        high: "high",
-        xhigh: "xhigh",
-      });
+      assert.equal(
+        getModelReasoningDefaultLevel({ provider: "openai", model: "gpt-5.4" }),
+        "default",
+      );
+      for (const [level, effort] of [
+        ["low", "low"],
+        ["medium", "medium"],
+        ["high", "high"],
+        ["xhigh", "xhigh"],
+      ] as const) {
+        assert.deepEqual(
+          buildReasoningPayload(
+            { provider: "openai", level },
+            false,
+            "gpt-5.4",
+            undefined,
+            "openai_chat_compat",
+          ),
+          { extra: { reasoning_effort: effort }, omitTemperature: true },
+          level,
+        );
+      }
+      assert.deepEqual(
+        buildReasoningPayload(
+          { provider: "openai", level: "default" },
+          false,
+          "gpt-5.4",
+          undefined,
+          "openai_chat_compat",
+        ),
+        { extra: {}, omitTemperature: true },
+        "the default level sends no effort field",
+      );
     });
 
     it("supports xhigh reasoning for gpt-5.5", function () {
-      const options = getRuntimeReasoningOptionsForModel("openai", "gpt-5.5");
       assert.deepEqual(
-        options.map((option) => option.level),
+        getRegistryReasoningOptions({
+          provider: "openai",
+          model: "gpt-5.5",
+        }).map((option) => option.level),
         ["default", "low", "medium", "high", "xhigh"],
       );
-
-      const profile = getOpenAIReasoningProfileForModel("gpt-5.5");
-      assert.equal(profile.defaultLevel, "default");
-      assert.equal(profile.levelToEffort.xhigh, "xhigh");
+      assert.equal(
+        getModelReasoningDefaultLevel({ provider: "openai", model: "gpt-5.5" }),
+        "default",
+      );
     });
 
     it("limits gpt-5.4-pro to medium/high/xhigh reasoning", function () {
-      const options = getRuntimeReasoningOptionsForModel(
-        "openai",
-        "gpt-5.4-pro",
-      );
+      const options = getRegistryReasoningOptions({
+        provider: "openai",
+        model: "gpt-5.4-pro",
+      });
       assert.deepEqual(
         options.map((option) => option.level),
         ["medium", "high", "xhigh"],
       );
       assert.equal(
-        getReasoningDefaultLevelForModel("openai", "gpt-5.4-pro"),
+        getModelReasoningDefaultLevel({
+          provider: "openai",
+          model: "gpt-5.4-pro",
+        }),
         "medium",
       );
     });
 
     it("limits gpt-5-pro to high reasoning only", function () {
-      const options = getRuntimeReasoningOptionsForModel("openai", "gpt-5-pro");
+      const options = getRegistryReasoningOptions({
+        provider: "openai",
+        model: "gpt-5-pro",
+      });
       assert.deepEqual(
         options.map((option) => option.level),
         ["high"],
       );
       assert.equal(
-        getReasoningDefaultLevelForModel("openai", "gpt-5-pro"),
+        getModelReasoningDefaultLevel({
+          provider: "openai",
+          model: "gpt-5-pro",
+        }),
         "high",
       );
     });
 
     it("supports codex-specific xhigh reasoning on gpt-5.2 and gpt-5.3 codex", function () {
-      const gpt52Codex = getRuntimeReasoningOptionsForModel(
-        "openai",
-        "gpt-5.2-codex",
-      );
-      const gpt53Codex = getRuntimeReasoningOptionsForModel(
-        "openai",
-        "gpt-5.3-codex",
-      );
+      const gpt52Codex = getRegistryReasoningOptions({
+        provider: "openai",
+        model: "gpt-5.2-codex",
+      });
+      const gpt53Codex = getRegistryReasoningOptions({
+        provider: "openai",
+        model: "gpt-5.3-codex",
+      });
 
       assert.deepEqual(
         gpt52Codex.map((option) => option.level),
@@ -153,24 +195,22 @@ describe("reasoningProfiles", function () {
 
   describe("DeepSeek V4 profiles", function () {
     it("supports disabled, high, and max thinking modes", function () {
-      const options = getRuntimeReasoningOptionsForModel(
-        "deepseek",
-        "deepseek-v4-pro",
-      );
+      // The V4 ladder lives in the registry; the mode semantics below are
+      // pinned by the wire assertions in the next test.
       assert.deepEqual(
-        options.map((option) => option.level),
+        getRegistryReasoningOptions({
+          provider: "deepseek",
+          model: "deepseek-v4-pro",
+        }).map((option) => option.level),
         ["default", "minimal", "high", "xhigh"],
       );
-
-      const profile = getDeepseekReasoningProfileForModel(
-        "deepseek/deepseek-v4-flash",
+      assert.equal(
+        getModelReasoningDefaultLevel({
+          provider: "deepseek",
+          model: "deepseek-v4-pro",
+        }),
+        "default",
       );
-      assert.equal(profile.defaultLevel, "default");
-      assert.equal(profile.defaultThinkingType, "enabled");
-      assert.equal(profile.defaultReasoningEffort, "high");
-      assert.isTrue(profile.omitTemperatureWhenThinking);
-      assert.equal(profile.levelToThinkingType.minimal, "disabled");
-      assert.equal(profile.levelToReasoningEffort.xhigh, "max");
     });
 
     it("builds documented DeepSeek V4 thinking payloads", function () {
@@ -252,7 +292,10 @@ describe("reasoningProfiles", function () {
         "mimo-v2-omni",
         "mimo-v2-flash",
       ]) {
-        const options = getRuntimeReasoningOptionsForModel("mimo", modelName);
+        const options = getRegistryReasoningOptions({
+          provider: "mimo",
+          model: modelName,
+        });
         assert.deepEqual(
           options.map((option) => option.level),
           ["default", "high"],
@@ -265,12 +308,29 @@ describe("reasoningProfiles", function () {
         );
       }
 
-      const profile = getMimoReasoningProfileForModel("mimo-v2.5-pro");
-      assert.equal(profile.defaultLevel, "default");
-      assert.isNull(profile.levelToThinkingType.default);
-      assert.equal(profile.levelToThinkingType.high, "enabled");
+      // mimo-v2's default level sends no thinking body and "high" opts in;
+      // both are pinned on the wire here, unknown mimo stays silent.
       assert.deepEqual(
-        getRuntimeReasoningOptionsForModel("mimo", "mimo-unknown"),
+        buildReasoningPayload(
+          { provider: "mimo", level: "default" },
+          false,
+          "mimo-v2.5-pro",
+        ),
+        { extra: {}, omitTemperature: false },
+      );
+      assert.deepEqual(
+        buildReasoningPayload(
+          { provider: "mimo", level: "high" },
+          false,
+          "mimo-v2.5-pro",
+        ),
+        { extra: { thinking: { type: "enabled" } }, omitTemperature: false },
+      );
+      assert.deepEqual(
+        getRegistryReasoningOptions({
+          provider: "mimo",
+          model: "mimo-unknown",
+        }),
         [],
       );
     });

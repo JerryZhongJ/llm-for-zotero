@@ -4,6 +4,7 @@ import {
   resetModelCapabilityStateForTests,
 } from "../src/modelCapabilities";
 import { detectReasoningProvider } from "../src/modules/contextPanel/chat";
+import { inferProviderFromApiBase } from "../src/modelCapabilities";
 
 describe("provider inference from model names", function () {
   afterEach(function () {
@@ -66,5 +67,41 @@ describe("provider inference from model names", function () {
     assert.equal(detectReasoningProvider("k30"), "unsupported");
     assert.equal(detectReasoningProvider("k3x"), "unsupported");
     assert.equal(detectReasoningProvider("mock3"), "unsupported");
+  });
+
+  it("detects the glm reasoning provider so registry levels reach the request", function () {
+    // The selector's send path drops the reasoning config when the provider
+    // resolves to "unsupported" — glm-5.3-flash must stay a real provider.
+    assert.equal(detectReasoningProvider("glm-5.3-flash"), "glm");
+    assert.equal(detectReasoningProvider("glm-5.3"), "glm");
+    assert.equal(detectReasoningProvider("glm-4.6"), "glm");
+  });
+
+  it("infers providers from API base substring tokens", function () {
+    // Substring semantics (not hostname equality): relays, regional mirrors
+    // and path-bearing bases must keep resolving like the hand-written chain
+    // this table replaced.
+    const cases: Array<[string, string | null]> = [
+      ["https://api.moonshot.cn/v1", "kimi"],
+      ["https://api.kimi.com/coding/v1", "kimi"],
+      ["https://kimi-relay.example.com/v1", null],
+      ["https://generativelanguage.googleapis.com/v1beta", "gemini"],
+      ["https://api.anthropic.com/v1", "anthropic"],
+      ["https://eu.api.anthropic.com", "anthropic"],
+      ["https://api.deepseek.com/anthropic", "deepseek"],
+      ["https://api.openai.com/v1", "openai"],
+      ["https://api.x.ai/v1", "grok"],
+      ["https://x.ai", "grok"],
+      ["https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen"],
+      ["https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "qwen"],
+      ["https://open.bigmodel.cn/api/anthropic", "glm"],
+      ["https://api.minimax.io/anthropic", "minimax"],
+      ["https://api.xiaomimimo.com/v1", "mimo"],
+      ["https://relay.example.com/v1", null],
+      ["", null],
+    ];
+    for (const [base, expected] of cases) {
+      assert.equal(inferProviderFromApiBase(base), expected, base);
+    }
   });
 });

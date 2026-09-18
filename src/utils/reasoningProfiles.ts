@@ -1,697 +1,94 @@
 const REASONING_PROFILE_TABLE_VERSION = 7;
 
-export type ReasoningProvider =
-  | "openai"
-  | "gemini"
-  | "deepseek"
-  | "kimi"
-  | "mimo"
-  | "qwen"
-  | "grok"
-  | "anthropic"
-  | "local";
-export type ReasoningLevel =
-  | "default"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  /** Future provider-defined values (for example `ultra`). */
-  | (string & {});
-export type OpenAIReasoningEffort =
-  | "default"
-  | "none"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | (string & {});
-export type GeminiThinkingParam = "thinking_level" | "thinking_budget";
-export type GeminiThinkingValue =
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | number;
-export type GeminiReasoningOption = {
-  level: ReasoningLevel;
-  value: GeminiThinkingValue;
-};
-export type RuntimeReasoningOption = {
-  level: ReasoningLevel;
-  label: string;
-  enabled: boolean;
-};
-export type OpenAIReasoningProfile = {
-  defaultEffort: OpenAIReasoningEffort;
-  supportedEfforts: OpenAIReasoningEffort[];
-  levelToEffort: Partial<Record<ReasoningLevel, OpenAIReasoningEffort | null>>;
-  defaultLevel: ReasoningLevel;
-};
-export type GeminiReasoningProfile = {
-  param: GeminiThinkingParam;
-  defaultValue: GeminiThinkingValue;
-  options: GeminiReasoningOption[];
-  levelToValue: Partial<Record<ReasoningLevel, GeminiThinkingValue>>;
-  defaultLevel: ReasoningLevel;
-};
-export type AnthropicThinkingMode = "adaptive" | "manual" | "none";
-export type AnthropicAdaptiveEffort =
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max";
-export type AnthropicReasoningProfile = {
-  defaultBudgetTokens: number;
-  levelToBudgetTokens: Partial<Record<ReasoningLevel, number>>;
-  levelToEffort: Partial<Record<ReasoningLevel, AnthropicAdaptiveEffort>>;
-  defaultLevel: ReasoningLevel;
-  preferredMode: AnthropicThinkingMode;
-  supportsAdaptiveThinking: boolean;
-  supportsManualThinking: boolean;
-};
-export type QwenReasoningProfile = {
-  defaultEnableThinking: boolean | null;
-  levelToEnableThinking: Partial<Record<ReasoningLevel, boolean | null>>;
-  defaultLevel: ReasoningLevel;
-};
-export type DeepseekThinkingType = "enabled" | "disabled";
-export type DeepseekReasoningEffort = "high" | "max";
-export type DeepseekReasoningProfile = {
-  defaultThinkingType: DeepseekThinkingType | null;
-  defaultReasoningEffort: DeepseekReasoningEffort | null;
-  levelToThinkingType: Partial<Record<ReasoningLevel, DeepseekThinkingType>>;
-  levelToReasoningEffort: Partial<
-    Record<ReasoningLevel, DeepseekReasoningEffort | null>
-  >;
-  defaultLevel: ReasoningLevel;
-  omitTemperatureWhenThinking: boolean;
-};
-export type MimoThinkingType = "enabled";
-export type MimoReasoningProfile = {
-  levelToThinkingType: Partial<Record<ReasoningLevel, MimoThinkingType | null>>;
-  defaultLevel: ReasoningLevel;
-};
+/**
+ * Facade over the per-provider reasoning adapters.
+ *
+ * The level tables, model-matching rules, and imperative encoders live in
+ * `utils/reasoning/<family>.ts`; this module keeps the historical import path
+ * and the cross-provider queries (`getRuntimeReasoningOptionsForModel`,
+ * `supportsReasoningForModel`, `getReasoningDefaultLevelForModel`) that read
+ * the assembled table. Provider membership itself comes from
+ * `utils/provider.ts` (single source of truth).
+ */
 
-type ProviderProfile = {
-  supportsReasoning: boolean;
-  defaultLevel: ReasoningLevel | null;
-  options: RuntimeReasoningOption[];
-  openai?: {
-    defaultEffort: OpenAIReasoningEffort;
-    levelToEffort: Partial<
-      Record<ReasoningLevel, OpenAIReasoningEffort | null>
-    >;
-  };
-  gemini?: {
-    param: GeminiThinkingParam;
-    defaultValue: GeminiThinkingValue;
-    levelToValue: Partial<Record<ReasoningLevel, GeminiThinkingValue>>;
-  };
-  anthropic?: {
-    defaultBudgetTokens: number;
-    levelToBudgetTokens: Partial<Record<ReasoningLevel, number>>;
-    levelToEffort?: Partial<Record<ReasoningLevel, AnthropicAdaptiveEffort>>;
-    preferredMode: AnthropicThinkingMode;
-    supportsAdaptiveThinking: boolean;
-    supportsManualThinking: boolean;
-  };
-  qwen?: {
-    defaultEnableThinking: boolean | null;
-    levelToEnableThinking: Partial<Record<ReasoningLevel, boolean | null>>;
-  };
-  deepseek?: {
-    defaultThinkingType: DeepseekThinkingType | null;
-    defaultReasoningEffort: DeepseekReasoningEffort | null;
-    levelToThinkingType: Partial<Record<ReasoningLevel, DeepseekThinkingType>>;
-    levelToReasoningEffort: Partial<
-      Record<ReasoningLevel, DeepseekReasoningEffort | null>
-    >;
-    omitTemperatureWhenThinking?: boolean;
-  };
-  mimo?: {
-    levelToThinkingType: Partial<
-      Record<ReasoningLevel, MimoThinkingType | null>
-    >;
-  };
-};
+// The member list lives in src/utils/provider.ts (single source of truth);
+// re-exported here so every existing consumer keeps its import path.
+export type { ReasoningProvider } from "./provider";
+import type { ReasoningProvider } from "./provider";
 
-type ProfileRule = {
-  match: RegExp;
-  profile: ProviderProfile;
-};
+export type {
+  ReasoningLevel,
+  OpenAIReasoningEffort,
+  GeminiThinkingParam,
+  GeminiThinkingValue,
+  GeminiReasoningOption,
+  RuntimeReasoningOption,
+  OpenAIReasoningProfile,
+  GeminiReasoningProfile,
+  AnthropicThinkingMode,
+  AnthropicAdaptiveEffort,
+  AnthropicReasoningProfile,
+  QwenReasoningProfile,
+  DeepseekThinkingType,
+  DeepseekReasoningEffort,
+  DeepseekReasoningProfile,
+  MimoThinkingType,
+  MimoReasoningProfile,
+} from "./reasoning/types";
+import type {
+  ProviderProfile,
+  ProfileRule,
+  ReasoningLevel,
+} from "./reasoning/types";
 
-const option = (
-  level: ReasoningLevel,
-  label: string,
-): RuntimeReasoningOption => {
-  return { level, label, enabled: true };
-};
+export {
+  getOpenAIReasoningProfileForModel,
+  getGrokReasoningProfileForModel,
+} from "./reasoning/openai";
+export { getGeminiReasoningProfileForModel } from "./reasoning/gemini";
+export { getQwenReasoningProfileForModel } from "./reasoning/qwen";
+export { getDeepseekReasoningProfileForModel } from "./reasoning/deepseek";
+export { getMimoReasoningProfileForModel } from "./reasoning/mimo";
+export { getAnthropicReasoningProfileForModel } from "./reasoning/anthropic";
+export {
+  REASONING_LEVEL_ALIAS_MAP,
+  getReasoningLevelAlias,
+} from "./reasoning/shared";
 
-function singleEnabledOptionProfile(
-  level: ReasoningLevel,
-  label: string,
-  extras: Omit<
-    Partial<ProviderProfile>,
-    "supportsReasoning" | "defaultLevel" | "options"
-  > = {},
-): ProviderProfile {
-  return {
-    supportsReasoning: true,
-    defaultLevel: level,
-    options: [option(level, label)],
-    ...extras,
-  };
-}
+import {
+  ANTHROPIC_FALLBACK_PROFILE,
+  ANTHROPIC_RULES,
+} from "./reasoning/anthropic";
+import {
+  DEEPSEEK_FALLBACK_PROFILE,
+  DEEPSEEK_RULES,
+} from "./reasoning/deepseek";
+import { GEMINI_FALLBACK_PROFILE, GEMINI_RULES } from "./reasoning/gemini";
+import { KIMI_FALLBACK_PROFILE, KIMI_RULES } from "./reasoning/kimi";
+import { MIMO_FALLBACK_PROFILE, MIMO_RULES } from "./reasoning/mimo";
+import {
+  GROK_FALLBACK_PROFILE,
+  GROK_RULES,
+  OPENAI_FALLBACK_PROFILE,
+  OPENAI_RULES,
+} from "./reasoning/openai";
+import { QWEN_FALLBACK_PROFILE, QWEN_RULES } from "./reasoning/qwen";
+import { resolveProfileForRules } from "./reasoning/shared";
 
-function getResolvedDefaultLevel(
-  provider: ReasoningProvider,
-  modelName: string | undefined,
-  fallback: ReasoningLevel,
-): ReasoningLevel {
-  return getReasoningDefaultLevelForModel(provider, modelName) || fallback;
-}
-
-function cloneLevelMap<T>(
-  levelMap?: Partial<Record<ReasoningLevel, T>>,
-): Partial<Record<ReasoningLevel, T>> {
-  return { ...(levelMap || {}) };
-}
-
-const OPENAI_GPT5_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "default"),
-    option("low", "low"),
-    option("medium", "medium"),
-    option("high", "high"),
-  ],
-  openai: {
-    defaultEffort: "default",
-    levelToEffort: {
-      default: null,
-      low: "low",
-      medium: "medium",
-      high: "high",
-    },
-  },
-};
-
-const OPENAI_GPT5_XHIGH_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "default"),
-    option("low", "low"),
-    option("medium", "medium"),
-    option("high", "high"),
-    option("xhigh", "xhigh"),
-  ],
-  openai: {
-    defaultEffort: "default",
-    levelToEffort: {
-      default: null,
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    },
-  },
-};
-
-const OPENAI_GPT5_PRO_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "high",
-  options: [option("high", "high")],
-  openai: {
-    defaultEffort: "high",
-    levelToEffort: {
-      high: "high",
-    },
-  },
-};
-
-const OPENAI_GPT5_XHIGH_PRO_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "medium",
-  options: [
-    option("medium", "medium"),
-    option("high", "high"),
-    option("xhigh", "xhigh"),
-  ],
-  openai: {
-    defaultEffort: "medium",
-    levelToEffort: {
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    },
-  },
-};
-
-const OPENAI_GPT5_CODEX_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "low",
-  options: [
-    option("low", "low"),
-    option("medium", "medium"),
-    option("high", "high"),
-    option("xhigh", "xhigh"),
-  ],
-  openai: {
-    defaultEffort: "low",
-    levelToEffort: {
-      low: "low",
-      medium: "medium",
-      high: "high",
-      xhigh: "xhigh",
-    },
-  },
-};
-
-const GROK_3_MINI_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "default"),
-    option("low", "low"),
-    option("high", "high"),
-  ],
-  openai: {
-    defaultEffort: "default",
-    levelToEffort: {
-      default: null,
-      low: "low",
-      high: "high",
-    },
-  },
-};
-
-const GROK_REASONING_PROFILE: ProviderProfile = singleEnabledOptionProfile(
-  "default",
-  "enabled",
-);
-
-const GEMINI_3_PRO_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "high",
-  options: [option("high", "high"), option("low", "low")],
-  gemini: {
-    param: "thinking_level",
-    defaultValue: "high",
-    levelToValue: {
-      high: "high",
-      low: "low",
-    },
-  },
-};
-
-// gemini-3.1-pro and later pro releases add "medium" but still reject
-// "minimal" (see ai.google.dev/gemini-api/docs/thinking).
-const GEMINI_3X_PRO_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "high",
-  options: [
-    option("high", "high"),
-    option("medium", "medium"),
-    option("low", "low"),
-  ],
-  gemini: {
-    param: "thinking_level",
-    defaultValue: "high",
-    levelToValue: {
-      high: "high",
-      medium: "medium",
-      low: "low",
-    },
-  },
-};
-
-// Flash releases support the full minimal..high ladder; defaults differ per
-// model (3.6-flash: medium, flash-lite: minimal, other flash: high).
-const GEMINI_36_FLASH_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "medium",
-  options: [
-    option("medium", "medium"),
-    option("high", "high"),
-    option("low", "low"),
-    option("minimal", "minimal"),
-  ],
-  gemini: {
-    param: "thinking_level",
-    defaultValue: "medium",
-    levelToValue: {
-      medium: "medium",
-      high: "high",
-      low: "low",
-      minimal: "minimal",
-    },
-  },
-};
-
-const GEMINI_3_FLASH_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "high",
-  options: [
-    option("high", "high"),
-    option("medium", "medium"),
-    option("low", "low"),
-    option("minimal", "minimal"),
-  ],
-  gemini: {
-    param: "thinking_level",
-    defaultValue: "high",
-    levelToValue: {
-      high: "high",
-      medium: "medium",
-      low: "low",
-      minimal: "minimal",
-    },
-  },
-};
-
-const GEMINI_3_FLASH_LITE_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "minimal",
-  options: [
-    option("minimal", "minimal"),
-    option("low", "low"),
-    option("medium", "medium"),
-    option("high", "high"),
-  ],
-  gemini: {
-    param: "thinking_level",
-    defaultValue: "minimal",
-    levelToValue: {
-      minimal: "minimal",
-      low: "low",
-      medium: "medium",
-      high: "high",
-    },
-  },
-};
-
-const GEMINI_25_PRO_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "dynamic"),
-    option("low", "128"),
-    option("high", "32768"),
-  ],
-  gemini: {
-    param: "thinking_budget",
-    defaultValue: -1,
-    levelToValue: {
-      default: -1,
-      low: 128,
-      high: 32768,
-    },
-  },
-};
-
-const GEMINI_25_FLASH_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "dynamic"),
-    option("minimal", "off"),
-    option("low", "1"),
-    option("high", "24576"),
-  ],
-  gemini: {
-    param: "thinking_budget",
-    defaultValue: -1,
-    levelToValue: {
-      default: -1,
-      minimal: 0,
-      low: 1,
-      high: 24576,
-    },
-  },
-};
-
-const GEMINI_25_FLASH_LITE_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "off"),
-    option("minimal", "dynamic"),
-    option("low", "512"),
-    option("high", "24576"),
-  ],
-  gemini: {
-    param: "thinking_budget",
-    defaultValue: 0,
-    levelToValue: {
-      default: 0,
-      minimal: -1,
-      low: 512,
-      high: 24576,
-    },
-  },
-};
-
-const GEMINI_GENERIC_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "medium",
-  options: [
-    option("medium", "medium"),
-    option("low", "low"),
-    option("high", "high"),
-  ],
-  gemini: {
-    param: "thinking_level",
-    defaultValue: "medium",
-    levelToValue: {
-      low: "low",
-      medium: "medium",
-      high: "high",
-    },
-  },
-};
-
-const DEEPSEEK_REASONER_PROFILE: ProviderProfile = singleEnabledOptionProfile(
-  "default",
-  "enabled",
-  {
-    deepseek: {
-      defaultThinkingType: "enabled",
-      defaultReasoningEffort: null,
-      levelToThinkingType: {
-        default: "enabled",
-      },
-      levelToReasoningEffort: {
-        default: null,
-      },
-      omitTemperatureWhenThinking: false,
-    },
-  },
-);
-
-const DEEPSEEK_V4_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "default"),
-    option("minimal", "disabled"),
-    option("high", "high"),
-    option("xhigh", "max"),
-  ],
-  deepseek: {
-    defaultThinkingType: "enabled",
-    defaultReasoningEffort: "high",
-    levelToThinkingType: {
-      default: "enabled",
-      minimal: "disabled",
-      high: "enabled",
-      xhigh: "enabled",
-    },
-    levelToReasoningEffort: {
-      default: "high",
-      minimal: null,
-      high: "high",
-      xhigh: "max",
-    },
-    omitTemperatureWhenThinking: true,
-  },
-};
-
-const DEEPSEEK_CHAT_PROFILE: ProviderProfile = {
-  supportsReasoning: false,
-  defaultLevel: null,
-  options: [],
-};
-
-const KIMI_THINKING_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [option("default", "enabled"), option("minimal", "disabled")],
-};
-
-const KIMI_NON_THINKING_PROFILE: ProviderProfile = {
-  supportsReasoning: false,
-  defaultLevel: null,
-  options: [],
-};
-
-const MIMO_THINKING_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [option("default", "default"), option("high", "enabled")],
-  mimo: {
-    levelToThinkingType: {
-      default: null,
-      high: "enabled",
-    },
-  },
-};
-
-const QWEN_TOGGLE_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [
-    option("default", "default"),
-    option("high", "enabled"),
-    option("low", "disabled"),
-  ],
-  qwen: {
-    defaultEnableThinking: null,
-    levelToEnableThinking: {
-      default: null,
-      high: true,
-      low: false,
-    },
-  },
-};
-
-const QWEN_THINKING_ONLY_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "default",
-  options: [option("default", "enabled")],
-  qwen: {
-    defaultEnableThinking: true,
-    levelToEnableThinking: {
-      default: true,
-    },
-  },
-};
-
-const QWEN_NON_THINKING_ONLY_PROFILE: ProviderProfile = {
-  supportsReasoning: false,
-  defaultLevel: null,
-  options: [],
-  qwen: {
-    defaultEnableThinking: false,
-    levelToEnableThinking: {},
-  },
-};
-
-const ANTHROPIC_ADAPTIVE_MAX_OPTIONS: RuntimeReasoningOption[] = [
-  option("low", "low"),
-  option("medium", "medium"),
-  option("high", "high"),
-  option("xhigh", "max"),
-];
-
-const ANTHROPIC_ADAPTIVE_XHIGH_OPTIONS: RuntimeReasoningOption[] = [
-  option("low", "low"),
-  option("medium", "medium"),
-  option("high", "high"),
-  option("xhigh", "xhigh"),
-];
-
-const ANTHROPIC_MANUAL_OPTIONS: RuntimeReasoningOption[] = [
-  option("low", "1024"),
-  option("medium", "2000"),
-  option("high", "10000"),
-  option("xhigh", "32000"),
-];
-
-const ANTHROPIC_MAX_EFFORT_MAP: Partial<
-  Record<ReasoningLevel, AnthropicAdaptiveEffort>
-> = {
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "max",
-};
-
-const ANTHROPIC_XHIGH_EFFORT_MAP: Partial<
-  Record<ReasoningLevel, AnthropicAdaptiveEffort>
-> = {
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "xhigh",
-};
-
-const ANTHROPIC_BUDGET_MAP: Partial<Record<ReasoningLevel, number>> = {
-  low: 1024,
-  medium: 2000,
-  high: 10000,
-  xhigh: 32000,
-};
-
-const ANTHROPIC_ADAPTIVE_ONLY_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "high",
-  options: ANTHROPIC_ADAPTIVE_MAX_OPTIONS,
-  anthropic: {
-    defaultBudgetTokens: 2000,
-    levelToBudgetTokens: ANTHROPIC_BUDGET_MAP,
-    levelToEffort: ANTHROPIC_MAX_EFFORT_MAP,
-    preferredMode: "adaptive",
-    supportsAdaptiveThinking: true,
-    supportsManualThinking: false,
-  },
-};
-
-const ANTHROPIC_OPUS_47_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "high",
-  options: ANTHROPIC_ADAPTIVE_XHIGH_OPTIONS,
-  anthropic: {
-    defaultBudgetTokens: 2000,
-    levelToBudgetTokens: ANTHROPIC_BUDGET_MAP,
-    levelToEffort: ANTHROPIC_XHIGH_EFFORT_MAP,
-    preferredMode: "adaptive",
-    supportsAdaptiveThinking: true,
-    supportsManualThinking: false,
-  },
-};
-
-const ANTHROPIC_ADAPTIVE_WITH_MANUAL_FALLBACK_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "high",
-  options: ANTHROPIC_ADAPTIVE_MAX_OPTIONS,
-  anthropic: {
-    defaultBudgetTokens: 2000,
-    levelToBudgetTokens: ANTHROPIC_BUDGET_MAP,
-    levelToEffort: ANTHROPIC_MAX_EFFORT_MAP,
-    preferredMode: "adaptive",
-    supportsAdaptiveThinking: true,
-    supportsManualThinking: true,
-  },
-};
-
-const ANTHROPIC_MANUAL_THINKING_PROFILE: ProviderProfile = {
-  supportsReasoning: true,
-  defaultLevel: "medium",
-  options: ANTHROPIC_MANUAL_OPTIONS,
-  anthropic: {
-    defaultBudgetTokens: 2000,
-    levelToBudgetTokens: ANTHROPIC_BUDGET_MAP,
-    levelToEffort: {},
-    preferredMode: "manual",
-    supportsAdaptiveThinking: false,
-    supportsManualThinking: true,
-  },
+/**
+ * Context tokens set aside for a reasoning level's thinking, shared by the
+ * chat budget estimator and the utility-LLM planner (which used to keep
+ * identical copies). Callers keep their own fallback for unknown levels.
+ */
+export const REASONING_RESERVE_TOKENS_BY_LEVEL: Record<string, number> = {
+  minimal: 512,
+  low: 1_024,
+  default: 1_024,
+  medium: 2_048,
+  high: 4_096,
+  xhigh: 8_192,
+  ultra: 8_192,
+  max: 8_192,
 };
 
 const UNSUPPORTED_PROFILE: ProviderProfile = {
@@ -702,247 +99,45 @@ const UNSUPPORTED_PROFILE: ProviderProfile = {
 
 const PROFILE_RULES: Record<
   ReasoningProvider,
-  { rules: ProfileRule[]; fallback: ProviderProfile }
+  { rules: readonly ProfileRule[]; fallback: ProviderProfile }
 > = {
-  openai: {
-    rules: [
-      {
-        match: /^gpt-5\.(?:2|4)-pro(?:\b|[.-])/,
-        profile: OPENAI_GPT5_XHIGH_PRO_PROFILE,
-      },
-      {
-        match: /^gpt-5-pro(?:\b|[.-])/,
-        profile: OPENAI_GPT5_PRO_PROFILE,
-      },
-      {
-        match: /^gpt-5\.(?:2|3)-codex(?:\b|[.-])/,
-        profile: OPENAI_GPT5_CODEX_PROFILE,
-      },
-      {
-        match: /^gpt-5\.(?:4|5)(?:\b|[.-])/,
-        profile: OPENAI_GPT5_XHIGH_PROFILE,
-      },
-      {
-        match: /^gpt-5\.2(?:\b|[.-])/,
-        profile: OPENAI_GPT5_XHIGH_PROFILE,
-      },
-      {
-        match: /^(gpt-5(?:\b|[.-])|o\d+(?:\b|[.-]))/,
-        profile: OPENAI_GPT5_PROFILE,
-      },
-      // The GPT-3 and GPT-4 families predate reasoning and reject
-      // `reasoning_effort` outright. They have to be named here rather than
-      // left to the fallback, which is deliberately optimistic so an
-      // unreleased OpenAI reasoning model still gets a usable level set
-      // before this table learns its name. `(?:chat)?` catches
-      // `chatgpt-4o-latest`; no trailing boundary, so `gpt-35-turbo` (Azure's
-      // spelling) and every dated `gpt-4o-*` snapshot fall out for free.
-      {
-        match: /^(?:chat)?gpt-[34]/,
-        profile: UNSUPPORTED_PROFILE,
-      },
-    ],
-    fallback: OPENAI_GPT5_PROFILE,
-  },
-  gemini: {
-    rules: [
-      {
-        match: /(^|[/:])gemini-2\.5-pro(?:\b|[.-])/,
-        profile: GEMINI_25_PRO_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-2\.5-flash-lite(?:\b|[.-])/,
-        profile: GEMINI_25_FLASH_LITE_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-2\.5-flash(?:\b|[.-])/,
-        profile: GEMINI_25_FLASH_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-2\.5(?:\b|[.-])/,
-        profile: GEMINI_25_FLASH_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-3(?:\.\d+)?-flash-lite(?:\b|[.-])/,
-        profile: GEMINI_3_FLASH_LITE_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-3\.6-flash(?:\b|[.-])/,
-        profile: GEMINI_36_FLASH_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-3(?:\.\d+)?-flash(?:\b|[.-])/,
-        profile: GEMINI_3_FLASH_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-3\.\d+-pro(?:\b|[.-])/,
-        profile: GEMINI_3X_PRO_PROFILE,
-      },
-      {
-        match: /(^|[/:])gemini-3-pro(?:\b|[.-])/,
-        profile: GEMINI_3_PRO_PROFILE,
-      },
-      {
-        match: /\bgemini\b/,
-        profile: GEMINI_GENERIC_PROFILE,
-      },
-    ],
-    fallback: GEMINI_GENERIC_PROFILE,
-  },
-  deepseek: {
-    rules: [
-      {
-        match: /(^|[/:])deepseek-v4-(?:flash|pro)(?:\b|[.-])/,
-        profile: DEEPSEEK_V4_PROFILE,
-      },
-      {
-        match: /(^|[/:])deepseek-(?:reasoner|r1)(?:\b|[.-])/,
-        profile: DEEPSEEK_REASONER_PROFILE,
-      },
-      {
-        match: /(^|[/:])deepseek-chat(?:\b|[.-])/,
-        profile: DEEPSEEK_CHAT_PROFILE,
-      },
-    ],
-    fallback: DEEPSEEK_CHAT_PROFILE,
-  },
-  kimi: {
-    rules: [
-      {
-        // kimi-k2-thinking, kimi-k2.5-thinking — always-on thinking
-        match: /^kimi-k2(?:\.5)?-thinking(?:-turbo)?(?:\b|[.-])/,
-        profile: KIMI_THINKING_PROFILE,
-      },
-      {
-        // kimi-k2.5 — supports toggling thinking on/off
-        match: /^kimi-k2\.5(?:\b|[.-])/,
-        profile: KIMI_THINKING_PROFILE,
-      },
-      {
-        // kimi-k2 (without .5) — supports toggling
-        match: /^kimi-k2(?:\b|[.-])/,
-        profile: KIMI_THINKING_PROFILE,
-      },
-      {
-        // Other kimi models — no thinking support
-        match: /^kimi(?:\b|[.-])/,
-        profile: KIMI_NON_THINKING_PROFILE,
-      },
-    ],
-    fallback: KIMI_NON_THINKING_PROFILE,
-  },
-  mimo: {
-    rules: [
-      {
-        match: /(^|[/:])mimo-v2(?:\.5)?(?:-(?:pro|omni|flash))?(?:\b|[.-])/,
-        profile: MIMO_THINKING_PROFILE,
-      },
-    ],
-    fallback: UNSUPPORTED_PROFILE,
-  },
-  qwen: {
-    rules: [
-      {
-        match: /(^|[/:])qwen3-[\w.-]*instruct-2507(?:\b|[.-])/,
-        profile: QWEN_NON_THINKING_ONLY_PROFILE,
-      },
-      {
-        match: /(^|[/:])(?:qwen3-[\w.-]*thinking-2507|qwq)(?:\b|[.-])/,
-        profile: QWEN_THINKING_ONLY_PROFILE,
-      },
-      {
-        match: /(^|[/:])qwen(?:\d+)?(?:\b|[.-])/,
-        profile: QWEN_TOGGLE_PROFILE,
-      },
-    ],
-    fallback: QWEN_TOGGLE_PROFILE,
-  },
-  grok: {
-    rules: [
-      {
-        match: /^grok-3-mini(?:\b|[.-])/,
-        profile: GROK_3_MINI_PROFILE,
-      },
-      {
-        match: /(^|[/:])grok(?:\b|[.-])/,
-        profile: GROK_REASONING_PROFILE,
-      },
-    ],
-    fallback: GROK_REASONING_PROFILE,
-  },
-  anthropic: {
-    rules: [
-      {
-        match: /(^|[/:.])claude-mythos-preview(?:\b|[.-])/,
-        profile: ANTHROPIC_ADAPTIVE_ONLY_PROFILE,
-      },
-      {
-        match: /(^|[/:.])claude-opus-4-7(?:\b|[.-])/,
-        profile: ANTHROPIC_OPUS_47_PROFILE,
-      },
-      {
-        match: /(^|[/:.])claude-(?:opus|sonnet)-4-6(?:\b|[.-])/,
-        profile: ANTHROPIC_ADAPTIVE_WITH_MANUAL_FALLBACK_PROFILE,
-      },
-      {
-        match: /(^|[/:.])claude-haiku-4-5(?:\b|[.-])/,
-        profile: ANTHROPIC_MANUAL_THINKING_PROFILE,
-      },
-      {
-        match:
-          /(^|[/:.])claude-(?:opus-(?:4-5|4-1|4)|sonnet-(?:4-5|4)|3-7-sonnet)(?:\b|[.-])/,
-        profile: ANTHROPIC_MANUAL_THINKING_PROFILE,
-      },
-    ],
-    fallback: UNSUPPORTED_PROFILE,
-  },
+  openai: { rules: OPENAI_RULES, fallback: OPENAI_FALLBACK_PROFILE },
+  grok: { rules: GROK_RULES, fallback: GROK_FALLBACK_PROFILE },
+  gemini: { rules: GEMINI_RULES, fallback: GEMINI_FALLBACK_PROFILE },
+  deepseek: { rules: DEEPSEEK_RULES, fallback: DEEPSEEK_FALLBACK_PROFILE },
+  kimi: { rules: KIMI_RULES, fallback: KIMI_FALLBACK_PROFILE },
+  mimo: { rules: MIMO_RULES, fallback: MIMO_FALLBACK_PROFILE },
+  qwen: { rules: QWEN_RULES, fallback: QWEN_FALLBACK_PROFILE },
+  anthropic: { rules: ANTHROPIC_RULES, fallback: ANTHROPIC_FALLBACK_PROFILE },
   // Locally-served models carry no hand-maintained profile: their options come
   // from what the server reports plus whatever the user configures, resolved
   // entirely through declarative ModelControlPatches. This entry exists so
   // ReasoningConfig.provider stays type-safe and every lookup here is inert.
-  local: {
-    rules: [],
-    fallback: UNSUPPORTED_PROFILE,
-  },
+  local: { rules: [], fallback: UNSUPPORTED_PROFILE },
+  // GLM's levels live in the model-capability registry (glm-5.3's
+  // reasoning_effort select), not in a hand-maintained profile. Inert here for
+  // the same type-safety reason as `local`.
+  glm: { rules: [], fallback: UNSUPPORTED_PROFILE },
 };
-
-const OPENAI_EFFORT_ORDER: OpenAIReasoningEffort[] = [
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-];
-
-function normalizeModelName(modelName?: string): string {
-  return (modelName || "").trim().toLowerCase();
-}
 
 function resolveProviderProfile(
   provider: ReasoningProvider,
   modelName?: string,
 ): ProviderProfile {
-  const normalized = normalizeModelName(modelName);
   const table = PROFILE_RULES[provider];
-  for (const rule of table.rules) {
-    if (rule.match.test(normalized)) {
-      return rule.profile;
-    }
-  }
-  return table.fallback;
+  return resolveProfileForRules(table.rules, table.fallback, modelName);
 }
 
 function cloneRuntimeOptions(
-  options: RuntimeReasoningOption[],
-): RuntimeReasoningOption[] {
+  options: ProviderProfile["options"],
+): ProviderProfile["options"] {
   return options.map((entry) => ({ ...entry }));
 }
 
 export function getRuntimeReasoningOptionsForModel(
   provider: ReasoningProvider,
   modelName?: string,
-): RuntimeReasoningOption[] {
+): ReturnType<typeof cloneRuntimeOptions> {
   const profile = resolveProviderProfile(provider, modelName);
   if (!profile.supportsReasoning) return [];
   return cloneRuntimeOptions(profile.options);
@@ -978,112 +173,6 @@ export function getReasoningDefaultLevelForModel(
   return firstEnabled?.level || null;
 }
 
-export function shouldUseDeepseekThinkingPayload(modelName?: string): boolean {
-  const profile = resolveProviderProfile("deepseek", modelName);
-  return Boolean(profile.deepseek?.defaultThinkingType);
-}
-
-export function getDeepseekReasoningProfileForModel(
-  modelName?: string,
-): DeepseekReasoningProfile {
-  const profile = resolveProviderProfile("deepseek", modelName);
-  const deepseekProfile = profile.deepseek;
-  const defaultLevel = getResolvedDefaultLevel(
-    "deepseek",
-    modelName,
-    "default",
-  );
-  return {
-    defaultThinkingType: deepseekProfile?.defaultThinkingType ?? null,
-    defaultReasoningEffort: deepseekProfile?.defaultReasoningEffort ?? null,
-    levelToThinkingType: cloneLevelMap(deepseekProfile?.levelToThinkingType),
-    levelToReasoningEffort: cloneLevelMap(
-      deepseekProfile?.levelToReasoningEffort,
-    ),
-    defaultLevel,
-    omitTemperatureWhenThinking: Boolean(
-      deepseekProfile?.omitTemperatureWhenThinking,
-    ),
-  };
-}
-
-export function getMimoReasoningProfileForModel(
-  modelName?: string,
-): MimoReasoningProfile {
-  const profile = resolveProviderProfile("mimo", modelName);
-  const mimoProfile = profile.mimo;
-  const defaultLevel = getResolvedDefaultLevel("mimo", modelName, "default");
-  return {
-    levelToThinkingType: cloneLevelMap(mimoProfile?.levelToThinkingType),
-    defaultLevel,
-  };
-}
-
-export function getOpenAIReasoningProfileForModel(
-  modelName?: string,
-): OpenAIReasoningProfile {
-  return getReasoningEffortProfileForModel("openai", modelName);
-}
-
-export function getGrokReasoningProfileForModel(
-  modelName?: string,
-): OpenAIReasoningProfile {
-  return getReasoningEffortProfileForModel("grok", modelName);
-}
-
-function getReasoningEffortProfileForModel(
-  provider: "openai" | "grok",
-  modelName?: string,
-): OpenAIReasoningProfile {
-  const profile = resolveProviderProfile(provider, modelName);
-  const fallbackOpenAIProfile =
-    provider === "openai" ? OPENAI_GPT5_PROFILE.openai : undefined;
-  const openaiProfile = profile.openai || fallbackOpenAIProfile;
-  const defaultLevel = getResolvedDefaultLevel(provider, modelName, "default");
-  const levelToEffort = cloneLevelMap(openaiProfile?.levelToEffort);
-  const supportedEfforts = OPENAI_EFFORT_ORDER.filter((effort) => {
-    return Object.values(levelToEffort).includes(effort);
-  });
-  return {
-    defaultEffort: openaiProfile?.defaultEffort || "default",
-    supportedEfforts,
-    levelToEffort,
-    defaultLevel,
-  };
-}
-
-export function getAnthropicReasoningProfileForModel(
-  modelName?: string,
-): AnthropicReasoningProfile {
-  const profile = resolveProviderProfile("anthropic", modelName);
-  const anthropicProfile = profile.anthropic;
-  const defaultLevel = getResolvedDefaultLevel("anthropic", modelName, "high");
-  return {
-    defaultBudgetTokens: anthropicProfile?.defaultBudgetTokens || 2000,
-    levelToBudgetTokens: cloneLevelMap(anthropicProfile?.levelToBudgetTokens),
-    levelToEffort: cloneLevelMap(anthropicProfile?.levelToEffort),
-    defaultLevel,
-    preferredMode: anthropicProfile?.preferredMode || "none",
-    supportsAdaptiveThinking: Boolean(
-      anthropicProfile?.supportsAdaptiveThinking,
-    ),
-    supportsManualThinking: Boolean(anthropicProfile?.supportsManualThinking),
-  };
-}
-
-export function getQwenReasoningProfileForModel(
-  modelName?: string,
-): QwenReasoningProfile {
-  const profile = resolveProviderProfile("qwen", modelName);
-  const qwenProfile = profile.qwen || QWEN_TOGGLE_PROFILE.qwen;
-  const defaultLevel = getResolvedDefaultLevel("qwen", modelName, "default");
-  return {
-    defaultEnableThinking: qwenProfile?.defaultEnableThinking ?? null,
-    levelToEnableThinking: cloneLevelMap(qwenProfile?.levelToEnableThinking),
-    defaultLevel,
-  };
-}
-
 /**
  * Thought summaries are the plugin's ask, not the profile's: every branch that
  * builds a `thinkingConfig` from a known profile requests them, so a config
@@ -1101,38 +190,4 @@ export function withGeminiThoughtSummaries(
   return "includeThoughts" in config || "include_thoughts" in config
     ? config
     : { includeThoughts: true, ...config };
-}
-
-export function getGeminiReasoningProfileForModel(
-  modelName?: string,
-): GeminiReasoningProfile {
-  const profile = resolveProviderProfile("gemini", modelName);
-  const geminiProfile = profile.gemini || GEMINI_GENERIC_PROFILE.gemini;
-  const defaultLevel = getResolvedDefaultLevel("gemini", modelName, "medium");
-  const levelToValue = cloneLevelMap(geminiProfile?.levelToValue);
-  const options: GeminiReasoningOption[] = profile.options
-    .filter((optionState) => optionState.enabled)
-    .map((optionState) => {
-      const mappedValue = levelToValue[optionState.level];
-      const value = (
-        mappedValue !== undefined
-          ? mappedValue
-          : optionState.level === "low" ||
-              optionState.level === "medium" ||
-              optionState.level === "high"
-            ? optionState.level
-            : (geminiProfile?.defaultValue ?? "medium")
-      ) as GeminiThinkingValue;
-      return {
-        level: optionState.level,
-        value,
-      };
-    });
-  return {
-    param: geminiProfile?.param ?? "thinking_level",
-    defaultValue: geminiProfile?.defaultValue ?? "medium",
-    options,
-    levelToValue,
-    defaultLevel,
-  };
 }

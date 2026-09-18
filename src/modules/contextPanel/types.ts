@@ -1,4 +1,5 @@
 import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
+import type { ReasoningProvider } from "../../utils/provider";
 import type { ContextAttachmentSupport } from "./contextAttachmentTypes";
 import type {
   SelectedTextSource,
@@ -130,17 +131,7 @@ export interface Message {
 export type ChatRuntimeMode = "chat" | "agent";
 export type PaperContextSendMode = "retrieval" | "full-next" | "full-sticky";
 
-export type ReasoningProviderKind =
-  | "openai"
-  | "gemini"
-  | "deepseek"
-  | "kimi"
-  | "mimo"
-  | "qwen"
-  | "grok"
-  | "anthropic"
-  | "local"
-  | "unsupported";
+export type ReasoningProviderKind = ReasoningProvider | "unsupported";
 export type ReasoningLevelSelection = "none" | LLMReasoningLevel;
 export type ReasoningOption = {
   level: LLMReasoningLevel;

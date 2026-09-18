@@ -9,6 +9,7 @@ import {
   refreshModelCatalog,
   resetModelCapabilityStateForTests,
   setModelCapabilityRegistryForTests,
+  validateRegistry,
   type ModelCapabilityRegistry,
 } from "../src/modelCapabilities";
 import {
@@ -220,7 +221,7 @@ describe("model capability service", function () {
           return new Response(
             JSON.stringify({
               schemaVersion: 1,
-              revision: 6,
+              revision: 7,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },
@@ -287,7 +288,7 @@ describe("model capability service", function () {
           text: async () =>
             JSON.stringify({
               schemaVersion: 1,
-              revision: 6,
+              revision: 7,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },
@@ -613,5 +614,106 @@ describe("model capability service", function () {
       "kimi-for-coding",
       "coding-endpoint alias kimi-for-coding covered",
     );
+  });
+});
+
+describe("registry schema version 2 (controlsByProtocol)", function () {
+  const optionWithProtocolControls = {
+    id: "high",
+    label: "high",
+    controls: { body: { reasoning_effort: "high" } },
+    controlsByProtocol: {
+      responses_api: {
+        body: { reasoning: { effort: "high", summary: "detailed" } },
+      },
+    },
+  };
+
+  afterEach(function () {
+    resetModelCapabilityStateForTests();
+  });
+
+  it("accepts a schema 2 registry with controlsByProtocol", function () {
+    const accepted = validateRegistry({
+      schemaVersion: 2,
+      revision: 6,
+      models: [
+        {
+          match: { prefix: "gpt-5.4" },
+          reasoning: {
+            kind: "select",
+            defaultOptionId: "default",
+            options: [optionWithProtocolControls],
+          },
+        },
+      ],
+    });
+    assert.isNotNull(accepted);
+    assert.deepEqual(
+      accepted?.models[0].reasoning?.options[0].controlsByProtocol,
+      {
+        responses_api: {
+          body: { reasoning: { effort: "high", summary: "detailed" } },
+        },
+      },
+    );
+  });
+
+  it("rejects controlsByProtocol in a schema 1 registry", function () {
+    // Older builds parse v1 only and would silently drop the protocol
+    // overrides; rejection keeps them on their bundled v1 copy instead.
+    const rejected = validateRegistry({
+      schemaVersion: 1,
+      revision: 6,
+      models: [
+        {
+          match: { prefix: "gpt-5.4" },
+          reasoning: {
+            kind: "select",
+            defaultOptionId: "default",
+            options: [optionWithProtocolControls],
+          },
+        },
+      ],
+    });
+    assert.isNull(rejected);
+  });
+
+  it("rejects invalid controlsByProtocol shapes", function () {
+    for (const bad of [
+      { "Not-A-Protocol": { body: { reasoning_effort: "high" } } },
+      { responses_api: "not-a-patch" },
+      {
+        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: {
+          body: { reasoning_effort: "high" },
+        },
+      },
+      Object.fromEntries(
+        Array.from({ length: 9 }, (_, index) => [
+          `proto_${index}`,
+          { body: { reasoning_effort: "high" } },
+        ]),
+      ),
+      { responses_api: { body: { messages: [] } } },
+    ]) {
+      assert.isNull(
+        validateRegistry({
+          schemaVersion: 2,
+          revision: 6,
+          models: [
+            {
+              match: { prefix: "gpt-5.4" },
+              reasoning: {
+                kind: "select",
+                options: [
+                  { id: "high", label: "high", controlsByProtocol: bad },
+                ],
+              },
+            },
+          ],
+        }),
+        JSON.stringify(Object.keys(bad)),
+      );
+    }
   });
 });

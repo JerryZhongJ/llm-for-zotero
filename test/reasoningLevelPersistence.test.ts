@@ -5,6 +5,7 @@ import {
   setLastUsedReasoningLevel,
   setLastUsedReasoningLevelForProvider,
 } from "../src/modules/contextPanel/prefHelpers";
+import { ALL_REASONING_PROVIDERS } from "../src/utils/provider";
 
 /**
  * A level the user defined in the model parameter editor has to survive a
@@ -85,5 +86,19 @@ describe("reasoning level persistence", function () {
   it("still rejects an unknown provider key", function () {
     setLastUsedReasoningLevelForProvider("not-a-provider", "high");
     assert.isNull(getLastUsedReasoningLevelForProvider("not-a-provider"));
+  });
+
+  it("remembers levels for every provider in the identity list", function () {
+    // The per-provider key whitelist used to be a hand-copied subset that
+    // silently dropped glm and mimo selections; it now derives from
+    // src/utils/provider.ts, so this pins the full member set.
+    for (const provider of ALL_REASONING_PROVIDERS) {
+      setLastUsedReasoningLevelForProvider(provider, "high");
+      assert.equal(
+        getLastUsedReasoningLevelForProvider(provider),
+        "high",
+        provider,
+      );
+    }
   });
 });

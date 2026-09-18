@@ -1,4 +1,5 @@
 import { isValidReasoningLevelId } from "../../modelCapabilities";
+import { ALL_REASONING_PROVIDERS } from "../../utils/provider";
 import {
   config,
   ASSISTANT_NOTE_MAP_PREF_KEY,
@@ -140,16 +141,12 @@ function isReasoningLevelSelection(
 const REASONING_LEVEL_SELECTIONS = {
   has: (value: string) => isReasoningLevelSelection(value),
 };
-const REASONING_PROVIDER_SELECTION_KEYS = new Set([
-  "openai",
-  "gemini",
-  "deepseek",
-  "kimi",
-  "qwen",
-  "grok",
-  "anthropic",
-  "local",
-]);
+// Derived from the provider identity list: every reasoning provider's
+// per-provider level memory is accepted, so a newly added family is remembered
+// without touching this file (glm and mimo selections used to be dropped).
+const REASONING_PROVIDER_SELECTION_KEYS = new Set<string>(
+  ALL_REASONING_PROVIDERS,
+);
 
 const BUILTIN_SHORTCUT_IDS = new Set<string>(
   BUILTIN_SHORTCUT_FILES.map((shortcut) => shortcut.id),

@@ -6,17 +6,10 @@
  * stable capability snapshot without knowing where it came from.
  */
 
+import type { ProviderId } from "../utils/provider";
+
 export type ModelCapabilityProvider =
-  | "openai"
-  | "gemini"
-  | "anthropic"
-  | "minimax"
-  | "glm"
-  | "deepseek"
-  | "grok"
-  | "qwen"
-  | "kimi"
-  | "mimo"
+  | ProviderId
   | "copilot"
   /**
    * A model served by a local runtime whose name matches no hosted family.
@@ -76,6 +69,13 @@ export type ReasoningCapabilityOption = {
   label: string;
   enabled?: boolean;
   controls?: ModelControlPatch;
+  /**
+   * Protocol-keyed overrides of `controls`: the patch for the request's
+   * protocol wins, otherwise `controls` applies. Families whose encoding
+   * forks on the wire protocol (openai responses vs chat, deepseek,
+   * gemini) need this; protocol-agnostic options leave it absent.
+   */
+  controlsByProtocol?: Record<string, ModelControlPatch>;
 };
 
 export type ModelReasoningCapability = {
@@ -149,7 +149,14 @@ export type RegistryModelEntry = {
 };
 
 export type ModelCapabilityRegistry = {
-  schemaVersion: 1;
+  /**
+   * 2 adds option-level `controlsByProtocol` (protocol-keyed control
+   * overrides). Readers must accept both; a v1 document carrying
+   * controlsByProtocol is invalid so data authors cannot skip the bump —
+   * older builds that only parse v1 then reject the whole registry and keep
+   * their bundled copy instead of silently dropping the overrides.
+   */
+  schemaVersion: 1 | 2;
   revision: number;
   models: RegistryModelEntry[];
 };

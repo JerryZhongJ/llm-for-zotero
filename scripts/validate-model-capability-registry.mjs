@@ -34,7 +34,12 @@ const fail = (message) => {
 };
 
 const json = JSON.parse(fs.readFileSync(file, "utf8"));
-if (!json || json.schemaVersion !== 1) fail("schemaVersion must be 1");
+// Keep in sync with validateRegistry in src/modelCapabilities/registry.ts:
+// v2 adds option-level controlsByProtocol; v1 documents carrying it are
+// rejected outright so data authors cannot skip the schema bump.
+if (!json || ![1, 2].includes(json.schemaVersion)) {
+  fail("schemaVersion must be 1 or 2");
+}
 if (!Number.isSafeInteger(json.revision) || json.revision < 0) {
   fail("revision must be a non-negative safe integer");
 }
@@ -171,6 +176,30 @@ for (const [index, entry] of json.models.entries()) {
           typeof option.controls.omitTemperature !== "boolean"
         ) {
           fail(`models[${index}] has an invalid omitTemperature flag`);
+        }
+      }
+      if (option.controlsByProtocol !== undefined) {
+        if (json.schemaVersion !== 2) {
+          fail(
+            `models[${index}] uses controlsByProtocol but schemaVersion is not 2`,
+          );
+        }
+        if (
+          typeof option.controlsByProtocol !== "object" ||
+          Array.isArray(option.controlsByProtocol) ||
+          Object.keys(option.controlsByProtocol).length > 8 ||
+          Object.keys(option.controlsByProtocol).some(
+            (key) => !/^[a-z0-9_]{1,32}$/.test(key),
+          )
+        ) {
+          fail(`models[${index}] has invalid controlsByProtocol keys`);
+        }
+        for (const patch of Object.values(option.controlsByProtocol)) {
+          validateValue(patch.body || {});
+          for (const key of Object.keys(patch.body || {})) {
+            if (!allowedRoots.has(key))
+              fail(`models[${index}] control root ${key} is not allowlisted`);
+          }
         }
       }
     }

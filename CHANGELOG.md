@@ -12,6 +12,53 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
   real limits (1M context, 131072 output) plus a thinking-effort selector
   (max / high / low) matching the model's forced-thinking behavior.
 
+### Fixed
+
+- glm-5.3-flash had no thinking levels in the chat selector: the reasoning
+  provider gate (`ReasoningProviderKind`) did not know the glm family, so the
+  model resolved to `unsupported` and the send path dropped the selected
+  effort before it reached the request. `glm` is now a first-class reasoning
+  provider end-to-end (registry levels compile as before).
+- Per-provider thinking-level memory silently dropped glm and mimo
+  selections: the persisted-key whitelist was a hand-copied subset of the
+  provider list. All provider-keyed sets now derive from the single provider
+  identity table, and a test pins the full member set.
+
+### Changed
+
+- **Provider identity has a single source of truth** (`src/utils/provider.ts`).
+  The "which provider families exist" knowledge was hand-copied across twelve
+  lists with diverging member sets — the root cause of the glm-5.3-flash
+  regression. Family ids, host tokens, labels, model-name rules, and the
+  local-server detection now live in one zero-dependency module; every type,
+  set, and switch derives from it.
+- **Reasoning request encoders are per-family adapters**
+  (`src/utils/reasoning/`), registered in one map that llmClient dispatches
+  through — the per-family if/else chain is gone. Adding a family's thinking
+  levels now means adding an adapter module plus a registry entry, without
+  editing existing branches (open for extension). Declarative registry
+  controls still take precedence; behavior is unchanged (pure refactor).
+- The duplicated gemini native `thinkingConfig` fallback (llmClient and the
+  agent's geminiNative adapter) and the two reasoning reserve-token tables
+  are each merged into one copy.
+
+### Changed (schema 2)
+
+- **Reasoning level tables moved into the capability registry** (schema
+  version 2, revision 6). OpenAI/GPT-5 (incl. codex and pro ladders), Grok,
+  Gemini (2.5 budgets with their -1/0 sentinels and the 3.x level ladders),
+  DeepSeek, MiMo, and Kimi k2/k2.5 now declare their levels as registry
+  options, so they can be updated remotely without a plugin release. Options
+  may carry `controlsByProtocol`, letting one entry encode the same level
+  differently per wire protocol (Responses vs chat, Anthropic-compat,
+  gemini_native). Older plugin builds reject the schema-2 registry outright
+  and keep their bundled copy — they never see half-decoded data. The
+  per-family adapters keep only optimistic fallbacks for models the registry
+  has not learned yet; qwen (host-dependent encoding) and Anthropic (adaptive/
+  manual thinking with a max-tokens-clamped budget) stay fully imperative.
+  New model versions now land on the generic fallback first and gain their
+  real ladder through a registry revision.
+
 ## 3.11.1 - 2026-09-15
 
 ### Fixed

@@ -6,6 +6,8 @@ import {
   getOpenAIReasoningProfileForModel,
   getQwenReasoningProfileForModel,
   getRuntimeReasoningOptionsForModel,
+  getReasoningDefaultLevelForModel,
+  getReasoningLevelAlias,
   supportsReasoningForModel,
   type ReasoningProvider,
 } from "../utils/reasoningProfiles";
@@ -13,8 +15,9 @@ import { MAX_ALLOWED_TOKENS } from "../utils/llmDefaults";
 import { BUNDLED_MODEL_CAPABILITY_REGISTRY } from "./bundled";
 import {
   inferProviderFromApiBase,
-  inferProviderFromModelName,
-} from "./providerInference";
+  isReasoningProvider,
+  resolveProviderOrLocal,
+} from "../utils/provider";
 import {
   fetchOllamaCatalog,
   stripImplicitLatestTag,
@@ -157,12 +160,11 @@ function providerFromIdentity(
     inferProviderFromApiBase(normalize(identity.apiBase)) ??
     // Relays and unrecognized hosts still serve recognizable models; the
     // model name keeps its provider family (and thus its reasoning profile).
-    inferProviderFromModelName(normalize(identity.model)) ??
-    // Last resort only, so a recognized family is never shadowed by its host.
-    // Must mirror detectReasoningProvider's ordering: the two derive the same
-    // provider for the same model, and a mismatch would key the live catalog
-    // snapshot under one name while the capability lookup reads another.
-    (isLocalModelApiBase(identity.apiBase || "") ? "local" : null) ??
+    // The model-name → local tail is shared with detectReasoningProvider via
+    // resolveProviderOrLocal, so the two can no longer derive different
+    // providers for the same model (a mismatch would key the live catalog
+    // snapshot under one name while the capability lookup reads another).
+    resolveProviderOrLocal(normalize(identity.model), identity.apiBase) ??
     "unknown"
   );
 }
@@ -170,19 +172,7 @@ function providerFromIdentity(
 function legacyReasoningProvider(
   provider: ModelCapabilityProvider,
 ): ReasoningProvider | null {
-  if (
-    provider === "openai" ||
-    provider === "gemini" ||
-    provider === "deepseek" ||
-    provider === "kimi" ||
-    provider === "mimo" ||
-    provider === "qwen" ||
-    provider === "grok" ||
-    provider === "anthropic"
-  ) {
-    return provider;
-  }
-  return null;
+  return isReasoningProvider(provider) ? provider : null;
 }
 
 function legacyReasoning(
@@ -610,16 +600,41 @@ export function compileReasoningControls(
 ): { extra: Record<string, unknown>; omitTemperature: boolean } | null {
   const reasoning = capabilities.reasoning;
   const requested = normalize(selection.effort || selection.level);
+  // Protocol-keyed overrides win over the option's default controls; the
+  // identity's protocol is absent in menu-only lookups, which then simply
+  // resolve the default patch.
+  const protocol = normalize(capabilities.identity.protocol);
+  const controlsForOption = (
+    option:
+      | {
+          controls?: ModelControlPatch;
+          controlsByProtocol?: Record<string, ModelControlPatch>;
+        }
+      | undefined,
+  ) => option?.controlsByProtocol?.[protocol] ?? option?.controls;
   const explicitOption = reasoning.options.find(
     (candidate) => Boolean(requested) && normalize(candidate.id) === requested,
   );
   if (
     (reasoning.kind === "none" || reasoning.kind === "server_default") &&
-    !explicitOption?.controls
+    !controlsForOption(explicitOption)
   ) {
     return null;
   }
   if (!requested || requested === "auto") return null;
+  // Level fallbacks beyond the exact id exist only where the vocabulary is
+  // registry-constrained: protocol-aware data (schema 2), and the
+  // fixed/toggle kinds whose single option stands for any requested level —
+  // matching the imperative encoders these entries replaced, which mapped
+  // unknown levels onto their default. Everything shipped before — glm,
+  // kimi-k2.6+ selects, Ollama's think switch, user overrides — must keep
+  // resolving exactly as it always has.
+  const levelFallbackEligible =
+    reasoning.options.some(
+      (candidate) => candidate.controlsByProtocol !== undefined,
+    ) ||
+    reasoning.kind === "fixed" ||
+    reasoning.kind === "toggle";
   const option =
     explicitOption ||
     (requested === "minimal"
@@ -629,6 +644,17 @@ export function compileReasoningControls(
       ? reasoning.options.find(
           (candidate) => candidate.id === reasoning.defaultOptionId,
         ) || reasoning.options[0]
+      : undefined) ||
+    (levelFallbackEligible
+      ? reasoning.options.find(
+          (candidate) =>
+            normalize(candidate.id) ===
+            normalize(getReasoningLevelAlias(requested) || ""),
+        ) ||
+        reasoning.options.find(
+          (candidate) => candidate.id === reasoning.defaultOptionId,
+        ) ||
+        reasoning.options[0]
       : undefined);
   const disabledOption =
     requested === "none" || requested === "off" || requested === "disabled";
@@ -636,10 +662,12 @@ export function compileReasoningControls(
   // The capability-level patch is the *enable* payload, so inheriting it here
   // would turn reasoning on for the level the user picked to turn it off.
   const controls =
-    option?.controls || (disabledOption ? undefined : reasoning.controls);
+    controlsForOption(option) ||
+    (disabledOption ? undefined : reasoning.controls);
   if (
     !option ||
-    (option.enabled === false && !(disabledOption && option.controls)) ||
+    (option.enabled === false &&
+      !(disabledOption && controlsForOption(option))) ||
     !controls
   ) {
     return null;
@@ -654,6 +682,28 @@ export function compileReasoningControls(
     extra,
     omitTemperature: Boolean(controls.omitTemperature),
   };
+}
+
+/**
+ * The default reasoning level a model should fall back to, from whatever
+ * source won capability resolution (registry entry, live catalog, legacy
+ * profile). The legacy facade is the last resort so a registry miss keeps
+ * today's behavior.
+ */
+export function getModelReasoningDefaultLevel(
+  identity: ModelCapabilityIdentity,
+): string | null {
+  const capabilities = getModelCapabilities(identity);
+  const reasoning = capabilities.reasoning;
+  if (reasoning.kind === "none") return null;
+  const legacyProvider = legacyReasoningProvider(capabilities.provider);
+  return (
+    reasoning.defaultOptionId ||
+    reasoning.options[0]?.id ||
+    (legacyProvider
+      ? getReasoningDefaultLevelForModel(legacyProvider, identity.model)
+      : null)
+  );
 }
 
 export function getRuntimeReasoningOptions(

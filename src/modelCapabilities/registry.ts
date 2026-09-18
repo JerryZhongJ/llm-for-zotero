@@ -117,6 +117,17 @@ function validateControlPatch(value: unknown): value is ModelControlPatch {
   return true;
 }
 
+function validateControlsByProtocol(
+  value: unknown,
+): value is Record<string, ModelControlPatch> {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length > 8) return false;
+  return keys.every(
+    (key) => /^[a-z0-9_]{1,32}$/.test(key) && validateControlPatch(value[key]),
+  );
+}
+
 function validateReasoning(value: unknown): value is ModelReasoningCapability {
   if (!isRecord(value)) return false;
   if (
@@ -151,6 +162,12 @@ function validateReasoning(value: unknown): value is ModelReasoningCapability {
       return false;
     }
     if (option.enabled !== undefined && typeof option.enabled !== "boolean") {
+      return false;
+    }
+    if (
+      option.controlsByProtocol !== undefined &&
+      !validateControlsByProtocol(option.controlsByProtocol)
+    ) {
       return false;
     }
     return (
@@ -265,12 +282,33 @@ export function validateRegistry(
   value: unknown,
 ): ModelCapabilityRegistry | null {
   if (!isRecord(value)) return null;
-  if (value.schemaVersion !== 1) return null;
+  const schemaVersion = value.schemaVersion;
+  // Schema 2 adds option-level controlsByProtocol. Readers accept both, but a
+  // v1 document carrying the field is invalid: older builds would silently
+  // drop the protocol overrides and send mis-encoded requests.
+  if (schemaVersion !== 1 && schemaVersion !== 2) return null;
   if (!Number.isSafeInteger(value.revision) || Number(value.revision) < 0)
     return null;
   if (!Array.isArray(value.models) || value.models.length > 4096) return null;
   if (!value.models.every(validateEntry)) return null;
+  if (schemaVersion === 1 && carriesControlsByProtocol(value.models)) {
+    return null;
+  }
   return cloneRegistry(value as ModelCapabilityRegistry);
+}
+
+function carriesControlsByProtocol(models: unknown[]): boolean {
+  return models.some((entry) => {
+    const options =
+      isRecord(entry) &&
+      isRecord(entry.reasoning) &&
+      Array.isArray(entry.reasoning.options)
+        ? entry.reasoning.options
+        : [];
+    return options.some(
+      (option) => isRecord(option) && option.controlsByProtocol !== undefined,
+    );
+  });
 }
 
 function normalized(value: unknown): string {

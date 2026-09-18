@@ -14,7 +14,11 @@ import {
   type ReasoningCapabilityOption,
 } from "../modelCapabilities";
 import type { ReasoningLevel, ReasoningProvider } from "./reasoningProfiles";
-import { getGeminiReasoningProfileForModel } from "./reasoningProfiles";
+import {
+  getGeminiReasoningProfileForModel,
+  REASONING_RESERVE_TOKENS_BY_LEVEL,
+} from "./reasoningProfiles";
+import { ALL_REASONING_PROVIDERS } from "./provider";
 import { callLLMWithTimeout } from "./llmCallTimeout";
 
 export type UtilityLLMFailureReason =
@@ -97,28 +101,7 @@ type UtilityReasoningPlan = {
   reserveTokens: number;
 };
 
-const REASONING_RESERVE_BY_LEVEL: Record<string, number> = {
-  minimal: 512,
-  low: 1_024,
-  default: 1_024,
-  medium: 2_048,
-  high: 4_096,
-  xhigh: 8_192,
-  ultra: 8_192,
-  max: 8_192,
-};
-
-const REASONING_PROVIDERS = new Set<ReasoningProvider>([
-  "openai",
-  "gemini",
-  "deepseek",
-  "kimi",
-  "mimo",
-  "qwen",
-  "grok",
-  "anthropic",
-  "local",
-]);
+const REASONING_PROVIDERS = new Set<ReasoningProvider>(ALL_REASONING_PROVIDERS);
 
 function normalize(value: unknown): string {
   return `${value ?? ""}`.trim().toLowerCase();
@@ -180,6 +163,13 @@ function numericReserveFromControls(
     isRecord(body.generationConfig) &&
     isRecord(body.generationConfig.thinkingConfig)
       ? body.generationConfig.thinkingConfig.thinkingBudget
+      : undefined,
+    // Registry gemini entries declare the chat-compat shape nested under
+    // extra_body.google.thinking_config.
+    isRecord(body.extra_body) && isRecord(body.extra_body.google)
+      ? isRecord(body.extra_body.google.thinking_config)
+        ? body.extra_body.google.thinking_config.thinking_budget
+        : undefined
       : undefined,
   ];
   const numeric = candidates.find(
@@ -286,7 +276,7 @@ function buildReasoningPlan(params: {
         (capabilities.provider === "gemini"
           ? numericGeminiReserve(params.model, level)
           : undefined) ??
-        REASONING_RESERVE_BY_LEVEL[level] ??
+        REASONING_RESERVE_TOKENS_BY_LEVEL[level] ??
         1_024,
     };
   }
@@ -302,7 +292,7 @@ function buildReasoningPlan(params: {
   ) {
     return {
       reasoning: { provider, level: "low" },
-      reserveTokens: REASONING_RESERVE_BY_LEVEL.low,
+      reserveTokens: REASONING_RESERVE_TOKENS_BY_LEVEL.low,
     };
   }
   return null;

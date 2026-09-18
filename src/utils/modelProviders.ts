@@ -12,6 +12,7 @@ import {
 } from "./providerProtocol";
 import { detectProviderPreset, getProviderPreset } from "./providerPresets";
 import type { ProviderPresetId } from "./providerPresets";
+import { PROVIDER_HOSTS, PROVIDER_LABELS } from "./provider";
 import type { ModelInputMode } from "../shared/types";
 import {
   CATALOG_EXCLUDED_AUTH_MODES,
@@ -269,38 +270,53 @@ export function deriveProviderLabel(
   }
   const lowerHost = host.toLowerCase();
 
-  if (
-    lowerHost === "generativelanguage.googleapis.com" ||
-    lowerHost.endsWith(".generativelanguage.googleapis.com") ||
-    lowerHost.includes("gemini")
-  ) {
-    return "Gemini";
-  }
-  if (lowerHost.includes("githubcopilot.com")) return "GitHub Copilot";
-  if (lowerHost.includes("openai.com") || lowerHost === "chatgpt.com") {
-    return "OpenAI";
-  }
-  if (lowerHost.includes("anthropic.com")) return "Anthropic";
-  if (lowerHost.includes("minimax")) return "MiniMax";
-  if (lowerHost.includes("bigmodel.cn") || lowerHost.includes("z.ai")) {
-    return "GLM";
-  }
-  if (lowerHost.includes("deepseek.com")) return "DeepSeek";
-  if (lowerHost.includes("moonshot.ai") || lowerHost.includes("moonshot.cn")) {
-    return "Kimi";
-  }
-  if (lowerHost.includes("together.ai") || lowerHost.includes("together.xyz")) {
-    return "Together.ai";
-  }
-  if (lowerHost.includes("openrouter.ai")) return "OpenRouter";
-  if (lowerHost === "x.ai" || lowerHost.endsWith(".x.ai")) return "Grok";
-  if (lowerHost.includes("groq.com")) return "Groq";
-  if (lowerHost.includes("dashscope") || lowerHost.includes("aliyuncs.com")) {
-    return "Qwen";
+  // Family lookups reuse the identity table's host tokens and labels; the
+  // extra tokens (bare "gemini", chatgpt.com, z.ai) are display-only aliases
+  // that must not confer provider-family identity anywhere else. Together.ai,
+  // OpenRouter and Groq have no family entry — they are marketplaces, not
+  // model vendors with reasoning profiles.
+  for (const rule of HOST_LABEL_RULES) {
+    if (rule.tokens.some((token) => lowerHost.includes(token))) {
+      return rule.label;
+    }
   }
 
   return host;
 }
+
+type HostLabelRule = { tokens: readonly string[]; label: string };
+
+const HOST_LABEL_RULES: readonly HostLabelRule[] = [
+  {
+    tokens: [...PROVIDER_HOSTS.gemini.hostTokens, "gemini"],
+    label: PROVIDER_LABELS.gemini,
+  },
+  { tokens: ["githubcopilot.com"], label: "GitHub Copilot" },
+  {
+    tokens: [...PROVIDER_HOSTS.openai.hostTokens, "chatgpt.com"],
+    label: PROVIDER_LABELS.openai,
+  },
+  {
+    tokens: PROVIDER_HOSTS.anthropic.hostTokens,
+    label: PROVIDER_LABELS.anthropic,
+  },
+  { tokens: PROVIDER_HOSTS.minimax.hostTokens, label: PROVIDER_LABELS.minimax },
+  {
+    tokens: [...PROVIDER_HOSTS.glm.hostTokens, "z.ai"],
+    label: PROVIDER_LABELS.glm,
+  },
+  {
+    tokens: PROVIDER_HOSTS.deepseek.hostTokens,
+    label: PROVIDER_LABELS.deepseek,
+  },
+  { tokens: ["moonshot.ai", "moonshot.cn"], label: PROVIDER_LABELS.kimi },
+  { tokens: ["together.ai", "together.xyz"], label: "Together.ai" },
+  { tokens: ["openrouter.ai"], label: "OpenRouter" },
+  { tokens: PROVIDER_HOSTS.grok.hostTokens, label: PROVIDER_LABELS.grok },
+  { tokens: ["groq.com"], label: "Groq" },
+  { tokens: PROVIDER_HOSTS.qwen.hostTokens, label: PROVIDER_LABELS.qwen },
+  { tokens: PROVIDER_HOSTS.mimo.hostTokens, label: PROVIDER_LABELS.mimo },
+];
 
 function extractProviderHost(apiBase: string): string {
   const normalizedBase = normalizeApiBase(apiBase);

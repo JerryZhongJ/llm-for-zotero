@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "revision": 5,
+  "schemaVersion": 2,
+  "revision": 6,
   "models": [
     {
       "match": {
@@ -323,6 +323,116 @@
       "limits": {
         "contextWindowTokens": 1048576,
         "inputTokens": 1048576
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "dynamic",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": -1
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": -1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "off",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 0
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "1",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 1
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "24576",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 24576
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 24576
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -333,78 +443,317 @@
       "limits": {
         "contextWindowTokens": 1050000,
         "inputTokens": 1050000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "default",
+            "controls": {
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controls": {
+              "body": {
+                "reasoning_effort": "xhigh"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
       }
     },
     {
-      "match": { "prefix": "qwen-turbo" },
-      "limits": { "contextWindowTokens": 1000000, "inputTokens": 1000000 }
+      "match": {
+        "prefix": "qwen-turbo"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      }
     },
     {
-      "match": { "prefix": "qwen-max" },
-      "limits": { "contextWindowTokens": 129024, "inputTokens": 129024 }
+      "match": {
+        "prefix": "qwen-max"
+      },
+      "limits": {
+        "contextWindowTokens": 129024,
+        "inputTokens": 129024
+      }
     },
     {
-      "match": { "provider": "qwen", "exact": "qwen3.8-max" },
-      "limits": { "contextWindowTokens": 1000000, "outputTokens": 131072 }
+      "match": {
+        "provider": "qwen",
+        "exact": "qwen3.8-max"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "outputTokens": 131072
+      }
     },
     {
-      "match": { "prefix": "gemini-2-5" },
-      "limits": { "contextWindowTokens": 1048576, "inputTokens": 1048576 }
+      "match": {
+        "prefix": "gemini-2-5"
+      },
+      "limits": {
+        "contextWindowTokens": 1048576,
+        "inputTokens": 1048576
+      }
     },
     {
-      "match": { "prefix": "gemini-25" },
-      "limits": { "contextWindowTokens": 1048576, "inputTokens": 1048576 }
+      "match": {
+        "prefix": "gemini-25"
+      },
+      "limits": {
+        "contextWindowTokens": 1048576,
+        "inputTokens": 1048576
+      }
     },
     {
-      "match": { "prefix": "gemini-3" },
-      "limits": { "contextWindowTokens": 1000000, "inputTokens": 1000000 }
+      "match": {
+        "prefix": "gemini-3"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      }
     },
     {
-      "match": { "prefix": "gemini-1.5" },
-      "limits": { "contextWindowTokens": 1000000, "inputTokens": 1000000 }
+      "match": {
+        "prefix": "gemini-1.5"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      }
     },
     {
-      "match": { "prefix": "gemini-1-5" },
-      "limits": { "contextWindowTokens": 1000000, "inputTokens": 1000000 }
+      "match": {
+        "prefix": "gemini-1-5"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      }
     },
     {
-      "match": { "prefix": "gemini-15" },
-      "limits": { "contextWindowTokens": 1000000, "inputTokens": 1000000 }
+      "match": {
+        "prefix": "gemini-15"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      }
     },
     {
-      "match": { "prefix": "gpt-4.1" },
-      "limits": { "contextWindowTokens": 1047576, "inputTokens": 1047576 }
+      "match": {
+        "prefix": "gpt-4.1"
+      },
+      "limits": {
+        "contextWindowTokens": 1047576,
+        "inputTokens": 1047576
+      }
     },
     {
-      "match": { "prefix": "gpt-4-1" },
-      "limits": { "contextWindowTokens": 1047576, "inputTokens": 1047576 }
+      "match": {
+        "prefix": "gpt-4-1"
+      },
+      "limits": {
+        "contextWindowTokens": 1047576,
+        "inputTokens": 1047576
+      }
     },
     {
-      "match": { "prefix": "gpt-41" },
-      "limits": { "contextWindowTokens": 1047576, "inputTokens": 1047576 }
+      "match": {
+        "prefix": "gpt-41"
+      },
+      "limits": {
+        "contextWindowTokens": 1047576,
+        "inputTokens": 1047576
+      }
     },
     {
-      "match": { "prefix": "gpt-5" },
-      "limits": { "contextWindowTokens": 400000, "inputTokens": 400000 }
+      "match": {
+        "prefix": "gpt-5"
+      },
+      "limits": {
+        "contextWindowTokens": 400000,
+        "inputTokens": 400000
+      }
     },
     {
-      "match": { "prefix": "o3" },
-      "limits": { "contextWindowTokens": 200000, "inputTokens": 200000 }
+      "match": {
+        "prefix": "o3"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      }
     },
     {
-      "match": { "prefix": "o1-pro" },
-      "limits": { "contextWindowTokens": 200000, "inputTokens": 200000 }
+      "match": {
+        "prefix": "o1-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      }
     },
     {
-      "match": { "prefix": "o1" },
-      "limits": { "contextWindowTokens": 200000, "inputTokens": 200000 }
+      "match": {
+        "prefix": "o1"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      }
     },
     {
-      "match": { "prefix": "gpt-4o" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "prefix": "gpt-4o"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
     },
     {
-      "match": { "prefix": "claude-opus-4-7" },
+      "match": {
+        "prefix": "claude-opus-4-7"
+      },
       "limits": {
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
@@ -412,7 +761,9 @@
       }
     },
     {
-      "match": { "prefix": "claude-opus-4-6" },
+      "match": {
+        "prefix": "claude-opus-4-6"
+      },
       "limits": {
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
@@ -420,7 +771,9 @@
       }
     },
     {
-      "match": { "prefix": "claude-sonnet-4-6" },
+      "match": {
+        "prefix": "claude-sonnet-4-6"
+      },
       "limits": {
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
@@ -428,7 +781,9 @@
       }
     },
     {
-      "match": { "prefix": "claude-haiku-4-5" },
+      "match": {
+        "prefix": "claude-haiku-4-5"
+      },
       "limits": {
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
@@ -436,75 +791,372 @@
       }
     },
     {
-      "match": { "prefix": "claude" },
-      "limits": { "contextWindowTokens": 200000, "inputTokens": 200000 }
+      "match": {
+        "prefix": "claude"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      }
     },
     {
-      "match": { "prefix": "grok-4.1-fast" },
-      "limits": { "contextWindowTokens": 2000000, "inputTokens": 2000000 }
+      "match": {
+        "prefix": "grok-4.1-fast"
+      },
+      "limits": {
+        "contextWindowTokens": 2000000,
+        "inputTokens": 2000000
+      }
     },
     {
-      "match": { "prefix": "grok-4-1-fast" },
-      "limits": { "contextWindowTokens": 2000000, "inputTokens": 2000000 }
+      "match": {
+        "prefix": "grok-4-1-fast"
+      },
+      "limits": {
+        "contextWindowTokens": 2000000,
+        "inputTokens": 2000000
+      }
     },
     {
-      "match": { "prefix": "grok-41-fast" },
-      "limits": { "contextWindowTokens": 2000000, "inputTokens": 2000000 }
+      "match": {
+        "prefix": "grok-41-fast"
+      },
+      "limits": {
+        "contextWindowTokens": 2000000,
+        "inputTokens": 2000000
+      }
     },
     {
-      "match": { "prefix": "grok-4-fast" },
-      "limits": { "contextWindowTokens": 2000000, "inputTokens": 2000000 }
+      "match": {
+        "prefix": "grok-4-fast"
+      },
+      "limits": {
+        "contextWindowTokens": 2000000,
+        "inputTokens": 2000000
+      }
     },
     {
-      "match": { "prefix": "grok-code-fast-1" },
-      "limits": { "contextWindowTokens": 256000, "inputTokens": 256000 }
+      "match": {
+        "prefix": "grok-code-fast-1"
+      },
+      "limits": {
+        "contextWindowTokens": 256000,
+        "inputTokens": 256000
+      }
     },
     {
-      "match": { "prefix": "grok-4" },
-      "limits": { "contextWindowTokens": 256000, "inputTokens": 256000 }
+      "match": {
+        "prefix": "grok-4"
+      },
+      "limits": {
+        "contextWindowTokens": 256000,
+        "inputTokens": 256000
+      }
     },
     {
-      "match": { "prefix": "grok-3" },
-      "limits": { "contextWindowTokens": 131072, "inputTokens": 131072 }
+      "match": {
+        "prefix": "grok-3"
+      },
+      "limits": {
+        "contextWindowTokens": 131072,
+        "inputTokens": 131072
+      }
     },
     {
-      "match": { "prefix": "command-a" },
-      "limits": { "contextWindowTokens": 256000, "inputTokens": 256000 }
+      "match": {
+        "prefix": "command-a"
+      },
+      "limits": {
+        "contextWindowTokens": 256000,
+        "inputTokens": 256000
+      }
     },
     {
-      "match": { "prefix": "command-r+" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "prefix": "command-r+"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
     },
     {
-      "match": { "prefix": "command-r-plus" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "prefix": "command-r-plus"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
     },
     {
-      "match": { "prefix": "command-r" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "prefix": "command-r"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
     },
     {
-      "match": { "prefix": "mistral-large-3" },
-      "limits": { "contextWindowTokens": 256000, "inputTokens": 256000 }
+      "match": {
+        "prefix": "mistral-large-3"
+      },
+      "limits": {
+        "contextWindowTokens": 256000,
+        "inputTokens": 256000
+      }
     },
     {
-      "match": { "prefix": "ministral-3" },
-      "limits": { "contextWindowTokens": 256000, "inputTokens": 256000 }
+      "match": {
+        "prefix": "ministral-3"
+      },
+      "limits": {
+        "contextWindowTokens": 256000,
+        "inputTokens": 256000
+      }
     },
     {
-      "match": { "prefix": "mistral-medium-3" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "prefix": "mistral-medium-3"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
     },
     {
-      "match": { "prefix": "mistral-small-3" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "prefix": "mistral-small-3"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
     },
     {
-      "match": { "prefix": "codestral" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "prefix": "codestral"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
     },
     {
-      "match": { "prefix": "deepseek-v4-flash" },
+      "match": {
+        "prefix": "deepseek-v4-flash"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000,
+        "outputTokens": 384000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "default",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                },
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "disabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "disabled"
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                },
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "max",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                },
+                "reasoning_effort": "max"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled"
+                  },
+                  "output_config": {
+                    "effort": "max"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "deepseek-v4-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000,
+        "outputTokens": 384000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "default",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                },
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "disabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "disabled"
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                },
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "max",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                },
+                "reasoning_effort": "max"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled"
+                  },
+                  "output_config": {
+                    "effort": "max"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "deepseek-chat"
+      },
       "limits": {
         "contextWindowTokens": 1000000,
         "inputTokens": 1000000,
@@ -512,32 +1164,2370 @@
       }
     },
     {
-      "match": { "prefix": "deepseek-v4-pro" },
+      "match": {
+        "prefix": "deepseek-reasoner"
+      },
       "limits": {
         "contextWindowTokens": 1000000,
         "inputTokens": 1000000,
         "outputTokens": 384000
+      },
+      "reasoning": {
+        "kind": "fixed",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                }
+              }
+            }
+          }
+        ]
       }
     },
     {
-      "match": { "prefix": "deepseek-chat" },
+      "match": {
+        "prefix": "deepseek"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      }
+    },
+    {
+      "match": {
+        "provider": "openai",
+        "prefix": "gpt-5.5"
+      },
+      "limits": {
+        "contextWindowTokens": 400000,
+        "inputTokens": 400000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "default",
+            "controls": {
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controls": {
+              "body": {
+                "reasoning_effort": "xhigh"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "openai",
+        "prefix": "gpt-5.2"
+      },
+      "limits": {
+        "contextWindowTokens": 400000,
+        "inputTokens": 400000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "default",
+            "controls": {
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controls": {
+              "body": {
+                "reasoning_effort": "xhigh"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "openai",
+        "prefix": "gpt-5.2-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 400000,
+        "inputTokens": 400000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "medium",
+        "options": [
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controls": {
+              "body": {
+                "reasoning_effort": "xhigh"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "openai",
+        "prefix": "gpt-5.4-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 1050000,
+        "inputTokens": 1050000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "medium",
+        "options": [
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controls": {
+              "body": {
+                "reasoning_effort": "xhigh"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "openai",
+        "prefix": "gpt-5-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 400000,
+        "inputTokens": 400000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "high",
+        "options": [
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "openai",
+        "prefix": "gpt-5.2-codex"
+      },
+      "limits": {
+        "contextWindowTokens": 400000,
+        "inputTokens": 400000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controls": {
+              "body": {
+                "reasoning_effort": "xhigh"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "openai",
+        "prefix": "gpt-5.3-codex"
+      },
+      "limits": {
+        "contextWindowTokens": 400000,
+        "inputTokens": 400000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "reasoning_effort": "low"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "reasoning_effort": "medium"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "medium",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controls": {
+              "body": {
+                "reasoning_effort": "xhigh"
+              },
+              "omitTemperature": true
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "xhigh",
+                    "summary": "detailed"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "grok-3-mini"
+      },
+      "limits": {
+        "contextWindowTokens": 131072,
+        "inputTokens": 131072
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "default",
+            "controls": {
+              "body": {}
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                }
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "summary": "detailed"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "reasoning_effort": "low"
+              }
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                }
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "low",
+                    "summary": "detailed"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "reasoning_effort": "high"
+              }
+            },
+            "controlsByProtocol": {
+              "responses_api": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                }
+              },
+              "codex_responses": {
+                "body": {
+                  "reasoning": {
+                    "effort": "high",
+                    "summary": "detailed"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-2.5-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 1048576,
+        "inputTokens": 1048576
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "dynamic",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": -1
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": -1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "128",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 128
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 128
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "32768",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 32768
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 32768
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-2.5-flash-lite"
+      },
+      "limits": {
+        "contextWindowTokens": 1048576,
+        "inputTokens": 1048576
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "off",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 0
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "dynamic",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": -1
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": -1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "512",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 512
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 512
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "24576",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 24576
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 24576
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-2.5-flash"
+      },
+      "limits": {
+        "contextWindowTokens": 1048576,
+        "inputTokens": 1048576
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "dynamic",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": -1
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": -1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "off",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 0
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 0
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "1",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 1
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "24576",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_budget": 24576
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": 24576
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3-flash-lite"
+      },
       "limits": {
         "contextWindowTokens": 1000000,
-        "inputTokens": 1000000,
-        "outputTokens": 384000
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "minimal",
+        "options": [
+          {
+            "id": "minimal",
+            "label": "minimal",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "minimal"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "minimal"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "medium"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "medium"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     },
     {
-      "match": { "prefix": "deepseek-reasoner" },
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3.1-flash-lite"
+      },
       "limits": {
         "contextWindowTokens": 1000000,
-        "inputTokens": 1000000,
-        "outputTokens": 384000
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "minimal",
+        "options": [
+          {
+            "id": "minimal",
+            "label": "minimal",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "minimal"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "minimal"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "medium"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "medium"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     },
     {
-      "match": { "prefix": "deepseek" },
-      "limits": { "contextWindowTokens": 128000, "inputTokens": 128000 }
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3.5-flash-lite"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "minimal",
+        "options": [
+          {
+            "id": "minimal",
+            "label": "minimal",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "minimal"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "minimal"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "medium"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "medium"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3.6-flash"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "medium",
+        "options": [
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "medium"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "medium"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "minimal",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "minimal"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "minimal"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3-flash"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "high",
+        "options": [
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "medium"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "medium"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "minimal",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "minimal"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "minimal"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3.5-flash"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "high",
+        "options": [
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "medium"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "medium"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "minimal",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "minimal"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "minimal"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "high",
+        "options": [
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "gemini",
+        "prefix": "gemini-3.1-pro"
+      },
+      "limits": {
+        "contextWindowTokens": 1000000,
+        "inputTokens": 1000000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "high",
+        "options": [
+          {
+            "id": "high",
+            "label": "high",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "high"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "high"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "medium"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "medium"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "low",
+            "label": "low",
+            "controls": {
+              "body": {
+                "extra_body": {
+                  "google": {
+                    "thinking_config": {
+                      "include_thoughts": true,
+                      "thinking_level": "low"
+                    }
+                  }
+                }
+              }
+            },
+            "controlsByProtocol": {
+              "gemini_native": {
+                "body": {
+                  "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingLevel": "low"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "deepseek-r1"
+      },
+      "limits": {
+        "contextWindowTokens": 128000,
+        "inputTokens": 128000
+      },
+      "reasoning": {
+        "kind": "fixed",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "mimo",
+        "prefix": "mimo-v2"
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "default",
+            "controls": {
+              "body": {}
+            }
+          },
+          {
+            "id": "high",
+            "label": "enabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "kimi",
+        "prefix": "kimi-k2.5-thinking"
+      },
+      "reasoning": {
+        "kind": "fixed",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "kimi",
+        "prefix": "kimi-k2-thinking"
+      },
+      "reasoning": {
+        "kind": "fixed",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "kimi",
+        "prefix": "kimi-k2.5"
+      },
+      "reasoning": {
+        "kind": "toggle",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "disabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "disabled"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "kimi",
+        "prefix": "kimi-k2"
+      },
+      "reasoning": {
+        "kind": "toggle",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "enabled"
+                }
+              }
+            }
+          },
+          {
+            "id": "minimal",
+            "label": "disabled",
+            "controls": {
+              "body": {
+                "thinking": {
+                  "type": "disabled"
+                }
+              }
+            }
+          }
+        ]
+      }
     }
   ]
 }

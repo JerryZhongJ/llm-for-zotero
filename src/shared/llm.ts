@@ -24,11 +24,10 @@ export type ChatMessage = {
   content: MessageContent;
 };
 
-export type ReasoningConfig = {
-  provider: ReasoningProvider;
-  level: ReasoningLevel;
-  effort?: string;
-};
+// Defined in utils/reasoning/types.ts so the adapters can reference it
+// without importing this module (shared/llm imports reasoningProfiles, which
+// imports the adapters).
+export type { ReasoningConfig } from "../utils/reasoning/types";
 
 export type ReasoningEvent = {
   summary?: string;

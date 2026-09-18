@@ -107,6 +107,10 @@ import {
 } from "../../utils/modelInputCap";
 import { subscribeModelProviderGroups } from "../../utils/modelProviders";
 import { formatDisplayModelName } from "../../utils/modelDisplayLabel";
+import {
+  ALL_REASONING_PROVIDERS,
+  isReasoningProvider,
+} from "../../utils/provider";
 import type { ProviderProtocol } from "../../utils/providerProtocol";
 import { inferLegacyProviderProtocol } from "../../utils/providerProtocol";
 import { isLocalModelApiBase } from "../../utils/providerPresets";
@@ -2470,29 +2474,12 @@ function getCachedAgentRunEvents(
   return agentRunTraceCache.get(normalizedRunId) || [];
 }
 
-const REASONING_PROVIDER_KINDS = new Set<ReasoningProviderKind>([
-  "openai",
-  "gemini",
-  "deepseek",
-  "kimi",
-  "mimo",
-  "qwen",
-  "grok",
-  "anthropic",
-  "local",
-]);
-
 export function detectReasoningProvider(
   modelName: string,
   apiBase?: string,
 ): ReasoningProviderKind {
   const inferred = inferProviderFromModelName(modelName);
-  if (
-    inferred &&
-    REASONING_PROVIDER_KINDS.has(inferred as ReasoningProviderKind)
-  ) {
-    return inferred as ReasoningProviderKind;
-  }
+  if (inferred && isReasoningProvider(inferred)) return inferred;
   // Only as a last resort: a recognized family keeps its own profile even when
   // served locally, because the level set belongs to the weights. This covers
   // the models whose names match nothing — gemma, llama, mistral, or a custom
@@ -2650,17 +2637,9 @@ export function getSelectedReasoningForItem(
     protocol: providerProtocol,
     profileOverride,
   }).provider;
-  const provider: ReasoningProviderKind = [
-    "openai",
-    "gemini",
-    "deepseek",
-    "kimi",
-    "mimo",
-    "qwen",
-    "grok",
-    "anthropic",
-    "local",
-  ].includes(resolvedCapabilityProvider as ReasoningProviderKind)
+  const provider: ReasoningProviderKind = (
+    ALL_REASONING_PROVIDERS as readonly string[]
+  ).includes(resolvedCapabilityProvider)
     ? (resolvedCapabilityProvider as ReasoningProviderKind)
     : detectedProvider;
   const enabledLevels = getReasoningOptions(

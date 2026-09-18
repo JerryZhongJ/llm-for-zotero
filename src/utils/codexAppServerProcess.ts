@@ -8,7 +8,7 @@ import type {
   CodexAppServerUserInput,
 } from "./codexAppServerInput";
 import { getRuntimePlatformInfo } from "./runtimePlatform";
-import { getReasoningDefaultLevelForModel } from "./reasoningProfiles";
+import { getModelReasoningDefaultLevel } from "../modelCapabilities";
 import { extractContextCacheUsage } from "../contextCache/manager";
 import {
   LocalDocumentPathStreamRedactor,
@@ -734,8 +734,10 @@ function normalizeCodexAppServerReasoningLevel(
 ): "low" | "medium" | "high" | "xhigh" | null {
   const resolvedLevel =
     reasoning.level === "default"
-      ? getReasoningDefaultLevelForModel(reasoning.provider, modelName) ||
-        reasoning.level
+      ? getModelReasoningDefaultLevel({
+          provider: reasoning.provider,
+          model: modelName || "",
+        }) || reasoning.level
       : reasoning.level;
   if (resolvedLevel === "minimal") return "low";
   if (resolvedLevel === "low") return "low";

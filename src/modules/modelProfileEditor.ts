@@ -137,12 +137,46 @@ export type ProfileOverrideDraft = {
  * of which survives the override store today — so a derived key there would
  * only trade one rejected request for another.
  */
+/**
+ * Protocol-aware controls lookup, mirroring compileReasoningControls: an
+ * override written for one protocol must copy and derive that protocol's
+ * body, not the entry's chat-compat default.
+ */
+function protocolResolvedControls(
+  option:
+    | {
+        controls?: NonNullable<
+          ResolvedModelCapabilities["reasoning"]["options"][number]["controls"]
+        >;
+        controlsByProtocol?: Record<
+          string,
+          NonNullable<
+            ResolvedModelCapabilities["reasoning"]["options"][number]["controls"]
+          >
+        >;
+      }
+    | undefined,
+  protocol?: string,
+) {
+  const normalized = (protocol || "").trim().toLowerCase();
+  return (
+    (normalized && option?.controlsByProtocol?.[normalized]) || option?.controls
+  );
+}
+
 export function resolveReasoningParameterKey(
   detected: ResolvedModelCapabilities,
 ): string {
   for (const option of detected.reasoning.options) {
-    const key = Object.keys(option.controls?.body || {})[0];
-    if (key) return key;
+    const body =
+      protocolResolvedControls(option, detected.identity.protocol)?.body || {};
+    for (const [key, value] of Object.entries(body)) {
+      // Container roots (thinkingConfig, extra_body, the Responses API's
+      // reasoning object) are envelopes, not level parameters — a custom
+      // level derives its dotted path from the protocol cases below.
+      if (value && typeof value === "object") continue;
+      return key;
+    }
   }
   switch (detected.identity.protocol) {
     case "responses_api":
@@ -151,8 +185,18 @@ export function resolveReasoningParameterKey(
     case "ollama_native":
       return "think";
     case "gemini_native":
-      // 2.5 thinks in token budgets, 3.x in level words; the family decides,
-      // and the wrong one of the two is a 400.
+      // 2.5 thinks in token budgets, 3.x in level words, and the wrong one
+      // of the two is a 400. The registry entry's native controls say which;
+      // the profile tables only know registry misses.
+      for (const option of detected.reasoning.options) {
+        const native =
+          option.controlsByProtocol?.gemini_native?.body?.thinkingConfig;
+        if (native && typeof native === "object") {
+          return "thinkingBudget" in native
+            ? "thinkingConfig.thinkingBudget"
+            : "thinkingConfig.thinkingLevel";
+        }
+      }
       return getGeminiReasoningProfileForModel(detected.model).param ===
         "thinking_budget"
         ? "thinkingConfig.thinkingBudget"
@@ -200,13 +244,19 @@ export function computeProfileOverrideDraft(input: {
   // its name. Legacy profile: the suggested ids already have correct
   // per-protocol encodings built in, so only ids outside that set derive.
   const declarative = detectedOptions.some(
-    (option) => Object.keys(option.controls?.body || {}).length > 0,
+    (option) =>
+      Object.keys(
+        protocolResolvedControls(option, input.detected.identity.protocol)
+          ?.body || {},
+      ).length > 0,
   );
   const hasBuiltinEncoding = (id: string) =>
     declarative
       ? Object.keys(
-          detectedOptions.find((option) => option.id === id)?.controls?.body ||
-            {},
+          protocolResolvedControls(
+            detectedOptions.find((option) => option.id === id),
+            input.detected.identity.protocol,
+          )?.body || {},
         ).length > 0
       : SUGGESTED_REASONING_LEVEL_IDS.includes(
           id as (typeof SUGGESTED_REASONING_LEVEL_IDS)[number],
@@ -241,7 +291,10 @@ export function computeProfileOverrideDraft(input: {
     // provides only the id, the plugin does the encoding, and the model
     // judges validity.
     const body = hasBuiltinEncoding(id)
-      ? detectedOptions.find((option) => option.id === id)?.controls?.body
+      ? protocolResolvedControls(
+          detectedOptions.find((option) => option.id === id),
+          input.detected.identity.protocol,
+        )?.body
       : parseKeyValueField(deriveLevelParameters(input.detected, id)).value;
     seenIds.add(id);
     options.push({

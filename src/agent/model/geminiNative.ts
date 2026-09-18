@@ -1,7 +1,5 @@
-import {
-  getGeminiReasoningProfile,
-  resolveUserExtraBody,
-} from "../../utils/llmClient";
+import { resolveUserExtraBody } from "../../utils/llmClient";
+import { geminiThinkingConfigFromProfile } from "../../utils/reasoning/gemini";
 import {
   compileReasoningControls,
   isRecord,
@@ -249,27 +247,10 @@ function resolveGeminiReasoningConfig(request: AgentRuntimeRequest) {
   if (isRecord(declarativeConfig)) {
     return withGeminiThoughtSummaries(declarativeConfig);
   }
-  const profile = getGeminiReasoningProfile(request.model);
-  const value =
-    profile.levelToValue[request.reasoning.level] ??
-    profile.levelToValue[profile.defaultLevel] ??
-    profile.defaultValue;
-  if (profile.param === "thinking_budget") {
-    return {
-      includeThoughts: true,
-      thinkingBudget: typeof value === "number" ? value : 8192,
-    };
-  }
-  return {
-    includeThoughts: true,
-    thinkingLevel:
-      value === "minimal" ||
-      value === "low" ||
-      value === "medium" ||
-      value === "high"
-        ? value
-        : "medium",
-  };
+  return geminiThinkingConfigFromProfile(
+    request.model,
+    request.reasoning.level,
+  );
 }
 
 async function buildGeminiParts(

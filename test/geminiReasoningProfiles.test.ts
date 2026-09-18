@@ -1,5 +1,8 @@
 import { assert } from "chai";
-import { getGeminiReasoningProfileForModel } from "../src/utils/reasoningProfiles";
+import {
+  getModelCapabilities,
+  getRuntimeReasoningOptions,
+} from "../src/modelCapabilities";
 import { callLLMStream } from "../src/utils/llmClient";
 import { GeminiNativeAgentAdapter } from "../src/agent/model/geminiNative";
 import type { AgentRuntimeRequest, ToolSpec } from "../src/agent/types";
@@ -30,47 +33,70 @@ describe("gemini 3.x reasoning profiles", function () {
     ).ztoolkit = originalToolkit;
   });
 
+  // The named gemini ladders live in the capability registry now; the
+  // helper resolves the registry entry and reports its option set, default,
+  // and which thinking parameter the native protocol declares.
+  function registryLadder(model: string) {
+    const capabilities = getModelCapabilities({
+      provider: "gemini",
+      model,
+      protocol: "gemini_native",
+    });
+    const options = getRuntimeReasoningOptions({
+      provider: "gemini",
+      model,
+      protocol: "gemini_native",
+    }).map((option) => option.level);
+    return {
+      defaultLevel: capabilities.reasoning.defaultOptionId,
+      options,
+      // The native patch's shape says budget-vs-level without trusting the
+      // label spelling.
+      takesBudget: capabilities.reasoning.options.some(
+        (option) =>
+          (
+            option.controlsByProtocol?.gemini_native?.body?.thinkingConfig as
+              | Record<string, unknown>
+              | undefined
+          )?.thinkingBudget !== undefined,
+      ),
+    };
+  }
+
   it("gives gemini-3.6-flash a medium default with a minimal option", function () {
-    const profile = getGeminiReasoningProfileForModel("gemini-3.6-flash");
-    assert.equal(profile.param, "thinking_level");
-    assert.equal(profile.defaultLevel, "medium");
-    assert.equal(profile.levelToValue.minimal, "minimal");
-    assert.include(
-      profile.options.map((entry) => entry.level),
-      "minimal",
-    );
+    const ladder = registryLadder("gemini-3.6-flash");
+    assert.equal(ladder.defaultLevel, "medium");
+    assert.isFalse(ladder.takesBudget);
+    assert.include(ladder.options, "minimal");
   });
 
   it("gives gemini-3.x flash-lite models a minimal default", function () {
     for (const model of ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]) {
-      const profile = getGeminiReasoningProfileForModel(model);
-      assert.equal(profile.param, "thinking_level", model);
-      assert.equal(profile.defaultLevel, "minimal", model);
+      const ladder = registryLadder(model);
+      assert.isFalse(ladder.takesBudget, model);
+      assert.equal(ladder.defaultLevel, "minimal", model);
     }
   });
 
   it("gives gemini-3.x flash models a high default with a minimal option", function () {
     for (const model of ["gemini-3-flash-preview", "gemini-3.5-flash"]) {
-      const profile = getGeminiReasoningProfileForModel(model);
-      assert.equal(profile.defaultLevel, "high", model);
-      assert.equal(profile.levelToValue.minimal, "minimal", model);
+      const ladder = registryLadder(model);
+      assert.equal(ladder.defaultLevel, "high", model);
+      assert.include(ladder.options, "minimal", model);
     }
   });
 
   it("gives gemini-3.1-pro medium support without minimal", function () {
-    const profile = getGeminiReasoningProfileForModel("gemini-3.1-pro-preview");
-    assert.equal(profile.defaultLevel, "high");
-    assert.equal(profile.levelToValue.medium, "medium");
-    assert.notProperty(profile.levelToValue, "minimal");
+    const ladder = registryLadder("gemini-3.1-pro-preview");
+    assert.equal(ladder.defaultLevel, "high");
+    assert.include(ladder.options, "medium");
+    assert.notInclude(ladder.options, "minimal");
   });
 
   it("keeps gemini-3-pro-preview on its low/high ladder", function () {
-    const profile = getGeminiReasoningProfileForModel("gemini-3-pro-preview");
-    assert.equal(profile.defaultLevel, "high");
-    assert.deepEqual(profile.options.map((entry) => entry.level).sort(), [
-      "high",
-      "low",
-    ]);
+    const ladder = registryLadder("gemini-3-pro-preview");
+    assert.equal(ladder.defaultLevel, "high");
+    assert.deepEqual([...ladder.options].sort(), ["high", "low"]);
   });
 
   function mockFetchCapturingBody(): { bodies: Record<string, unknown>[] } {
