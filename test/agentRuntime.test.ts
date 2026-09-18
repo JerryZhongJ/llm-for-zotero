@@ -27,6 +27,7 @@ import { createToolResultReadTool } from "../src/agent/tools/read/toolResultRead
 import { createFileIOTool } from "../src/agent/tools/write/fileIO";
 import { createWebSearchTool } from "../src/agent/tools/read/webSearch";
 import { createPaperReadTool } from "../src/agent/tools/read/paperRead";
+import { createPaperQueryTool } from "../src/agent/tools/read/paperQuery";
 import { TAVILY_API_KEY_PREF } from "../src/webAccess/prefs";
 import type { WebAccessProvider } from "../src/webAccess/types";
 import {
@@ -382,7 +383,7 @@ describe("AgentRuntime", function () {
     try {
       const registry = new AgentToolRegistry();
       registry.register(
-        createPaperReadTool(
+        createPaperQueryTool(
           {
             ensurePaperContext: async (paper: unknown) => {
               ensuredPaper = paper;
@@ -415,7 +416,6 @@ describe("AgentRuntime", function () {
               },
             ],
           } as never,
-          {} as never,
           {
             resolvePaperContextTarget: () => paperContext,
           } as never,
@@ -423,9 +423,8 @@ describe("AgentRuntime", function () {
       );
       const toolCall = {
         id: "issue-393-paper-read",
-        name: "paper_read",
+        name: "paper_query",
         arguments: {
-          mode: "targeted",
           target: {},
           query: "Use the actual PDF/full text to explain the method.",
         },
@@ -479,7 +478,7 @@ describe("AgentRuntime", function () {
         events.some(
           (event) =>
             event.type === "tool_result" &&
-            event.name === "paper_read" &&
+            event.name === "paper_query" &&
             !event.ok,
         ),
       );
@@ -3366,20 +3365,20 @@ describe("AgentRuntime", function () {
     }
   });
 
-  it("records successful paper_read calls as prior-read hints for later turns", async function () {
+  it("records successful paper_query calls as prior-read hints for later turns", async function () {
     const restoreDb = installMockDb();
     try {
       const registry = new AgentToolRegistry();
       registry.register({
         spec: {
-          name: "paper_read",
-          description: "read",
+          name: "paper_query",
+          description: "query",
           inputSchema: { type: "object" },
           mutability: "read",
           requiresConfirmation: false,
         },
         presentation: {
-          label: "Read Paper",
+          label: "Query Paper",
         },
         validate: (args: unknown) => ({ ok: true, value: args }),
         execute: async () => ({
@@ -3426,9 +3425,8 @@ describe("AgentRuntime", function () {
                 calls: [
                   {
                     id: "call-read",
-                    name: "paper_read",
+                    name: "paper_query",
                     arguments: {
-                      mode: "targeted",
                       target: {
                         paperContext: request.selectedPaperContexts?.[0],
                       },
@@ -3442,9 +3440,8 @@ describe("AgentRuntime", function () {
                   tool_calls: [
                     {
                       id: "call-read",
-                      name: "paper_read",
+                      name: "paper_query",
                       arguments: {
-                        mode: "targeted",
                         target: {
                           paperContext: request.selectedPaperContexts?.[0],
                         },
@@ -3516,9 +3513,8 @@ describe("AgentRuntime", function () {
         secondInitialUserMessage,
         "Preserved evidence from prior agent tool reads:",
       );
-      assert.include(secondInitialUserMessage, "Read Paper");
+      assert.include(secondInitialUserMessage, "Query Paper");
       assert.include(secondInitialUserMessage, "Ledger Paper");
-      assert.include(secondInitialUserMessage, "mode=targeted");
       assert.include(secondInitialUserMessage, 'query="abstract"');
       assert.include(secondInitialUserMessage, "paper text");
     } finally {

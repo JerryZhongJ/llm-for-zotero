@@ -7,7 +7,6 @@ import type { QuoteCitation } from "../../../shared/types";
 import type { PdfService } from "../../services/pdfService";
 import type { PdfPageService } from "../../services/pdfPageService";
 import { parsePageSelectionValue } from "../../services/pdfPageService";
-import type { RetrievalService } from "../../services/retrievalService";
 import type { ZoteroGateway } from "../../services/zoteroGateway";
 import {
   formatPaperCitationLabel,
@@ -16,7 +15,6 @@ import {
 import { mergeQuoteCitations } from "../../../modules/contextPanel/quoteCitations";
 import {
   fail,
-  normalizePositiveInt,
   ok,
   PAPER_CONTEXT_REF_SCHEMA,
   validateObject,
@@ -41,7 +39,6 @@ import type {
   PaperReadFigureExtractionService,
   PaperReadFullResult,
   PaperReadInput,
-  PaperReadMode,
 } from "./paperReadTypes";
 
 export type {
@@ -54,6 +51,7 @@ import {
   buildMetadataOverview,
   tryReadMineruOverview,
 } from "./paperReadOverview";
+import { executeSectionsRead } from "./paperReadSections";
 import {
   buildOverviewQuoteCitationPack,
   buildTargetedPaperGroups,
@@ -69,22 +67,23 @@ import {
 } from "./paperReadShared";
 
 const MAX_OVERVIEW_TARGETS = 5;
-const MAX_TARGETED_TARGETS = 10;
+const MAX_TARGETS = 10;
 const MAX_FULL_TARGETS = Number.MAX_SAFE_INTEGER;
-
-function normalizeMode(value: unknown): PaperReadMode {
-  return value === "targeted" ||
-    value === "full" ||
-    value === "figures" ||
-    value === "visual" ||
-    value === "capture" ||
-    value === "overview"
-    ? value
-    : "overview";
-}
+const LEGACY_MODE_MESSAGE =
+  "paper_read no longer takes 'mode'. Coordinates select the path instead: sections:[...] for section text, pages:[...] for exact pages (add images:true for rendered pages), labels:[...] with images:true for figure crops, readFullReason for an exhaustive whole-document read, or no locator arguments for an overview. For relevance-ranked evidence use paper_query({query}).";
 
 function normalizePages(value: unknown): number[] | undefined {
-  return parsePageSelectionValue(value)?.pageIndexes;
+  // Bare page syntax ("16-18") is documented in the schema; the shared
+  // parser only understands the "p16-18" form, so prefix bare digits.
+  const normalized =
+    typeof value === "string" && /^\s*\d/.test(value)
+      ? `p${value.trim()}`
+      : value;
+  return parsePageSelectionValue(normalized)?.pageIndexes;
+}
+
+function hasArg(args: Record<string, unknown>, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(args, name);
 }
 
 function resolveFullReadTargets(params: {
@@ -92,10 +91,9 @@ function resolveFullReadTargets(params: {
   context: AgentToolContext;
   zoteroGateway: ZoteroGateway;
 }): NonNullable<PdfTarget["paperContext"]>[] {
-  // Full reads are no longer gated on implicit analysis of the user's
-  // phrasing. The model must state why the complete document is needed via
-  // the required readFullReason argument (validated in validate()), which
-  // makes the decision explicit and auditable instead of inferred.
+  // Full reads are gated on an explicit, auditable reason (readFullReason,
+  // validated in validate()) instead of implicit analysis of the user's
+  // phrasing.
   const explicitTargets =
     params.input.target || params.input.targets?.length
       ? resolveDefaultTargets(
@@ -107,8 +105,7 @@ function resolveFullReadTargets(params: {
         )
       : [];
   if (explicitTargets.length) return explicitTargets;
-  const requestText =
-    (params.context.request.userText || "").trim() || params.input.query || "";
+  const requestText = (params.context.request.userText || "").trim();
   const selected = dedupePaperContexts([
     ...getTurnPapersWithRoles(params.context.request, ["selected", "ambient"]),
   ]);
@@ -128,136 +125,9 @@ function resolveFullReadTargets(params: {
   }).papers;
 }
 
-function targetForPageTool(input: PaperReadInput): Record<string, unknown> {
-  const target = input.target || input.targets?.[0];
-  return {
-    ...(target ? { target } : {}),
-    ...(input.query ? { question: input.query } : {}),
-    ...(input.pages?.length
-      ? { pages: input.pages.map((pageIndex) => pageIndex + 1) }
-      : {}),
-    ...(input.neighborPages ? { neighborPages: input.neighborPages } : {}),
-    ...(input.mode === "capture" ? { capture: true } : {}),
-  };
-}
-
-function isExplicitPdfVisualRequest(
-  input: PaperReadInput,
-  requestText: string | undefined,
-): boolean {
-  if (input.pages?.length) return true;
-  const text = [input.query || "", requestText || ""]
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-  if (!text) return false;
-  return (
-    /\b(?:raw|rendered?)\s+pdf\b/.test(text) ||
-    /\bpdf\s+(?:page|pages|render|renders|screenshot|screenshots|layout)\b/.test(
-      text,
-    ) ||
-    /\b(?:render|renders|rendered|screenshot|screenshots|capture|captures|captured)\s+(?:the\s+)?(?:pdf\s+)?pages?\b/.test(
-      text,
-    ) ||
-    /\b(?:current|visible)\s+(?:reader\s+)?pages?\b/.test(text) ||
-    /\bpage\s+(?:image|images|layout|screenshot|screenshots|render|renders|rendered)\b/.test(
-      text,
-    ) ||
-    /\bexact\s+pages?\b/.test(text) ||
-    /\bpages?\s+\d+(?:\s*(?:-|–|to|,|and)\s*\d+)?\b/.test(text) ||
-    /\bp\.?\s*\d+\b/.test(text) ||
-    /\bpaper_read\s*\(\s*\{\s*mode\s*:\s*['"]visual['"]/.test(text)
-  );
-}
-
-function getCombinedQueryText(
-  input: Pick<PaperReadInput, "query">,
-  requestText: string | undefined,
-): string {
-  return [input.query || "", requestText || ""]
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isTableOnlyInterpretationRequest(
-  input: Pick<PaperReadInput, "query">,
-  requestText: string | undefined,
-): boolean {
-  const text = getCombinedQueryText(input, requestText);
-  if (!text) return false;
-  const hasTable = /\btables?\s+(?:[sS]?\d+|[IVX]+)\b/i.test(text);
-  if (!hasTable) return false;
-  const hasFigure = /\b(?:fig(?:ure)?s?\.?|figs?\.?)\s*[sS]?\d+\b/i.test(text);
-  return !hasFigure;
-}
-
-async function buildMineruVisualRedirect(params: {
-  input: PaperReadInput;
-  context: AgentToolContext;
-  zoteroGateway: ZoteroGateway;
-}): Promise<Record<string, unknown> | null> {
-  if (
-    isExplicitPdfVisualRequest(params.input, params.context.request.userText)
-  ) {
-    return null;
-  }
-  let targets: NonNullable<PdfTarget["paperContext"]>[] = [];
-  try {
-    targets = resolveDefaultTargets(
-      params.input.target,
-      params.input.targets?.slice(0, 1),
-      params.context,
-      params.zoteroGateway,
-      1,
-    );
-  } catch {
-    return null;
-  }
-  const paperContext = targets[0] || null;
-  const mineruCacheDir = normalizeString(paperContext?.mineruCacheDir);
-  if (!paperContext) return null;
-  const query = params.input.query || params.context.request.userText || "";
-  if (
-    isTableOnlyInterpretationRequest(
-      params.input,
-      params.context.request.userText,
-    )
-  ) {
-    if (!mineruCacheDir) return null;
-    return {
-      mode: "visual",
-      status: "use_text_mode",
-      backend: "mineru",
-      query,
-      paperContext,
-      mineruCacheDir,
-      guidance:
-        "This is a table request for a MinerU-ready paper. Do not render PDF pages and do not use the figure-crop extractor. Call paper_read({ mode:'targeted', query:'<table label and surrounding discussion>' }) so the answer comes from MinerU table text, captions, and surrounding extracted text. Use direct file_io manifest/full.md inspection only for explicit filesystem/cache-inspection tasks.",
-      nextSteps: [
-        `paper_read({ mode:'targeted', query:'${query.replace(/'/g, "\\'")}' })`,
-      ],
-    };
-  }
-  return {
-    mode: "visual",
-    status: "use_figures_mode",
-    backend: "pdf_figure_extraction",
-    query,
-    paperContext,
-    ...(mineruCacheDir ? { mineruCacheDir } : {}),
-    guidance:
-      "This is a figure/image request for a Zotero library PDF. Do not read MinerU image paths and do not use paper_read mode:'visual' for figure interpretation. Call paper_read({ mode:'figures', query:'<figure/table label or all figures>' }) to get precise PDF crops plus captions/provenance. Use mode:'visual' only for explicit raw/rendered PDF page or layout inspection.",
-    nextSteps: [
-      `paper_read({ mode:'figures', query:'${query.replace(/'/g, "\\'")}' })`,
-    ],
-  };
-}
-
 async function readExplicitPageTargets(params: {
-  input: PaperReadInput;
   targets: NonNullable<PdfTarget["paperContext"]>[];
+  pages: number[];
   context: AgentToolContext;
   pdfPageService: PdfPageService;
 }): Promise<Record<string, unknown>> {
@@ -267,8 +137,7 @@ async function readExplicitPageTargets(params: {
     const pageResult = await params.pdfPageService.readPageTexts({
       paperContext,
       request: params.context.request,
-      pages: params.input.pages || [],
-      neighborPages: params.input.neighborPages,
+      pages: params.pages,
     });
     for (const page of pageResult.pages) {
       results.push({
@@ -286,7 +155,7 @@ async function readExplicitPageTargets(params: {
     }
   }
   return {
-    mode: params.input.mode,
+    mode: "pages",
     results,
     papers: buildTargetedPaperGroups(params.targets, results, quoteCitations),
     quoteCitations: mergeQuoteCitations(quoteCitations),
@@ -295,7 +164,7 @@ async function readExplicitPageTargets(params: {
 
 export function createPaperReadTool(
   pdfService: PdfService,
-  retrievalService: RetrievalService,
+  _retrievalService: unknown,
   pdfPageService: PdfPageService,
   zoteroGateway: ZoteroGateway,
   figureExtractionService?: PaperReadFigureExtractionService,
@@ -306,84 +175,62 @@ export function createPaperReadTool(
     spec: {
       name: "paper_read",
       description:
-        "Read content from the active or targeted paper through one semantic tool. Use mode:'overview' for bounded summaries, mode:'targeted' for relevance-ranked textual evidence, mode:'full' for exhaustive whole-document reading (requires readFullReason), mode:'figures' for precise extracted figures from Zotero library PDFs, mode:'visual' for rendered PDF pages/layout, and mode:'capture' for the currently visible Zotero reader page.",
+        "Read content from the active or targeted papers by structured coordinate. sections:['Methods'] returns whole sections; pages:[16,17] ('16-20' also works) returns exact page text; labels:['Figure 3'] with images:true returns precise figure crops; images:true with pages returns rendered PDF pages; images:true alone returns all figures; readFullReason:'...' triggers an exhaustive whole-document read; no arguments at all returns a bounded overview (abstract/introduction/conclusion with Zotero-metadata fallback). To find passages by what they say instead of where they are, use paper_query.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        allOf: [
-          {
-            not: {
-              required: ["target", "targets"],
-            },
-          },
-        ],
         properties: {
-          mode: {
-            type: "string",
-            enum: [
-              "overview",
-              "targeted",
-              "full",
-              "figures",
-              "visual",
-              "capture",
-            ],
-            description:
-              "overview = bounded summary/main message; targeted = relevance-ranked text evidence; full = exhaustive processing of every extractable text chunk (requires readFullReason); figures = precise extracted figures; visual = rendered pages/layout; capture = current reader page.",
-          },
-          readFullReason: {
-            type: "string",
-            description:
-              "Required when mode is 'full': one short sentence explaining why the complete document must be read (e.g. 'verify every reference entry against its DOI'). Prefer mode:'targeted' with a specific query when a section or claim suffices.",
-          },
           target: {
-            type: "object",
             description:
-              "Optional explicit paper or visual target. Omit this property to use the current turn's paper scope.",
-            properties: {
-              contextItemId: { type: "number" },
-              itemId: { type: "number" },
-              paperContext: PAPER_CONTEXT_REF_SCHEMA,
-              attachmentId: { type: "string" },
-              name: { type: "string" },
-            },
-            additionalProperties: false,
+              "Paper(s) to read — one selector or an array. Omit to use the current turn's paper scope. attachmentId/name selectors select an uploaded attachment (images reads only).",
             anyOf: [
-              { required: ["contextItemId"] },
-              { required: ["itemId"] },
-              { required: ["paperContext"] },
-              { required: ["attachmentId"] },
-              { required: ["name"] },
+              {
+                type: "object",
+                properties: {
+                  contextItemId: { type: "number" },
+                  itemId: { type: "number" },
+                  paperContext: PAPER_CONTEXT_REF_SCHEMA,
+                  attachmentId: { type: "string" },
+                  name: { type: "string" },
+                },
+                additionalProperties: false,
+                anyOf: [
+                  { required: ["contextItemId"] },
+                  { required: ["itemId"] },
+                  { required: ["paperContext"] },
+                  { required: ["attachmentId"] },
+                  { required: ["name"] },
+                ],
+              },
+              {
+                type: "array",
+                minItems: 1,
+                maxItems: MAX_TARGETS,
+                items: {
+                  type: "object",
+                  properties: {
+                    contextItemId: { type: "number" },
+                    itemId: { type: "number" },
+                    paperContext: PAPER_CONTEXT_REF_SCHEMA,
+                  },
+                  additionalProperties: false,
+                  anyOf: [
+                    { required: ["contextItemId"] },
+                    { required: ["itemId"] },
+                    { required: ["paperContext"] },
+                  ],
+                },
+              },
             ],
           },
-          targets: {
+          sections: {
             type: "array",
             minItems: 1,
+            maxItems: 8,
+            items: { type: "string", minLength: 1 },
             description:
-              "Optional explicit paper targets. Omit this property to use the current turn's paper scope.",
-            items: {
-              type: "object",
-              properties: {
-                contextItemId: { type: "number" },
-                itemId: { type: "number" },
-                paperContext: PAPER_CONTEXT_REF_SCHEMA,
-              },
-              additionalProperties: false,
-              anyOf: [
-                { required: ["contextItemId"] },
-                { required: ["itemId"] },
-                { required: ["paperContext"] },
-              ],
-            },
+              "Section names as they appear in the paper (e.g. 'Methods', '3.2 Ablation Study'). Returns the full text of those sections. Mutually exclusive with pages and labels.",
           },
-          query: { type: "string" },
-          queryVariants: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Optional search probes such as translations, acronyms, notation variants, or technical equivalents.",
-          },
-          sections: { type: "array", items: { type: "string" } },
           pages: {
             anyOf: [
               { type: "string" },
@@ -391,15 +238,26 @@ export function createPaperReadTool(
               { type: "array", items: { type: "number" } },
             ],
             description:
-              "1-based page numbers (e.g. 17, [16,17,18], or '16-20'). When set, bypasses relevance ranking entirely and returns the raw text of exactly those pages — use it whenever the target location is known (a specific table/figure/section) instead of rephrasing the query. Mentioning page numbers inside 'query' has no effect on ranking.",
+              "1-based page numbers (e.g. 17, [16,17,18], or '16-20'). Returns the raw text of exactly those pages; with images:true renders them instead. Mutually exclusive with sections and labels. Mentioning page numbers inside a query has no effect — this is the only page coordinate.",
           },
-          neighborPages: {
-            type: "number",
+          labels: {
+            type: "array",
+            minItems: 1,
+            maxItems: 12,
+            items: { type: "string", minLength: 1 },
             description:
-              "With 'pages': also include this many adjacent pages before and after each requested page.",
+              "Figure/table labels such as 'Figure 3', 'Fig 4a', 'Extended Data Figure 2', 'Table 1'. Requires images:true; returns precise extracted crops with captions. Mutually exclusive with sections and pages.",
           },
-          maxChars: { type: "number" },
-          topK: { type: "number" },
+          images: {
+            type: "boolean",
+            description:
+              "false (default) returns text. true with pages returns rendered PDF page images; true with labels returns figure crops; true alone returns all figures. Not valid with sections.",
+          },
+          readFullReason: {
+            type: "string",
+            description:
+              "One short sentence explaining why the complete document must be read exhaustively (e.g. 'verify every reference entry against its DOI'). Triggers a whole-document read with a coverage receipt. Prefer sections, pages, or paper_query when a part or claim suffices.",
+          },
         },
       },
       mutability: "read",
@@ -411,23 +269,31 @@ export function createPaperReadTool(
       label: "Read Paper",
       summaries: {
         onCall: ({ args }) => {
-          const mode =
-            args && typeof args === "object"
-              ? String((args as Record<string, unknown>).mode || "overview")
-              : "overview";
-          if (mode === "visual")
+          const record = (args as Record<string, unknown>) || {};
+          if (record.readFullReason) {
+            return `Reading the complete paper text — ${record.readFullReason}`;
+          }
+          if (record.labels) {
+            const labels = Array.isArray(record.labels)
+              ? record.labels.join(", ")
+              : "";
+            return `Extracting figures: ${labels || "all figures"}`;
+          }
+          if (record.images && record.pages) {
             return "Preparing paper pages for visual review";
-          if (mode === "figures")
-            return "Extracting precise figures from the paper";
-          if (mode === "capture") return "Capturing current paper page";
-          if (mode === "targeted") return "Reading targeted paper content";
-          if (mode === "full") {
-            const reason = normalizeString(
-              (args as Record<string, unknown> | undefined)?.readFullReason,
-            );
-            return reason
-              ? `Reading the complete paper text — ${reason}`
-              : "Reading the complete paper text";
+          }
+          if (record.pages) {
+            return `Reading pages: ${
+              Array.isArray(record.pages)
+                ? record.pages.join(", ")
+                : String(record.pages)
+            }`;
+          }
+          if (record.sections) {
+            const sections = Array.isArray(record.sections)
+              ? record.sections.join(", ")
+              : "";
+            return `Reading sections: ${sections}`;
           }
           return "Reading paper overview";
         },
@@ -439,7 +305,7 @@ export function createPaperReadTool(
           const mode = typeof c?.mode === "string" ? c.mode : undefined;
           const results = Array.isArray(c?.results) ? c.results : undefined;
           const papers = Array.isArray(c?.papers) ? c.papers : undefined;
-          if (mode === "targeted") {
+          if (mode === "targeted" || mode === "sections" || mode === "pages") {
             const passageCount =
               results?.length ?? (papers ? countGroupedPassages(papers) : 0);
             if (passageCount > 0) {
@@ -452,6 +318,7 @@ export function createPaperReadTool(
                 ? `Read ${passageCount} ${passageLabel} from ${sourcePhrase}`
                 : `Read ${passageCount} ${passageLabel}`;
             }
+            if (mode === "sections") return "No matching sections";
             return "Read paper content";
           }
           if (mode === "full") {
@@ -469,9 +336,6 @@ export function createPaperReadTool(
                 results.length === 1 ? "paper overview" : "paper overviews";
               return `Read ${overviewLabel} from ${sourcePhrase}`;
             }
-          }
-          if (mode === "visual" && c?.status === "use_figures_mode") {
-            return "Use figure extraction for this figure request";
           }
           if (mode === "figures") {
             const figures = Array.isArray(c?.figures) ? c.figures : [];
@@ -493,20 +357,73 @@ export function createPaperReadTool(
       if (!validateObject<Record<string, unknown>>(args)) {
         return fail("Expected an object");
       }
-      const mode = normalizeMode(args.mode);
-      const maxTargets =
-        mode === "overview"
-          ? MAX_OVERVIEW_TARGETS
-          : mode === "full"
-            ? MAX_FULL_TARGETS
-            : MAX_TARGETED_TARGETS;
+      // Legacy-argument migration errors first: a model that learned the old
+      // surface gets one self-correcting hop instead of a generic rejection.
+      if (hasArg(args, "mode")) {
+        return fail(LEGACY_MODE_MESSAGE);
+      }
+      for (const legacyArg of [
+        "query",
+        "queryVariants",
+        "topK",
+        "neighborPages",
+        "maxChars",
+        "targets",
+      ]) {
+        if (hasArg(args, legacyArg)) {
+          return fail(
+            `paper_read no longer takes '${legacyArg}'. Semantic search moved to paper_query({query}); section text is sections:[...]; figure selection is labels:[...] with images:true; exact pages are pages:[...].`,
+          );
+        }
+      }
+      const images = args.images === true;
+      const sections = normalizeStringArray(args.sections);
+      const pages = normalizePages(args.pages);
+      const labels = normalizeStringArray(args.labels);
+      const readFullReason = normalizeString(args.readFullReason);
+
+      const locators = [
+        sections ? "sections" : "",
+        pages?.length ? "pages" : "",
+        labels ? "labels" : "",
+      ].filter(Boolean);
+      if (locators.length > 1) {
+        return fail(
+          `Provide at most one of sections, pages, labels — they select text by different coordinates. Got both: ${locators[0]} and ${locators[1]}.`,
+        );
+      }
+      if (images && sections) {
+        return fail(
+          "images:true renders PDF page images or figure crops and cannot select by sections. Use sections without images for section text, or pages with images:true for rendered pages.",
+        );
+      }
+      if (labels && !images) {
+        return fail(
+          "labels select extracted figure/table crops, which are images. Add images:true, e.g. paper_read({labels:['Figure 3'], images:true}).",
+        );
+      }
+      if (readFullReason && (locators.length || images)) {
+        return fail(
+          "readFullReason triggers an exhaustive whole-document read; sections/pages/labels/images are redundant with it. Drop the locators or drop readFullReason.",
+        );
+      }
+
+      const isTargetArray = Array.isArray(args.target);
       const targetSyntax = normalizeExplicitTargetSyntax({
-        targetProvided: Object.prototype.hasOwnProperty.call(args, "target"),
-        target: args.target,
-        targetsProvided: Object.prototype.hasOwnProperty.call(args, "targets"),
-        targets: args.targets,
-        mode: mode === "visual" || mode === "capture" ? "visual" : "paper",
-        maxCount: maxTargets,
+        targetProvided: hasArg(args, "target") && !isTargetArray,
+        target: isTargetArray ? undefined : args.target,
+        targetsProvided: isTargetArray,
+        targets: isTargetArray ? args.target : undefined,
+        mode: images ? "visual" : "paper",
+        maxCount: readFullReason
+          ? MAX_FULL_TARGETS
+          : images
+            ? 1
+            : sections
+              ? MAX_TARGETS
+              : pages?.length
+                ? MAX_TARGETS
+                : MAX_OVERVIEW_TARGETS,
       });
       if (targetSyntax.kind === "invalid") {
         return fail(`${targetSyntax.code}: ${targetSyntax.message}`);
@@ -519,37 +436,46 @@ export function createPaperReadTool(
               name: targetSyntax.selector.name,
             }
           : undefined;
-      const readFullReason = normalizeString(args.readFullReason);
-      if (mode === "full" && !readFullReason) {
+      if (explicitTarget && !images) {
         return fail(
-          "paper_read mode:'full' requires readFullReason: one short sentence explaining why the complete document must be read. Use mode:'targeted' with a specific query when a section or claim suffices.",
+          "attachmentId and name selectors are supported only for image reads (images:true).",
         );
       }
-      const input: PaperReadInput = {
-        mode,
-        target: explicitTarget,
-        targets:
-          targetSyntax.kind === "paper_selectors"
-            ? [...targetSyntax.selectors]
-            : undefined,
-        query: normalizeString(args.query),
-        queryVariants: normalizeStringArray(args.queryVariants),
-        sections: normalizeStringArray(args.sections),
-        pages: normalizePages(args.pages),
-        neighborPages: normalizePositiveInt(args.neighborPages),
-        maxChars: normalizePositiveInt(args.maxChars),
-        topK: normalizePositiveInt(args.topK),
-        readFullReason,
-      };
-      if (mode === "visual" || mode === "capture") {
-        const visualValidation = visualTool.validate(targetForPageTool(input));
+      const selectors =
+        targetSyntax.kind === "paper_selectors"
+          ? [...targetSyntax.selectors]
+          : undefined;
+      if ((explicitTarget || selectors?.length) && images && pages?.length) {
+        // Visual page render keeps the review-card flow: validate through the
+        // embedded visual tool so confirmation hooks work unchanged.
+        const visualValidation = visualTool.validate({
+          ...(explicitTarget ? { target: explicitTarget } : {}),
+          pages: pages.map((pageIndex) => pageIndex + 1),
+        });
         if (!visualValidation.ok) return fail(visualValidation.error);
-        input.visualInput = visualValidation.value;
+        return ok({
+          target: explicitTarget,
+          targets: selectors,
+          sections,
+          pages,
+          labels,
+          images,
+          readFullReason: undefined,
+          visualInput: visualValidation.value,
+        });
       }
-      return ok(input);
+      return ok({
+        target: explicitTarget,
+        targets: selectors,
+        sections,
+        pages,
+        labels,
+        images,
+        readFullReason,
+      });
     },
     async shouldRequireConfirmation(input, context) {
-      if (input.mode !== "visual" && input.mode !== "capture") return false;
+      if (!input.visualInput) return false;
       return Boolean(
         await visualTool.shouldRequireConfirmation?.(
           input.visualInput as never,
@@ -558,8 +484,8 @@ export function createPaperReadTool(
       );
     },
     async createPendingAction(input, context) {
-      if (input.mode !== "visual" && input.mode !== "capture") {
-        throw new Error("Only visual and capture paper_read modes need review");
+      if (!input.visualInput) {
+        throw new Error("Only image page reads need review");
       }
       const action = await visualTool.createPendingAction!(
         input.visualInput as never,
@@ -571,7 +497,7 @@ export function createPaperReadTool(
       };
     },
     applyConfirmation(input, resolutionData, context) {
-      if (input.mode !== "visual" && input.mode !== "capture") return ok(input);
+      if (!input.visualInput) return ok(input);
       const resolved = visualTool.applyConfirmation?.(
         input.visualInput as never,
         resolutionData,
@@ -585,229 +511,95 @@ export function createPaperReadTool(
       });
     },
     async execute(input, context) {
-      if (input.mode === "visual" || input.mode === "capture") {
-        if (input.mode === "visual") {
-          const mineruRedirect = await buildMineruVisualRedirect({
-            input,
-            context,
-            zoteroGateway,
-          });
-          if (mineruRedirect) return mineruRedirect;
-        }
+      if (input.visualInput) {
         return visualTool.execute(input.visualInput as never, context);
       }
-      const targets =
-        input.mode === "full"
-          ? resolveFullReadTargets({ input, context, zoteroGateway })
-          : resolveDefaultTargets(
-              input.target,
-              input.targets,
-              context,
-              zoteroGateway,
-              input.mode === "overview"
-                ? MAX_OVERVIEW_TARGETS
-                : MAX_TARGETED_TARGETS,
-            );
-      if (!targets.length) {
-        throw new Error(describeNoDefaultPaperTarget(context.request));
+      if (input.readFullReason) {
+        return executeFullRead({
+          input,
+          context,
+          pdfService,
+          zoteroGateway,
+          fullReadAnalyzer,
+        });
       }
-      if (input.mode === "figures") {
-        if (isTableOnlyInterpretationRequest(input, context.request.userText)) {
+      if (input.images) {
+        const targets = resolveDefaultTargets(
+          input.target,
+          input.targets,
+          context,
+          zoteroGateway,
+          MAX_TARGETS,
+        );
+        if (!targets.length) {
+          throw new Error(describeNoDefaultPaperTarget(context.request));
+        }
+        if (!figureExtractionService) {
           return {
             mode: "figures",
-            status: "no_figures",
-            query: input.query || context.request.userText || "",
-            guidance:
-              "Tables are handled through extracted MinerU text/table content, not the figure-crop extractor. Use paper_read mode:'targeted' with the table label and surrounding discussion.",
+            status: "error",
+            query: input.labels?.join("; "),
+            warning: "Precise figure extraction service is not available.",
           };
         }
         const figureTargets = await hydrateFigureTargetsWithMineruMetadata(
           targets,
           zoteroGateway,
         );
-        if (!figureExtractionService) {
-          return {
-            mode: "figures",
-            status: "error",
-            query: input.query || context.request.userText || "",
-            warning: "Precise figure extraction service is not available.",
-          };
-        }
         const figureResult = await figureExtractionService.extractFigures({
-          input,
+          input: {
+            // labels ARE the query for the crop extractor's label parser; an
+            // absent labels list means "all figures" (empty query).
+            query: input.labels?.length ? input.labels.join("; ") : undefined,
+            target: input.target,
+          },
           context,
           paperContexts: figureTargets,
         });
         const { artifacts, ...content } = figureResult;
         return artifacts?.length ? { content, artifacts } : content;
       }
-      if (input.mode === "full") {
-        if (
-          !fullReadAnalyzer &&
-          context.request.exhaustiveReadBackend === "unavailable"
-        ) {
-          throw new Error(
-            "Exhaustive paper reading cannot run because a tool-free full-read backend is unavailable for this MCP scope. Use mode:'targeted', or start the request from a provider-backed chat that supports exhaustive reading.",
-          );
-        }
-        const nativeFullReadModel = `${context.request.model || ""}`.trim();
-        if (
-          !fullReadAnalyzer &&
-          context.request.authMode === "codex_app_server" &&
-          (!nativeFullReadModel || nativeFullReadModel === "codex-app-server")
-        ) {
-          throw new Error(
-            "Exhaustive paper reading cannot run because the Codex tool-free full-read backend has no selected model.",
-          );
-        }
-        const paperInputs = [];
-        for (const paperContext of targets) {
-          paperInputs.push({
-            paperContext,
-            pdfContext: await pdfService.ensurePaperContext(paperContext),
-          });
-        }
-        const inputTokenCap = Math.max(
-          2048,
-          Math.floor(Number(context.request.advanced?.inputTokenCap || 12000)),
+      if (input.sections?.length) {
+        const targets = resolveDefaultTargets(
+          input.target,
+          input.targets,
+          context,
+          zoteroGateway,
+          MAX_TARGETS,
         );
-        const nativeReaderSession =
-          !fullReadAnalyzer && context.request.authMode === "codex_app_server"
-            ? createCodexAppServerExhaustiveReaderSession({
-                model: nativeFullReadModel,
-                reasoning: context.request.reasoning,
-                profileOverride: context.request.advanced?.profileOverride,
-              })
-            : null;
-        const result = await (async () => {
-          try {
-            return await readDocumentsExhaustively({
-              papers: paperInputs,
-              question:
-                input.query ||
-                context.request.userText ||
-                "Read the full text.",
-              batchTokenBudget: Math.max(1024, Math.floor(inputTokenCap * 0.5)),
-              finalTokenBudget: Math.max(
-                1024,
-                Math.floor(inputTokenCap * 0.45),
-              ),
-              analyzeBatch:
-                fullReadAnalyzer || nativeReaderSession?.analyzeBatch,
-              signal: context.signal,
-              llm: {
-                model: context.request.model,
-                apiBase: context.request.apiBase,
-                apiKey: context.request.apiKey,
-                authMode: context.request.authMode,
-                providerProtocol: context.request.providerProtocol,
-                reasoning: context.request.reasoning,
-                profileOverride: context.request.advanced?.profileOverride,
-              },
-            });
-          } finally {
-            nativeReaderSession?.dispose();
-          }
-        })();
-        const output: PaperReadFullResult = {
-          mode: "full",
-          status: result.status,
-          papers: result.papers,
-          coverageReceipt: result.receipt,
-          synthesisContext: result.contextText,
-          warnings: result.warnings,
-        };
-        return output;
-      }
-      if (input.mode === "overview") {
-        const maxChars = input.maxChars || 6000;
-        const results = [];
-        const metadataResolver = createZoteroMetadataResolver({
-          getItem: (itemId) => zoteroGateway.getItem(itemId),
-        });
-        for (const paperContext of targets) {
-          const mineru = await tryReadMineruOverview(paperContext, maxChars);
-          if (mineru && (mineru as { ok?: boolean }).ok !== false) {
-            results.push(mineru);
-            continue;
-          }
-          try {
-            results.push(
-              await pdfService.getOverviewExcerpt({ paperContext, maxChars }),
-            );
-          } catch (error) {
-            const warning = combineWarnings(
-              extractWarningText(mineru),
-              error instanceof Error ? error.message : String(error),
-            );
-            const metadataOverview = buildMetadataOverview({
-              paperContext,
-              metadataResolver,
-              warning,
-            });
-            if (metadataOverview) {
-              results.push(metadataOverview);
-            } else if (mineru) {
-              results.push(mineru);
-            } else {
-              throw error;
-            }
-          }
+        if (!targets.length) {
+          throw new Error(describeNoDefaultPaperTarget(context.request));
         }
-        const overviewQuotePack = buildOverviewQuoteCitationPack(
-          results as Array<Record<string, unknown>>,
-        );
-        return {
-          mode: input.mode,
-          results: overviewQuotePack.results,
-          quoteCitations: overviewQuotePack.quoteCitations,
-        };
-      }
-
-      if (input.pages?.length) {
-        return readExplicitPageTargets({
-          input,
+        return executeSectionsRead({
           targets,
+          sectionNames: input.sections,
+          pdfService,
+        });
+      }
+      if (input.pages?.length) {
+        const targets = resolveDefaultTargets(
+          input.target,
+          input.targets,
+          context,
+          zoteroGateway,
+          MAX_TARGETS,
+        );
+        if (!targets.length) {
+          throw new Error(describeNoDefaultPaperTarget(context.request));
+        }
+        return readExplicitPageTargets({
+          targets,
+          pages: input.pages,
           context,
           pdfPageService,
         });
       }
-
-      const question = [
-        input.query || context.request.userText,
-        input.sections?.length
-          ? `Relevant sections: ${input.sections.join(", ")}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-      for (const paper of targets) {
-        await pdfService.ensurePaperContext(paper);
-      }
-      const results = await retrievalService.retrieveEvidence({
-        papers: targets,
-        question,
-        queryVariants: input.queryVariants,
-        model: context.request.model,
-        apiBase: context.request.apiBase,
-        apiKey: context.request.apiKey,
-        authMode: context.request.authMode,
-        providerProtocol: context.request.providerProtocol,
-        profileOverride: context.request.advanced?.profileOverride,
-        topK: input.topK,
-        perPaperTopK: input.topK,
+      return executeOverviewRead({
+        input,
+        context,
+        pdfService,
+        zoteroGateway,
       });
-      const quoteCitations: QuoteCitation[] = [];
-      return {
-        mode: input.mode,
-        results,
-        papers: buildTargetedPaperGroups(
-          targets,
-          results as Array<Record<string, unknown>>,
-          quoteCitations,
-        ),
-        quoteCitations: mergeQuoteCitations(quoteCitations),
-      };
     },
     async buildFollowupMessage(result: AgentToolResult) {
       const content =
@@ -819,5 +611,150 @@ export function createPaperReadTool(
       }
       return null;
     },
+  };
+}
+
+async function executeFullRead(params: {
+  input: PaperReadInput;
+  context: AgentToolContext;
+  pdfService: PdfService;
+  zoteroGateway: ZoteroGateway;
+  fullReadAnalyzer?: ExhaustiveBatchAnalyzer;
+}): Promise<Record<string, unknown>> {
+  const { input, context } = params;
+  const targets = resolveFullReadTargets({
+    input,
+    context,
+    zoteroGateway: params.zoteroGateway,
+  });
+  if (
+    !params.fullReadAnalyzer &&
+    context.request.exhaustiveReadBackend === "unavailable"
+  ) {
+    throw new Error(
+      "Exhaustive paper reading cannot run because a tool-free full-read backend is unavailable for this MCP scope. Use sections, pages, or paper_query, or start the request from a provider-backed chat that supports exhaustive reading.",
+    );
+  }
+  const nativeFullReadModel = `${context.request.model || ""}`.trim();
+  if (
+    !params.fullReadAnalyzer &&
+    context.request.authMode === "codex_app_server" &&
+    (!nativeFullReadModel || nativeFullReadModel === "codex-app-server")
+  ) {
+    throw new Error(
+      "Exhaustive paper reading cannot run because the Codex tool-free full-read backend has no selected model.",
+    );
+  }
+  const paperInputs = [];
+  for (const paperContext of targets) {
+    paperInputs.push({
+      paperContext,
+      pdfContext: await params.pdfService.ensurePaperContext(paperContext),
+    });
+  }
+  const inputTokenCap = Math.max(
+    2048,
+    Math.floor(Number(context.request.advanced?.inputTokenCap || 12000)),
+  );
+  const nativeReaderSession =
+    !params.fullReadAnalyzer && context.request.authMode === "codex_app_server"
+      ? createCodexAppServerExhaustiveReaderSession({
+          model: nativeFullReadModel,
+          reasoning: context.request.reasoning,
+          profileOverride: context.request.advanced?.profileOverride,
+        })
+      : null;
+  const result = await (async () => {
+    try {
+      return await readDocumentsExhaustively({
+        papers: paperInputs,
+        question: context.request.userText || "Read the full text.",
+        batchTokenBudget: Math.max(1024, Math.floor(inputTokenCap * 0.5)),
+        finalTokenBudget: Math.max(1024, Math.floor(inputTokenCap * 0.45)),
+        analyzeBatch: params.fullReadAnalyzer || nativeReaderSession?.analyzeBatch,
+        signal: context.signal,
+        llm: {
+          model: context.request.model,
+          apiBase: context.request.apiBase,
+          apiKey: context.request.apiKey,
+          authMode: context.request.authMode,
+          providerProtocol: context.request.providerProtocol,
+          reasoning: context.request.reasoning,
+          profileOverride: context.request.advanced?.profileOverride,
+        },
+      });
+    } finally {
+      nativeReaderSession?.dispose();
+    }
+  })();
+  const output: PaperReadFullResult = {
+    mode: "full",
+    status: result.status,
+    papers: result.papers,
+    coverageReceipt: result.receipt,
+    synthesisContext: result.contextText,
+    warnings: result.warnings,
+  };
+  return output;
+}
+
+async function executeOverviewRead(params: {
+  input: PaperReadInput;
+  context: AgentToolContext;
+  pdfService: PdfService;
+  zoteroGateway: ZoteroGateway;
+}): Promise<Record<string, unknown>> {
+  const { input, context } = params;
+  const targets = resolveDefaultTargets(
+    input.target,
+    input.targets,
+    context,
+    params.zoteroGateway,
+    MAX_OVERVIEW_TARGETS,
+  );
+  if (!targets.length) {
+    throw new Error(describeNoDefaultPaperTarget(context.request));
+  }
+  const maxChars = 6000;
+  const results = [];
+  const metadataResolver = createZoteroMetadataResolver({
+    getItem: (itemId) => params.zoteroGateway.getItem(itemId),
+  });
+  for (const paperContext of targets) {
+    const mineru = await tryReadMineruOverview(paperContext, maxChars);
+    if (mineru && (mineru as { ok?: boolean }).ok !== false) {
+      results.push(mineru);
+      continue;
+    }
+    try {
+      results.push(
+        await params.pdfService.getOverviewExcerpt({ paperContext, maxChars }),
+      );
+    } catch (error) {
+      const warning = combineWarnings(
+        extractWarningText(mineru),
+        error instanceof Error ? error.message : String(error),
+      );
+      const metadataOverview = buildMetadataOverview({
+        paperContext,
+        metadataResolver,
+        warning,
+      });
+      if (metadataOverview) {
+        results.push(metadataOverview);
+      } else if (mineru) {
+        results.push(mineru);
+      } else {
+        throw error;
+      }
+    }
+  }
+  const overviewQuotePack = buildOverviewQuoteCitationPack(
+    results as Array<Record<string, unknown>>,
+  );
+  return {
+    mode: "overview",
+    results: overviewQuotePack.results,
+    quoteCitations: overviewQuotePack.quoteCitations,
   };
 }

@@ -1,32 +1,22 @@
-import type {
-  AgentToolContext,
-  AgentToolArtifact,
-} from "../../types";
+import type { AgentToolContext, AgentToolArtifact } from "../../types";
 import type {
   FullReadCoverageReceipt,
   FullReadPaperResult,
 } from "../../../shared/exhaustiveDocumentReader";
 import type { PdfTarget } from "./pdfToolUtils";
 
-export type PaperReadMode =
-  | "overview"
-  | "targeted"
-  | "full"
-  | "figures"
-  | "visual"
-  | "capture";
-
+/**
+ * paper_read takes structured coordinates instead of a mode enum: the
+ * presence of sections/pages/labels/readFullReason selects the path, and a
+ * call with no locator at all is the overview preset.
+ */
 export type PaperReadInput = {
-  mode: PaperReadMode;
   target?: PdfTarget;
   targets?: PdfTarget[];
-  query?: string;
-  queryVariants?: string[];
   sections?: string[];
   pages?: number[];
-  neighborPages?: number;
-  maxChars?: number;
-  topK?: number;
+  labels?: string[];
+  images: boolean;
   readFullReason?: string;
   visualInput?: unknown;
 };
@@ -54,7 +44,7 @@ export type PaperReadFullResult = {
 
 export type PaperReadFigureExtractionService = {
   extractFigures: (params: {
-    input: PaperReadInput;
+    input: { query?: string; pages?: number[]; target?: PdfTarget };
     context: AgentToolContext;
     paperContexts: NonNullable<PdfTarget["paperContext"]>[];
   }) => Promise<PaperReadFigureExtractionResult>;

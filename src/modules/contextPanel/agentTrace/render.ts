@@ -2675,6 +2675,16 @@ function buildAgentTraceToolParamInfo(args: unknown): AgentTraceToolParamInfo {
     { inText: true },
   );
   collect("Query", record?.query, { inText: true });
+  const sections =
+    Array.isArray(record?.sections) && record.sections.length
+      ? record.sections.map((entry) => compactAgentTraceText(entry)).join(", ")
+      : "";
+  collect("Sections", sections, { inText: true });
+  const figLabels =
+    Array.isArray(record?.labels) && record.labels.length
+      ? record.labels.map((entry) => compactAgentTraceText(entry)).join(", ")
+      : "";
+  collect("Labels", figLabels, { inText: true });
   collect("Pattern", record?.pattern, { inText: true });
   collect("URL", record?.url, { kind: "url", inText: true });
   collect("File", record?.name);
@@ -3240,7 +3250,7 @@ function summarizeCodexToolActivity(input: {
     input.ok !== false &&
     imageArtifacts.length &&
     normalizeMcpToolName(toolName || "") === "paper_read" &&
-    readToolArgsMode(input.args) === "figures"
+    readToolArgsLabels(input.args)
   ) {
     return {
       kind: "tool",
@@ -3267,8 +3277,30 @@ function normalizeMcpToolName(value: string): string {
   return match?.[1] || clean;
 }
 
-function readToolArgsMode(args: unknown): string {
+function readToolArgsLabels(args: unknown): boolean {
   let value = args;
+  if (typeof value === "string") {
+    const clean = value.trim();
+    if (clean.startsWith("{") || clean.startsWith("[")) {
+      try {
+        value = JSON.parse(clean) as unknown;
+      } catch {
+        return false;
+      }
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  // images:true without pages is the all-figures read; labels name specific
+  // figures. Either way the artifacts are figure crops.
+  const record = value as Record<string, unknown>;
+  return (
+    Array.isArray(record.labels) ||
+    (record.images === true && !Array.isArray(record.pages))
+  );
+}
+
+function readContentMode(content: unknown): string {
+  let value = content;
   if (typeof value === "string") {
     const clean = value.trim();
     if (clean.startsWith("{") || clean.startsWith("[")) {

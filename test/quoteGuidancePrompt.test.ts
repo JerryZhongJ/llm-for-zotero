@@ -264,11 +264,11 @@ describe("quote guidance prompts", function () {
         .join("\n");
       assert.notInclude(unmatchedText, "Available MinerU cache directories");
       assert.notInclude(unmatchedText, "For figure workflows");
-      assert.notInclude(unmatchedText, "paper_read({ mode:'figures'");
+      assert.notInclude(unmatchedText, "paper_read({ labels:");
     }
     for (const messages of [intentMatched, matched]) {
       const matchedText = messages.map((message) => message.content).join("\n");
-      assert.include(matchedText, "paper_read({ mode:'figures'");
+      assert.include(matchedText, "paper_read({ labels:");
       assert.include(matchedText, "precise PDF crops");
       assert.include(matchedText, "/tmp/llm-for-zotero-mineru/12");
     }

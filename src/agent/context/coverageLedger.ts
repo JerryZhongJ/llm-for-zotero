@@ -618,7 +618,10 @@ function buildPaperReadCoverageEntries(
     return entries;
   }
 
-  if (mode === "targeted" && Array.isArray(content.papers)) {
+  if (
+    (mode === "targeted" || mode === "sections" || mode === "pages") &&
+    Array.isArray(content.papers)
+  ) {
     for (const paperRecord of content.papers) {
       const record = normalizeRecord(paperRecord);
       const paper = paperContextFromRecord(record);
@@ -649,7 +652,14 @@ function buildPaperReadCoverageEntries(
     return entries;
   }
 
-  if (mode === "visual" || mode === "capture") {
+  // The rendered-page path (images:true with pages) returns the visual
+  // tool's content, which carries no mode field — detect it from the input
+  // coordinates instead.
+  const isVisualPageRead =
+    activity.toolName === "paper_read" &&
+    input.images === true &&
+    Array.isArray(input.pages);
+  if (mode === "visual" || mode === "capture" || isVisualPageRead) {
     return buildVisualCoverageEntries(activity);
   }
 

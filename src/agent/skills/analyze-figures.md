@@ -1,7 +1,7 @@
 ---
 id: analyze-figures
 description: Analyze figures, tables, and diagrams from papers
-version: 4
+version: 5
 contexts: single-paper
 activation: auto
 match: /\b(figure|fig\.?|table|diagram|chart|graph|plot|schematic|illustration)\s*\d/i
@@ -35,10 +35,10 @@ This is the semantic fast path — MinerU has already extracted labels, captions
 The visual evidence should come from precise crops extracted from the source PDF.
 
 **Step 1 — Choose the right evidence path:**
-For figure/image questions, use `paper_read({ mode:'figures', query:'<figure label or all figures>' })` to obtain precise PDF crop paths, captions, page numbers, confidence, warnings, and provenance.
-Treat `paper_read({ mode:'figures' })` as the authority for figure crop cache reuse/regeneration.
+For figure/image questions, use `paper_read({ labels:['<figure label>'], images:true })` (or `paper_read({ images:true })` for all figures) to obtain precise PDF crop paths, captions, page numbers, confidence, warnings, and provenance.
+Treat `paper_read({ labels:[...], images:true })` as the authority for figure crop cache reuse/regeneration.
 Use its returned crop paths/artifacts as-is and do not inspect or validate `figure_crops` metadata before analysis or writing.
-For table questions, use `paper_read({ mode:'targeted', query:'<table label and surrounding discussion>' })` because MinerU usually exposes tables as structured text.
+For table questions, use `paper_query({ query:'<table label and surrounding discussion>' })` because MinerU usually exposes tables as structured text.
 
 **Step 2 — Read the caption and surrounding text when needed:**
 Use `manifest.json` and `full.md` section offsets only for captions and surrounding discussion.
@@ -62,8 +62,8 @@ Figure extraction is not available.
 Say that MinerU cache is required for figure extraction.
 Use rendered PDF pages only if the user explicitly asks for raw page/layout inspection.
 
-1. `paper_read({ mode:'targeted', query:'<figure/table label and surrounding discussion>' })` for captions/surrounding text
-2. `paper_read({ mode:'visual', query:'<page/layout request>' })` only for explicit rendered page inspection
+1. `paper_query({ query:'<figure/table label and surrounding discussion>' })` for captions/surrounding text
+2. `paper_read({ pages:[...], images:true })` only for explicit rendered page inspection
 
 ### Key rules
 
@@ -83,11 +83,11 @@ Use rendered PDF pages only if the user explicitly asks for raw page/layout insp
 When the user asks to save your figure analysis to a note (e.g., "save it", "put that in a note", "create a note", "write to obsidian"), the Write Note skill handles the full workflow. Key rules:
 
 - Embed the analyzed figure image when an extracted PDF crop is available.
-- Embed extracted PDF crop paths returned by `paper_read({ mode:'figures' })`.
+- Embed extracted PDF crop paths returned by `paper_read({ images:true })`.
 - Do not embed MinerU source image paths.
 - Place the image at the start of the relevant section, before the explanation text.
 - If you analyzed multiple figures, embed all of them.
-- If `paper_read({ mode:'figures' })` returns `no_figures`, `mineru_required`, `error`, zero figures, or no image artifact, switch to text-only mode when the user asked for a note.
+- If `paper_read({ images:true })` returns `no_figures`, `mineru_required`, `error`, zero figures, or no image artifact, switch to text-only mode when the user asked for a note.
 - In that failure state, do not include figure images or extracted-image placeholders.
 - In that failure state, explicitly state that figure extraction failed or no extracted crops are available.
 - In that failure state, explicitly state that the explanations are based on captions, figure legends, and surrounding paper text.

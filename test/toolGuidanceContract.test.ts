@@ -211,7 +211,7 @@ describe("tool guidance contracts", function () {
     }
     assert.include(
       agentPersona,
-      "Use paper_read overview for a broad single-paper understanding",
+      "Use paper_read with no arguments for a broad single-paper overview",
     );
     assert.include(
       fileIoTool,
@@ -219,7 +219,10 @@ describe("tool guidance contracts", function () {
     );
     assert.notInclude(agentPersona, "mineruCacheDir}/manifest.json");
     assert.notInclude(agentPersona, "mineruCacheDir}/full.md");
-    assert.include(agentPersona, "figures for extracted figure crops");
+    assert.include(
+      agentPersona,
+      "labels:[...] with images:true for extracted figure crops",
+    );
   });
 
   it("requires extracted PDF crop inspection and note embedding", function () {
@@ -250,9 +253,9 @@ describe("tool guidance contracts", function () {
       assert.isString(content);
     }
 
-    assert.include(analyzeFigures!, "use `paper_read({ mode:'figures'");
+    assert.include(analyzeFigures!, "use `paper_read({ labels:");
     assert.include(messageBuilder!, "precise PDF crops");
-    assert.include(paperRead!, "mode:'figures'");
+    assert.include(paperRead!, "labels:['Figure 3']");
     assert.include(writeNote!, "extracted PDF crop paths returned");
     assert.notInclude(noteTools!, "returns no_figures");
     assert.notInclude(agentPersona!, "figure_crops");

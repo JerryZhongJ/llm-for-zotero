@@ -17,6 +17,7 @@ import { AgentToolRegistry } from "../src/agent/tools/registry";
 import { initAgentChangeJournal } from "../src/agent/store/changeJournal";
 import type { AgentToolContext, AgentToolDefinition } from "../src/agent/types";
 import { createPaperReadTool } from "../src/agent/tools/read/paperRead";
+import { createPaperQueryTool } from "../src/agent/tools/read/paperQuery";
 import { ChangeJournalTestDb } from "./helpers/changeJournalTestDb";
 
 type EndpointReply = [number, string, string];
@@ -1534,26 +1535,27 @@ describe("Zotero MCP server", function () {
       resolvePaperContextTarget: () => paper,
     } as never;
     const registry = new AgentToolRegistry();
+    const pdfServiceStub = {
+      ensurePaperContext: async (paperContext: unknown) => {
+        ensuredPaper = paperContext;
+      },
+    } as never;
+    const retrievalStub = {
+      retrieveEvidence: async () => [
+        {
+          paperContext: paper,
+          itemId: paper.itemId,
+          contextItemId: paper.contextItemId,
+          title: paper.title,
+          text: "method evidence",
+        },
+      ],
+    } as never;
     registry.register(
-      createPaperReadTool(
-        {
-          ensurePaperContext: async (paperContext: unknown) => {
-            ensuredPaper = paperContext;
-          },
-        } as never,
-        {
-          retrieveEvidence: async () => [
-            {
-              itemId: paper.itemId,
-              contextItemId: paper.contextItemId,
-              title: paper.title,
-              text: "method evidence",
-            },
-          ],
-        } as never,
-        {} as never,
-        gateway,
-      ),
+      createPaperReadTool(pdfServiceStub, {} as never, {} as never, gateway),
+    );
+    registry.register(
+      createPaperQueryTool(pdfServiceStub, retrievalStub, gateway),
     );
     registerMcpServer({ toolRegistry: registry, zoteroGateway: gateway });
     const scoped = registerScopedZoteroMcpScope({
@@ -1591,9 +1593,8 @@ describe("Zotero MCP server", function () {
           id: 2,
           method: "tools/call",
           params: {
-            name: "paper_read",
+            name: "paper_query",
             arguments: {
-              mode: "targeted",
               target: {},
               query: "Use the actual PDF/full text to explain the method.",
             },
@@ -2134,12 +2135,10 @@ describe("Zotero MCP server", function () {
           params: {
             name: "paper_read",
             arguments: {
-              mode: "full",
               target: {
                 itemId: paperContext.itemId,
                 contextItemId: paperContext.contextItemId,
               },
-              query: "Read the complete paper.",
               readFullReason: "test the scope guard",
             },
           },

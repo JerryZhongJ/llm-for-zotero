@@ -2591,7 +2591,7 @@ describe("agentTrace render", function () {
         toolName: "paper_read",
         toolLabel: "Read Paper",
         serverName: "llm_for_zotero",
-        args: { mode: "figures", query: "Figure 1" },
+        args: { labels: ["Figure 1"], images: true },
         ok: true,
         artifacts: [
           {

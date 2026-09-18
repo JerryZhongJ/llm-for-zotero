@@ -356,12 +356,21 @@ function formatTargetLabel(target: {
 function buildReadDetail(toolName: string, args: unknown): string | undefined {
   const record = normalizeRecord(args);
   if (toolName === "paper_read") {
-    const mode = normalizeText(record.mode, 40) || "overview";
-    const pieces = [`mode=${mode}`];
-    const query = normalizeText(record.query, 120);
-    if (query) pieces.push(`query="${query}"`);
-    if (Array.isArray(record.pages) && record.pages.length) {
+    // The old mode enum is gone; the read kind is derived from which
+    // coordinate the call carried.
+    const pieces: string[] = [];
+    if (record.readFullReason) {
+      pieces.push("full");
+    } else if (Array.isArray(record.labels) && record.labels.length) {
+      pieces.push(`figures=${record.labels.join(", ")}`);
+    } else if (record.images === true && Array.isArray(record.pages)) {
+      pieces.push(`visual pages=${record.pages.join(", ")}`);
+    } else if (Array.isArray(record.pages) && record.pages.length) {
       pieces.push(`pages=${record.pages.join(", ")}`);
+    } else if (Array.isArray(record.sections) && record.sections.length) {
+      pieces.push(`sections=${record.sections.join(", ")}`);
+    } else {
+      pieces.push("overview");
     }
     return pieces.join(", ");
   }
@@ -483,7 +492,10 @@ function buildPaperReadEvidenceEntries(
   const mode = normalizeText(content.mode, 40) || "overview";
   const detail = buildReadDetail(activity.toolName, activity.input);
   const entries: AgentEvidenceEntry[] = [];
-  if (mode === "targeted" && Array.isArray(content.papers)) {
+  if (
+    (mode === "targeted" || mode === "sections" || mode === "pages") &&
+    Array.isArray(content.papers)
+  ) {
     for (const paper of content.papers) {
       const record = normalizeRecord(paper);
       const target = targetFromPaperContext(record.paperContext);

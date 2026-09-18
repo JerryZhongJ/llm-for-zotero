@@ -510,8 +510,8 @@ function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
   if (detectExplicitFullReadIntent(request.userText || "")) {
     return (
       "TURN RULE: The user explicitly requested exhaustive full-text reading. " +
-      "Your very first action MUST be to call `paper_read({ mode:'full', readFullReason:'the user explicitly requested exhaustive full-text reading' })` targeting only the requested paper(s). " +
-      "Overview and targeted retrieval do not satisfy this request. Preserve the coverage receipt and do not claim complete reading when it is partial or unreadable."
+      "Your very first action MUST be to call `paper_read({ readFullReason:'the user explicitly requested exhaustive full-text reading' })` targeting only the requested paper(s). " +
+      "Overview and passage retrieval do not satisfy this request. Preserve the coverage receipt and do not claim complete reading when it is partial or unreadable."
     );
   }
   const allHaveMineruCache = fullTextPapers.every((entry) =>
@@ -520,14 +520,14 @@ function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
   if (allHaveMineruCache) {
     return (
       "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
-      "your very first action MUST be to call `paper_read({ mode:'overview' })` targeting only those full-text papers. " +
-      "The paper_read facade dispatches to the available MinerU or PDF text path; use `paper_read({ mode:'targeted', query:'...' })` only for a specific missing claim. " +
+      "your very first action MUST be to call `paper_read()` targeting only those full-text papers. " +
+      "The overview read dispatches to the available MinerU or PDF text path; use `paper_query({ query:'...' })` only for a specific missing claim. " +
       "Do this before answering, even if the answer seems obvious."
     );
   }
   return (
     "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
-    "your very first action MUST be to call `paper_read({ mode:'overview' })` targeting only those full-text papers. " +
+    "your very first action MUST be to call `paper_read()` targeting only those full-text papers. " +
     "Do this before answering, even if the answer seems obvious. " +
     "Do not include retrieval-only papers in that mandatory first read."
   );
@@ -583,12 +583,12 @@ function buildFigureMineruInstruction(
     .join("\n");
   return (
     "TURN RULE: This is a figure/table interpretation task and MinerU cache is available for at least one in-scope paper. " +
-    "For figure/image questions, call `paper_read({ mode:'figures', query:'<figure label or all figures>' })` first. This returns precise PDF crops plus captions/provenance. Treat that result as the authority for figure crop cache reuse/regeneration; use returned crop paths/artifacts as-is and do not inspect or validate `figure_crops` metadata before analysis or writing. " +
+    "For figure/image questions, call `paper_read({ labels:['<figure label>'], images:true })` first (or `paper_read({ images:true })` for all figures). This returns precise PDF crops plus captions/provenance. Treat that result as the authority for figure crop cache reuse/regeneration; use returned crop paths/artifacts as-is and do not inspect or validate `figure_crops` metadata before analysis or writing. " +
     "If figure extraction fails or returns no crops, switch to text-only mode for analysis, note taking, and follow-up artifacts: do not include figure images, rendered PDF page screenshots, MinerU source images, or extracted-image placeholders; explicitly state that extraction failed or no extracted crops are available and base explanations on captions, figure legends, and surrounding paper text. Manual user-provided image inputs are unaffected. " +
-    "For table questions, call `paper_read({ mode:'targeted', query:'<table label and surrounding discussion>' })` because MinerU table evidence is text/structure, not figure crops. " +
+    "For table questions, call `paper_query({ query:'<table label and surrounding discussion>' })` because MinerU table evidence is text/structure, not figure crops. " +
     "Use `full.md`/manifest text for captions and surrounding textual evidence, but do not read or embed MinerU image paths for ordinary figure interpretation. " +
     "For explicit panel requests, inspect the whole extracted figure crop and treat panel suffixes as hints. " +
-    "Use `paper_read({ mode:'visual', query:'<page/layout request>' })` only when the user explicitly asks for rendered/raw PDF pages, page screenshots, page layout, exact pages, or visible-reader inspection.\n" +
+    "Use `paper_read({ pages:[...], images:true })` only when the user explicitly asks for rendered/raw PDF pages, page screenshots, page layout, or exact pages.\n" +
     `Available MinerU cache directories:\n${cacheHints}`
   );
 }
@@ -670,7 +670,7 @@ function buildTextOnlyModelInstruction(
     `MODEL LIMITATION: ${modelLabel} is treated as text-only in this plugin. ` +
     "Do not rely on screenshots, PDF page images, or image-file visual inspection. " +
     "For MinerU-cached papers, prefer `manifest.json`, `full.md` section offsets, captions, tables, formulas, and surrounding extracted text. " +
-    "For figure workflows, you may still call `paper_read({ mode:'figures' })` to obtain extracted crop paths, captions, warnings, and provenance for note embedding. Treat that result as the authority for figure crop cache reuse/regeneration; do not inspect or validate `figure_crops` metadata before analysis or writing. Do not make unsupported visual claims unless an image-capable model inspected the crop."
+    "For figure workflows, you may still call `paper_read({ images:true })` to obtain extracted crop paths, captions, warnings, and provenance for note embedding. Treat that result as the authority for figure crop cache reuse/regeneration; do not inspect or validate `figure_crops` metadata before analysis or writing. Do not make unsupported visual claims unless an image-capable model inspected the crop."
   );
 }
 

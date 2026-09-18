@@ -1460,7 +1460,7 @@ describe("primitive agent tools", function () {
       );
       assert.include(
         String(result.content.error || ""),
-        "paper_read mode:'figures'",
+        "paper_read({ labels:[...], images:true })",
       );
       assert.isUndefined(result.content.figureBlock);
       assert.isUndefined(result.artifacts);

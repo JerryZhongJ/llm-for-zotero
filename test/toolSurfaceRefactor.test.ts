@@ -12,7 +12,13 @@ import {
   createPaperReadTool as createResolvedPaperReadTool,
   resolveMetadataOverviewTitleForTests,
 } from "../src/agent/tools/read/paperRead";
-import type { AgentToolContext } from "../src/agent/types";
+import {
+  createPaperQueryTool as createResolvedPaperQueryTool,
+} from "../src/agent/tools/read/paperQuery";
+import type {
+  AgentToolContext,
+  AgentToolDefinition,
+} from "../src/agent/types";
 import { resolveAgentRuntimeRequest } from "../src/agent/context/resolvedAgentRequest";
 import {
   PDF_FIGURE_CROP_ALGORITHM_VERSION,
@@ -23,24 +29,32 @@ import {
 import { CodexAppServerProcess } from "../src/utils/codexAppServerProcess";
 import { resolvedAgentRequest } from "./helpers/resolvedAgentRequest";
 
-function createPaperReadTool(
-  ...args: Parameters<typeof createResolvedPaperReadTool>
-): ReturnType<typeof createResolvedPaperReadTool> {
-  const tool = createResolvedPaperReadTool(...args);
-  const gateway = args[3] as {
-    listPaperContexts?: (request: AgentToolContext["request"]) => Array<{
-      itemId: number;
-      contextItemId: number;
-      title: string;
-    }>;
-  };
+type ScopePaperContext = {
+  itemId: number;
+  contextItemId: number;
+  title: string;
+};
+
+type ScopeGateway = {
+  listPaperContexts?: (
+    request: AgentToolContext["request"],
+  ) => ScopePaperContext[];
+};
+
+/**
+ * Binds a freshly created read tool to the raw→resolved request boundary the
+ * agent dispatcher normally crosses, inferring the active paper from the
+ * gateway's ambient list when the raw request carries no concrete scope.
+ */
+function withResolvedRequestScope<TInput, TResult>(
+  tool: AgentToolDefinition<TInput, TResult>,
+  gateway: ScopeGateway,
+): AgentToolDefinition<TInput, TResult> {
   return {
     ...tool,
     execute: (input, context) => {
       const request = context.request as AgentToolContext["request"] & {
-        selectedPaperContexts?: ReturnType<
-          NonNullable<typeof gateway.listPaperContexts>
-        >;
+        selectedPaperContexts?: ScopePaperContext[];
       };
       const hasConcreteScope = Boolean(
         request.turnPaperScope?.papers.length ||
@@ -66,6 +80,30 @@ function createPaperReadTool(
       });
     },
   };
+}
+
+function createPaperReadTool(
+  ...args: Parameters<typeof createResolvedPaperReadTool>
+): ReturnType<typeof createResolvedPaperReadTool> {
+  return withResolvedRequestScope(
+    createResolvedPaperReadTool(...args),
+    args[3] as ScopeGateway,
+  );
+}
+
+function createPaperQueryTool(
+  pdfService: unknown,
+  retrievalService: unknown,
+  zoteroGateway: ScopeGateway,
+): ReturnType<typeof createResolvedPaperQueryTool> {
+  return withResolvedRequestScope(
+    createResolvedPaperQueryTool(
+      pdfService as never,
+      retrievalService as never,
+      zoteroGateway as never,
+    ),
+    zoteroGateway,
+  );
 }
 
 describe("semantic tool surface", function () {
@@ -229,8 +267,8 @@ describe("semantic tool surface", function () {
       "library_update",
       "literature_search",
       "note_write",
-      "paper_read",
       "paper_query",
+      "paper_read",
       "revert_changes",
       "run_command",
       "saved_search_update",
@@ -468,7 +506,6 @@ describe("semantic tool surface", function () {
       } as never,
     );
     const validated = tool.validate({
-      mode: "overview",
       target: { itemId: 999, contextItemId: 1000 },
     });
     assert.equal(validated.ok, true);
@@ -497,18 +534,20 @@ describe("semantic tool surface", function () {
         {
           ensurePaperContext: async (paperContext: unknown) => {
             ensuredPaper = paperContext;
+            return {
+              chunks: ["method text"],
+              chunkMeta: [
+                {
+                  chunkIndex: 0,
+                  text: "method text",
+                  sectionLabel: "Methods",
+                  chunkKind: "methods",
+                },
+              ],
+            };
           },
         } as never,
-        {
-          retrieveEvidence: async () => [
-            {
-              itemId: activePaper.itemId,
-              contextItemId: activePaper.contextItemId,
-              title: activePaper.title,
-              text: "method evidence",
-            },
-          ],
-        } as never,
+        {} as never,
         {} as never,
         {
           listPaperContexts: () => [activePaper],
@@ -531,9 +570,8 @@ describe("semantic tool surface", function () {
         id: "issue-393-empty-target",
         name: "paper_read",
         arguments: {
-          mode: "targeted",
           target: {},
-          query: "Use the actual PDF/full text to explain the method.",
+          sections: ["Methods"],
         },
       },
       {
@@ -560,26 +598,14 @@ describe("semantic tool surface", function () {
     );
 
     const emptyEntry = tool.validate({
-      mode: "targeted",
-      targets: [{}],
+      target: [{}],
     });
     assert.equal(emptyEntry.ok, false);
     if (!emptyEntry.ok) {
       assert.include(emptyEntry.error, "empty_target_entry");
     }
 
-    const conflicting = tool.validate({
-      mode: "targeted",
-      target: {},
-      targets: [],
-    });
-    assert.equal(conflicting.ok, false);
-    if (!conflicting.ok) {
-      assert.include(conflicting.error, "conflicting_target_arguments");
-    }
-
     const visualOnly = tool.validate({
-      mode: "targeted",
       target: { attachmentId: "upload-1" },
     });
     assert.equal(visualOnly.ok, false);
@@ -588,8 +614,7 @@ describe("semantic tool surface", function () {
     }
 
     const lateEmptyEntry = tool.validate({
-      mode: "targeted",
-      targets: [
+      target: [
         ...Array.from({ length: 20 }, (_, index) => ({ itemId: index + 1 })),
         {},
       ],
@@ -599,24 +624,34 @@ describe("semantic tool surface", function () {
       assert.include(lateEmptyEntry.error, "empty_target_entry");
     }
 
+    // Image reads are single-target: a selector array fails even with
+    // images:true.
     const visualTargets = tool.validate({
-      mode: "visual",
-      targets: [{ itemId: 1 }],
+      images: true,
+      target: [{ itemId: 1 }],
     });
     assert.equal(visualTargets.ok, false);
     if (!visualTargets.ok) {
       assert.include(visualTargets.error, "selector_not_supported_for_mode");
     }
 
-    const visualPaperTarget = tool.validate({
-      mode: "visual",
+    const imagePaperTarget = tool.validate({
+      images: true,
       target: { itemId: 1 },
       pages: [1],
     });
-    assert.equal(visualPaperTarget.ok, true);
+    assert.equal(imagePaperTarget.ok, true);
+
+    // attachmentId/name selectors stay legal for image reads.
+    const attachmentImageTarget = tool.validate({
+      images: true,
+      target: { attachmentId: "upload-1" },
+      pages: [1],
+    });
+    assert.equal(attachmentImageTarget.ok, true);
   });
 
-  it("paper_read advertises non-empty mutually exclusive target shapes", function () {
+  it("paper_read advertises selector-shaped target coordinates", function () {
     const tool = createPaperReadTool(
       {} as never,
       {} as never,
@@ -624,16 +659,17 @@ describe("semantic tool surface", function () {
       {} as never,
     );
     const schema = tool.spec.inputSchema as {
-      allOf?: unknown[];
       properties?: {
-        target?: { anyOf?: unknown[] };
-        targets?: { minItems?: number; items?: { anyOf?: unknown[] } };
+        target?: {
+          anyOf?: Array<{ type?: string; minItems?: number }>;
+        };
       };
     };
-    assert.isNotEmpty(schema.allOf);
-    assert.isNotEmpty(schema.properties?.target?.anyOf);
-    assert.isNotEmpty(schema.properties?.targets?.items?.anyOf);
-    assert.equal(schema.properties?.targets?.minItems, 1);
+    const [singleSelector, selectorArray] =
+      schema.properties?.target?.anyOf || [];
+    assert.equal(singleSelector?.type, "object");
+    assert.equal(selectorArray?.type, "array");
+    assert.equal(selectorArray?.minItems, 1);
   });
 
   it("paper_read refuses active-reader fallback in collection-scoped library chat", async function () {
@@ -660,7 +696,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => activeReaderPaper,
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
 
@@ -710,7 +746,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => activeReaderPaper,
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
 
@@ -756,8 +792,7 @@ describe("semantic tool surface", function () {
       } as never,
     );
     const validated = tool.validate({
-      mode: "overview",
-      targets: [{ itemId: 11, contextItemId: 22 }],
+      target: [{ itemId: 11, contextItemId: 22 }],
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -862,7 +897,7 @@ describe("semantic tool surface", function () {
         }),
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
     const output = await tool.execute(validated.value, baseContext);
@@ -940,7 +975,7 @@ describe("semantic tool surface", function () {
         getItem: (itemId: number) => items.get(itemId) || null,
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.isTrue(validated.ok);
     if (!validated.ok) return;
 
@@ -1030,7 +1065,7 @@ describe("semantic tool surface", function () {
           }),
         } as never,
       );
-      const validated = tool.validate({ mode: "overview" });
+      const validated = tool.validate({});
       assert.equal(validated.ok, true);
       if (!validated.ok) return;
       const output = await tool.execute(validated.value, baseContext);
@@ -1119,7 +1154,7 @@ describe("semantic tool surface", function () {
         }),
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
     const output = await tool.execute(validated.value, baseContext);
@@ -1164,7 +1199,7 @@ describe("semantic tool surface", function () {
           resolvePaperContextTarget: () => paperContext,
         } as never,
       );
-      const validated = tool.validate({ mode: "overview" });
+      const validated = tool.validate({});
       assert.equal(validated.ok, true);
       if (!validated.ok) return;
       const output = await tool.execute(validated.value, baseContext);
@@ -1239,7 +1274,7 @@ describe("semantic tool surface", function () {
           resolvePaperContextTarget: () => paperContext,
         } as never,
       );
-      const validated = tool.validate({ mode: "overview" });
+      const validated = tool.validate({});
       assert.equal(validated.ok, true);
       if (!validated.ok) return;
       const output = await tool.execute(validated.value, baseContext);
@@ -1261,159 +1296,18 @@ describe("semantic tool surface", function () {
     }
   });
 
-  it("paper_read visual redirects generic MinerU figure requests to cache inspection", async function () {
-    const originalIOUtils = globalScope.IOUtils;
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "MinerU Figure Paper",
-      firstCreator: "Miller",
-      year: "2025",
-      mineruCacheDir: "/tmp/mineru-paper",
-    };
-    const fullMd = [
-      "## Results",
-      "",
-      "![](images/fig2a.png)",
-      "",
-      "![](images/fig2b.png)",
-      "",
-      "![](images/fig2c.png)",
-      "",
-      "Figure 2. Attractor network for probabilistic decision-making.",
-    ].join("\n");
-    const contentListPath = "/tmp/mineru-paper/paper_content_list.json";
-    globalScope.IOUtils = {
-      read: async (path: string) => {
-        if (path === "/tmp/mineru-paper/full.md") {
-          return encoder.encode(fullMd);
-        }
-        if (path === contentListPath) {
-          return encoder.encode(
-            JSON.stringify([
-              {
-                type: "image",
-                img_path: "images/fig2a.png",
-                image_caption: ["Figure 2. Attractor network."],
-              },
-              { type: "image", img_path: "images/fig2b.png" },
-              { type: "image", img_path: "images/fig2c.png" },
-            ]),
-          );
-        }
-        throw new Error(`Unexpected read: ${path}`);
-      },
-      getChildren: async (path: string) =>
-        path === "/tmp/mineru-paper" ? [contentListPath] : [],
-    };
-    let prepareCalls = 0;
+  it("paper_read labels without images fail with an actionable fix", function () {
     const tool = createPaperReadTool(
       {} as never,
       {} as never,
-      {
-        preparePagesForModel: async () => {
-          prepareCalls += 1;
-          return {
-            target: { source: "library", title: "Should Not Render" },
-            pages: [],
-            artifacts: [],
-            pageTexts: {},
-          };
-        },
-      } as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-      } as never,
-    );
-    const validated = tool.validate({
-      mode: "visual",
-      query: "Explain Figure 2c",
-    });
-    assert.equal(validated.ok, true);
-    if (!validated.ok) return;
-    try {
-      const output = (await tool.execute(validated.value, {
-        ...baseContext,
-        request: {
-          ...baseContext.request,
-          userText: "Explain Figure 2c",
-          selectedPaperContexts: [paperContext],
-        },
-      })) as Record<string, unknown>;
-
-      assert.equal(prepareCalls, 0);
-      assert.equal(output.status, "use_figures_mode");
-      assert.equal(output.backend, "pdf_figure_extraction");
-      assert.equal(output.mineruCacheDir, "/tmp/mineru-paper");
-      assert.include(String(output.guidance || ""), "mode:'figures'");
-      assert.include(
-        String(output.guidance || ""),
-        "Do not read MinerU image paths",
-      );
-      assert.notProperty(output, "panelHint");
-      assert.notProperty(output, "figureBlocks");
-      assert.notProperty(output, "artifacts");
-    } finally {
-      if (originalIOUtils === undefined) {
-        delete globalScope.IOUtils;
-      } else {
-        globalScope.IOUtils = originalIOUtils;
-      }
-    }
-  });
-
-  it("paper_read visual redirects generic MinerU table requests to text inspection", async function () {
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "MinerU Table Paper",
-      firstCreator: "Miller",
-      year: "2025",
-      mineruCacheDir: "/tmp/mineru-paper",
-    };
-    let prepareCalls = 0;
-    const tool = createPaperReadTool(
       {} as never,
       {} as never,
-      {
-        preparePagesForModel: async () => {
-          prepareCalls += 1;
-          return {
-            target: { source: "library", title: "Should Not Render" },
-            pages: [],
-            artifacts: [],
-            pageTexts: {},
-          };
-        },
-      } as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-      } as never,
     );
-    const validated = tool.validate({
-      mode: "visual",
-      query: "Explain Table 1",
-    });
-    assert.equal(validated.ok, true);
+    const validated = tool.validate({ labels: ["Figure 3"] });
+    assert.equal(validated.ok, false);
     if (!validated.ok) return;
-
-    const output = (await tool.execute(validated.value, {
-      ...baseContext,
-      request: {
-        ...baseContext.request,
-        userText: "Explain Table 1",
-        selectedPaperContexts: [paperContext],
-      },
-    })) as Record<string, unknown>;
-
-    assert.equal(prepareCalls, 0);
-    assert.equal(output.status, "use_text_mode");
-    assert.equal(output.backend, "mineru");
-    assert.include(String(output.guidance || ""), "mode:'targeted'");
-    assert.notInclude(String(output.guidance || ""), "mode:'figures'");
-    assert.notProperty(output, "artifacts");
+    assert.include(validated.error, "labels select extracted figure/table crops");
+    assert.include(validated.error, "Add images:true");
   });
 
   it("paper_read visual still renders explicit PDF pages for MinerU papers", async function () {
@@ -1467,10 +1361,9 @@ describe("semantic tool surface", function () {
       } as never,
     );
     const validated = tool.validate({
-      mode: "visual",
       target: { paperContext },
       pages: [4],
-      query: "Render page 4 from the raw PDF",
+      images: true,
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -1491,17 +1384,24 @@ describe("semantic tool surface", function () {
     assert.lengthOf(output.artifacts || [], 1);
   });
 
-  it("paper_read exposes a dedicated figures mode", function () {
+  it("paper_read exposes a coordinate schema without a mode enum", function () {
     const registry = createTestBuiltInRegistry();
     const tool = registry.getTool("paper_read");
     assert.exists(tool);
-    const modeSchema = (
-      tool!.spec.inputSchema as {
-        properties?: { mode?: { enum?: string[] } };
-      }
-    ).properties?.mode;
+    const schema = tool!.spec.inputSchema as {
+      additionalProperties?: boolean;
+      properties?: Record<string, unknown>;
+    };
 
-    assert.include(modeSchema?.enum || [], "figures");
+    assert.isFalse(schema.additionalProperties);
+    assert.deepEqual(Object.keys(schema.properties || {}).sort(), [
+      "images",
+      "labels",
+      "pages",
+      "readFullReason",
+      "sections",
+      "target",
+    ]);
   });
 
   it("paper_read figures accepts library PDFs without MinerU cache", async function () {
@@ -1513,6 +1413,7 @@ describe("semantic tool surface", function () {
       year: "2025",
     };
     const extractionContexts: unknown[] = [];
+    let receivedQuery: unknown = "unset";
     const tool = createPaperReadTool(
       {} as never,
       {} as never,
@@ -1522,12 +1423,13 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => paperContext,
       } as never,
       {
-        extractFigures: async ({ paperContexts }) => {
+        extractFigures: async ({ input, paperContexts }) => {
+          receivedQuery = input.query;
           extractionContexts.push(...paperContexts);
           return {
             mode: "figures",
             status: "ok",
-            query: "Explain Figure 1",
+            query: "Figure 1",
             figures: [
               {
                 id: "figure-1",
@@ -1541,8 +1443,8 @@ describe("semantic tool surface", function () {
       },
     );
     const validated = tool.validate({
-      mode: "figures",
-      query: "Explain Figure 1",
+      labels: ["Figure 1"],
+      images: true,
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -1558,6 +1460,8 @@ describe("semantic tool surface", function () {
 
     assert.equal(output.mode, "figures");
     assert.equal(output.status, "ok");
+    // labels are joined into the crop extractor's query string.
+    assert.equal(receivedQuery, "Figure 1");
     assert.deepInclude(
       extractionContexts[0] as Record<string, unknown>,
       paperContext,
@@ -1609,8 +1513,8 @@ describe("semantic tool surface", function () {
       },
     );
     const validated = tool.validate({
-      mode: "figures",
-      query: "Explain Figure 1",
+      labels: ["Figure 1"],
+      images: true,
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -1711,8 +1615,8 @@ describe("semantic tool surface", function () {
       },
     );
     const validated = tool.validate({
-      mode: "figures",
-      query: "Explain Figure 1",
+      labels: ["Figure 1"],
+      images: true,
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -1852,10 +1756,8 @@ describe("semantic tool surface", function () {
       });
       const tool = registry.getTool("paper_read");
       assert.exists(tool);
-      const validated = tool!.validate({
-        mode: "figures",
-        query: "Explain Figure 1",
-      });
+      // images:true without labels is the "all figures" preset.
+      const validated = tool!.validate({ images: true });
       assert.equal(validated.ok, true);
       if (!validated.ok) return;
 
@@ -1940,10 +1842,9 @@ describe("semantic tool surface", function () {
       } as never,
     );
     const validated = tool.validate({
-      mode: "visual",
       target: { paperContext },
       pages: [2],
-      query: "Explain Figure 1",
+      images: true,
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -1993,7 +1894,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => paperContext,
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
     const output = await tool.execute(validated.value, baseContext);
@@ -2050,7 +1951,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => paperContext,
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
     const output = (await tool.execute(validated.value, baseContext)) as {
@@ -2118,7 +2019,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => paperContext,
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
     const output = (await tool.execute(validated.value, baseContext)) as {
@@ -2163,7 +2064,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => paperContext,
       } as never,
     );
-    const validated = tool.validate({ mode: "overview" });
+    const validated = tool.validate({});
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
     const output = (await tool.execute(validated.value, {
@@ -2195,7 +2096,7 @@ describe("semantic tool surface", function () {
     assert.lengthOf(output.results?.[0]?.quoteAnchors || [], 1);
   });
 
-  it("paper_read targeted returns grouped per-paper evidence while preserving flat results", async function () {
+  it("paper_query returns grouped per-paper evidence while preserving flat results", async function () {
     const firstPaper = {
       itemId: 11,
       contextItemId: 22,
@@ -2210,7 +2111,7 @@ describe("semantic tool surface", function () {
       firstCreator: "Montague",
       year: "2012",
     };
-    const tool = createPaperReadTool(
+    const tool = createPaperQueryTool(
       {
         ensurePaperContext: async () => ({ chunks: ["methods"] }),
       } as never,
@@ -2240,17 +2141,15 @@ describe("semantic tool surface", function () {
           },
         ],
       } as never,
-      {} as never,
       {
         resolvePaperContextTarget: ({ itemId }: { itemId?: number }) =>
           itemId === firstPaper.itemId ? firstPaper : secondPaper,
         listPaperContexts: () => [firstPaper, secondPaper],
-      } as never,
+      },
     );
     const validated = tool.validate({
-      mode: "targeted",
       query: "methods methodology method section",
-      targets: [
+      target: [
         { itemId: 11, contextItemId: 22 },
         { itemId: 33, contextItemId: 44 },
       ],
@@ -2258,6 +2157,7 @@ describe("semantic tool surface", function () {
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
     const output = (await tool.execute(validated.value, baseContext)) as {
+      mode?: string;
       results?: unknown[];
       quoteCitations?: Array<{
         id: string;
@@ -2277,6 +2177,7 @@ describe("semantic tool surface", function () {
         }>;
       }>;
     };
+    assert.equal(output.mode, "targeted");
     assert.lengthOf(output.results || [], 2);
     assert.lengthOf(output.papers || [], 2);
     assert.deepEqual(
@@ -2306,8 +2207,8 @@ describe("semantic tool surface", function () {
     assert.isFunction(onSuccess);
     if (typeof onSuccess !== "function") return;
     assert.equal(
-      onSuccess({ label: "Read Paper", content: output }),
-      "Read 2 passages from 2 sources",
+      onSuccess({ label: "Query Paper", content: output }),
+      "Found 2 passages in 2 sources",
     );
   });
 
@@ -2355,9 +2256,7 @@ describe("semantic tool surface", function () {
       },
     );
     const validated = tool.validate({
-      mode: "full",
       target: { itemId: 51, contextItemId: 52 },
-      query: "Read the complete text.",
       readFullReason: "verify chunk coverage",
     });
     assert.equal(validated.ok, true);
@@ -2480,9 +2379,7 @@ describe("semantic tool surface", function () {
       const tool = registry.getTool("paper_read");
       assert.exists(tool);
       const validated = tool!.validate({
-        mode: "full",
         target: { paperContext },
-        query: "Read the complete text.",
         readFullReason: "verify chunk coverage",
       });
       assert.equal(validated.ok, true);
@@ -2587,24 +2484,27 @@ describe("semantic tool surface", function () {
         relevantChunkIds: [0],
       }),
     );
-    const missingReason = tool.validate({ mode: "full" });
-    assert.equal(missingReason.ok, false);
-    if (missingReason.ok) return;
-    assert.match(
-      missingReason.error,
-      /requires readFullReason/,
-      "mode:'full' must refuse to validate without an explicit reason",
+    const legacyMode = tool.validate({ mode: "full" });
+    assert.equal(legacyMode.ok, false);
+    if (legacyMode.ok) return;
+    assert.include(
+      legacyMode.error,
+      "no longer takes 'mode'",
+      "the legacy mode enum must fail closed with a migration hint",
+    );
+    assert.include(
+      legacyMode.error,
+      "readFullReason",
+      "the migration hint must point at the readFullReason coordinate",
     );
 
     const validated = tool.validate({
-      mode: "full",
       readFullReason: "verify every reference entry against its DOI",
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
 
     const explicit = tool.validate({
-      mode: "full",
       target: { paperContext: activePaper },
       readFullReason: "the user named this exact paper",
     });
@@ -2666,7 +2566,7 @@ describe("semantic tool surface", function () {
     assert.equal(allSelectedOutput.coverageReceipt.paperCount, 1);
   });
 
-  it("paper_read targeted honors explicit pages even when a query is present", async function () {
+  it("paper_read pages returns exact page text without semantic retrieval", async function () {
     const paperContext = {
       itemId: 11,
       contextItemId: 22,
@@ -2719,8 +2619,6 @@ describe("semantic tool surface", function () {
       } as never,
     );
     const validated = tool.validate({
-      mode: "targeted",
-      query: "hippocampal evidence",
       pages: [2],
     });
     assert.equal(validated.ok, true);
@@ -2756,7 +2654,7 @@ describe("semantic tool surface", function () {
     assert.equal(output.quoteCitations?.[0]?.pageHintLabel, "2");
   });
 
-  it("paper_read targeted groups explicit page reads across multiple targets", async function () {
+  it("paper_read pages groups explicit page reads across multiple targets", async function () {
     const firstPaper = {
       itemId: 11,
       contextItemId: 22,
@@ -2819,9 +2717,8 @@ describe("semantic tool surface", function () {
       } as never,
     );
     const validated = tool.validate({
-      mode: "targeted",
       pages: [3],
-      targets: [
+      target: [
         { itemId: 11, contextItemId: 22 },
         { itemId: 33, contextItemId: 44 },
       ],
@@ -2850,7 +2747,7 @@ describe("semantic tool surface", function () {
     assert.equal(output.papers?.[1]?.passages?.[0]?.pageLabel, "3");
   });
 
-  it("paper_read targeted dedupes duplicate default paper contexts", async function () {
+  it("paper_query dedupes duplicate default paper contexts", async function () {
     const paperContext = {
       itemId: 11,
       contextItemId: 22,
@@ -2859,7 +2756,7 @@ describe("semantic tool surface", function () {
       year: "2025",
     };
     let retrievedPapers: unknown[] = [];
-    const tool = createPaperReadTool(
+    const tool = createPaperQueryTool(
       {
         ensurePaperContext: async () => ({ chunks: ["memory"] }),
       } as never,
@@ -2892,14 +2789,12 @@ describe("semantic tool surface", function () {
           ];
         },
       } as never,
-      {} as never,
       {
         listPaperContexts: () => [paperContext, { ...paperContext }],
         resolvePaperContextTarget: () => paperContext,
-      } as never,
+      },
     );
     const validated = tool.validate({
-      mode: "targeted",
       query: "memory palace",
     });
     assert.equal(validated.ok, true);
@@ -2915,12 +2810,12 @@ describe("semantic tool surface", function () {
     assert.isFunction(onSuccess);
     if (typeof onSuccess !== "function") return;
     assert.equal(
-      onSuccess({ label: "Read Paper", content: output }),
-      "Read 2 passages from (Chandra et al., 2025)",
+      onSuccess({ label: "Query Paper", content: output }),
+      "Found 2 passages in (Chandra et al., 2025)",
     );
   });
 
-  it("paper_read targeted dedupes duplicate explicit targets", async function () {
+  it("paper_query dedupes duplicate explicit targets", async function () {
     const paperContext = {
       itemId: 11,
       contextItemId: 22,
@@ -2929,7 +2824,7 @@ describe("semantic tool surface", function () {
       year: "2025",
     };
     let retrievedPapers: unknown[] = [];
-    const tool = createPaperReadTool(
+    const tool = createPaperQueryTool(
       {
         ensurePaperContext: async () => ({ chunks: ["memory"] }),
       } as never,
@@ -2953,16 +2848,14 @@ describe("semantic tool surface", function () {
           ];
         },
       } as never,
-      {} as never,
       {
         listPaperContexts: () => [],
         resolvePaperContextTarget: () => paperContext,
-      } as never,
+      },
     );
     const validated = tool.validate({
-      mode: "targeted",
       query: "memory palace",
-      targets: [
+      target: [
         { itemId: 11, contextItemId: 22 },
         { itemId: 11, contextItemId: 22 },
       ],
@@ -3027,6 +2920,206 @@ describe("semantic tool surface", function () {
       }),
       "Read 2 passages from (Chandra et al., 2025)",
     );
+  });
+
+  describe("paper_read coordinate validation", function () {
+    const tool = createPaperReadTool(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const cases: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      errorIncludes: string[];
+    }> = [
+      {
+        name: "legacy mode argument fails with a paper_query migration hint",
+        args: { mode: "targeted", pages: [2] },
+        errorIncludes: ["no longer takes 'mode'", "paper_query"],
+      },
+      {
+        name: "legacy query argument fails with a paper_query migration hint",
+        args: { query: "hippocampal evidence" },
+        errorIncludes: ["no longer takes 'query'", "paper_query"],
+      },
+      {
+        name: "legacy targets argument fails with a target migration hint",
+        args: { targets: [{ itemId: 1, contextItemId: 2 }] },
+        errorIncludes: ["no longer takes 'targets'"],
+      },
+      {
+        name: "sections and pages are mutually exclusive locators",
+        args: { sections: ["Methods"], pages: [3] },
+        errorIncludes: ["at most one of sections, pages, labels"],
+      },
+      {
+        name: "images cannot combine with sections",
+        args: { sections: ["Methods"], images: true },
+        errorIncludes: ["cannot select by sections"],
+      },
+      {
+        name: "labels require images",
+        args: { labels: ["Figure 3"] },
+        errorIncludes: ["Add images:true"],
+      },
+      {
+        name: "readFullReason excludes locator arguments",
+        args: { readFullReason: "verify every reference", pages: [3] },
+        errorIncludes: ["redundant with it"],
+      },
+    ];
+
+    for (const testCase of cases) {
+      it(testCase.name, function () {
+        const validated = tool.validate(testCase.args);
+        assert.isFalse(validated.ok, JSON.stringify(testCase.args));
+        if (validated.ok) return;
+        for (const fragment of testCase.errorIncludes) {
+          assert.include(validated.error, fragment);
+        }
+      });
+    }
+  });
+
+  it("paper_read sections returns only the matched section text", async function () {
+    const paperContext = {
+      itemId: 11,
+      contextItemId: 22,
+      title: "Sectioned Paper",
+      firstCreator: "Miller",
+      year: "2025",
+    };
+    const tool = createPaperReadTool(
+      {
+        ensurePaperContext: async () => ({
+          chunks: ["abstract text", "intro text", "related work text"],
+          chunkMeta: [
+            {
+              chunkIndex: 0,
+              text: "abstract text",
+              sectionLabel: "Abstract",
+              chunkKind: "abstract",
+            },
+            {
+              chunkIndex: 1,
+              text: "intro text",
+              sectionLabel: "1 Introduction",
+              chunkKind: "introduction",
+            },
+            {
+              chunkIndex: 2,
+              text: "related work text",
+              sectionLabel: "2 Related Work",
+              chunkKind: "introduction",
+            },
+          ],
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {
+        listPaperContexts: () => [paperContext],
+        resolvePaperContextTarget: () => paperContext,
+      } as never,
+    );
+    const validated = tool.validate({ sections: ["related work"] });
+    assert.equal(validated.ok, true);
+    if (!validated.ok) return;
+    const output = (await tool.execute(validated.value, baseContext)) as {
+      mode?: string;
+      status?: string;
+      results?: Array<{
+        text?: string;
+        sectionLabel?: string;
+        chunkIndex?: number;
+      }>;
+      papers?: Array<{
+        status?: string;
+        passages?: Array<{ text?: string }>;
+      }>;
+    };
+
+    assert.equal(output.mode, "sections");
+    assert.equal(output.status, "matched");
+    assert.lengthOf(output.results || [], 1);
+    assert.equal(output.results?.[0]?.text, "related work text");
+    assert.equal(output.results?.[0]?.sectionLabel, "2 Related Work");
+    assert.equal(output.results?.[0]?.chunkIndex, 2);
+    assert.deepEqual(
+      (output.papers?.[0]?.passages || []).map((passage) => passage.text),
+      ["related work text"],
+    );
+  });
+
+  it("paper_read sections reports unmatched names with suggestions", async function () {
+    const paperContext = {
+      itemId: 11,
+      contextItemId: 22,
+      title: "Sectioned Paper",
+      firstCreator: "Miller",
+      year: "2025",
+    };
+    const tool = createPaperReadTool(
+      {
+        ensurePaperContext: async () => ({
+          chunks: ["abstract text", "intro text", "related work text"],
+          chunkMeta: [
+            {
+              chunkIndex: 0,
+              text: "abstract text",
+              sectionLabel: "Abstract",
+              chunkKind: "abstract",
+            },
+            {
+              chunkIndex: 1,
+              text: "intro text",
+              sectionLabel: "1 Introduction",
+              chunkKind: "introduction",
+            },
+            {
+              chunkIndex: 2,
+              text: "related work text",
+              sectionLabel: "2 Related Work",
+              chunkKind: "introduction",
+            },
+          ],
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {
+        listPaperContexts: () => [paperContext],
+        resolvePaperContextTarget: () => paperContext,
+      } as never,
+    );
+    const validated = tool.validate({ sections: ["Nonexistent Section"] });
+    assert.equal(validated.ok, true);
+    if (!validated.ok) return;
+    const output = (await tool.execute(validated.value, baseContext)) as {
+      mode?: string;
+      status?: string;
+      papers?: Array<{
+        status?: string;
+        requested?: string[];
+        suggestions?: string[];
+        availableSections?: string[];
+      }>;
+      guidance?: string;
+    };
+
+    assert.equal(output.mode, "sections");
+    assert.equal(output.status, "no_matching_sections");
+    assert.deepEqual(output.papers?.[0]?.requested, ["Nonexistent Section"]);
+    assert.isArray(output.papers?.[0]?.suggestions);
+    assert.deepEqual(output.papers?.[0]?.availableSections, [
+      "Abstract",
+      "1 Introduction",
+      "2 Related Work",
+    ]);
+    assert.include(String(output.guidance || ""), "paper_query");
   });
 
   it("matches simple-paper-qa for understand-this-paper typo requests", function () {
