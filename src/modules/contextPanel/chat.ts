@@ -139,6 +139,7 @@ import {
   getActiveReaderForSelectedTab,
   getAllOpenReaders,
 } from "./contextResolution";
+import { getActiveReaderPageContext } from "./pdfPageCapture";
 export {
   isScrollUpdateSuspended,
   withScrollGuard,
@@ -9682,12 +9683,16 @@ async function buildAgentRuntimeRequest(
     conversationKind,
     libraryID: requestLibraryID,
   });
+  // Where the user is looking right now: ambient reader state for the turn
+  // envelope. Best-effort — no reader open means no line, never an error.
+  const readerPageContext = (await getActiveReaderPageContext()) ?? undefined;
   return {
     conversationKey: params.conversationKey,
     conversationGeneration: params.conversationGeneration,
     mode: "agent",
     userText: params.userText,
     conversationKind,
+    readerPageContext,
     activeItemId: activeNoteSession?.noteId || params.item.id,
     activePaperContext: activePaperContext
       ? {

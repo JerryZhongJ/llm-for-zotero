@@ -66,6 +66,7 @@ type ResolvedTurnContextEnvelopeInput = Pick<
   | "turnPaperScope"
   | "turnPaperScopeWarnings"
   | "zoteroMetadataContext"
+  | "readerPageContext"
 > & {
   activePaperTitle?: string;
 };
@@ -84,6 +85,11 @@ export type TurnContextEnvelope = Readonly<{
   resolvedSelectedTextAnchors: readonly ResolvedTurnSelectedTextAnchor[];
   selectedTextSources: readonly SelectedTextSource[];
   selectedTextLocators: readonly string[];
+  readerPage?: Readonly<{
+    contextItemId: number;
+    pageNumber: number;
+    pageLabel: string;
+  }>;
   selectedTextNotes: readonly Readonly<{
     index: number;
     noteId?: number;
@@ -133,6 +139,18 @@ function normalizeNumber(value: unknown): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return Math.floor(parsed);
+}
+
+function normalizeReaderPage(
+  value: unknown,
+): TurnContextEnvelope["readerPage"] {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const contextItemId = normalizeNumber(record.contextItemId);
+  const pageNumber = normalizeNumber(record.pageNumber);
+  if (!contextItemId || !pageNumber) return undefined;
+  const pageLabel = normalizeText(record.pageLabel) || String(pageNumber);
+  return { contextItemId, pageNumber, pageLabel };
 }
 
 export function buildTurnContextEnvelope(
@@ -219,6 +237,10 @@ export function buildTurnContextEnvelope(
     resolvedSelectedTextAnchors: paperScopeResult.resolvedSelectedTextAnchors,
     selectedTextSources,
     selectedTextLocators,
+    readerPage:
+      "readerPageContext" in input
+        ? normalizeReaderPage(input.readerPageContext)
+        : undefined,
     selectedTextNotes,
     screenshotCount: (input.screenshots || []).filter(Boolean).length,
     attachments: (input.attachments || []).filter(Boolean),
@@ -337,6 +359,15 @@ export function renderTurnContextEnvelopeForModel(
     );
   });
 
+  if (envelope.readerPage) {
+    lines.push(
+      `Open reader page: ${renderFields([
+        ["contextItemId", envelope.readerPage.contextItemId],
+        ["page", envelope.readerPage.pageLabel],
+      ])}`,
+    );
+  }
+
   if (envelope.selectedTextCount) {
     lines.push(
       `Selected text: count=${envelope.selectedTextCount}, sources=${envelope.selectedTextSources.join(", ")}`,
@@ -434,6 +465,7 @@ export function renderTurnContextEnvelopeForModel(
     ...lines,
     'Resolve current-resource references only from the context listed above. "This paper" means the active paper. In Paper Chat, "these papers" or "both papers" means the active paper plus visibly added concrete papers; in Library Chat it means all visibly attached concrete papers. Collections and tags remain lazy resource pools and are never silently included in "these papers". Do not infer missing resource identity from old thread history, citation provenance, retrieved candidates, local PDF transport, or local memory.',
     'Entries marked "ambient selection" or "ambient context" mirror what is currently selected in the Zotero library pane (the open collection and/or the highlighted item); the user did not attach them. Ambient papers are metadata references only — call paper_read for their content — and they never count as "these papers". Expand ambient collections with library_search or library_read before relying on them.',
+    'The "Open reader page" line mirrors where the user is currently looking in the PDF reader. Treat "this page" or "the current page" as that page (its contextItemId maps to a paper above) unless the user clearly means something else.',
   ].join("\n");
 }
 

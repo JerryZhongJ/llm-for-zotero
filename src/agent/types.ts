@@ -577,6 +577,15 @@ export type AgentRuntimeRequestInput = AgentRequest & {
    * Missing means the request's configured provider is the completion backend.
    */
   exhaustiveReadBackend?: ExhaustiveReadBackend;
+  /**
+   * Where the user currently is in the open PDF reader: ambient context, not
+   * a tool action. Absent when no PDF reader is open.
+   */
+  readerPageContext?: {
+    contextItemId: number;
+    pageNumber: number;
+    pageLabel: string;
+  };
 };
 
 export type LegacyPaperContextField =

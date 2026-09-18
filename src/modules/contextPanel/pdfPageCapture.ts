@@ -1004,6 +1004,43 @@ export async function captureCurrentPdfPage(): Promise<string | null> {
 }
 
 /**
+ * Where the user currently is in the open PDF reader — attachment id plus
+ * 1-based page — without rendering anything. Ambient context for the turn
+ * envelope; every failure mode is a silent null.
+ */
+export async function getActiveReaderPageContext(): Promise<{
+  contextItemId: number;
+  pageNumber: number;
+  pageLabel: string;
+} | null> {
+  try {
+    const reader = getActiveReaderForSelectedTab();
+    if (!reader) return null;
+    const app = getPdfViewerApplication(reader);
+    if (!app?.pdfDocument) return null;
+    const rawPageNumber = Number(
+      app?.pdfViewer?.currentPageNumber ||
+        app?.pdfViewer?.currentPageLabel ||
+        app?.page ||
+        1,
+    );
+    if (!Number.isFinite(rawPageNumber) || rawPageNumber < 1) return null;
+    const readerItemId = Number(
+      reader?._item?.id || reader?.itemID || 0,
+    );
+    if (!Number.isFinite(readerItemId) || readerItemId <= 0) return null;
+    const pageNumber = Math.floor(rawPageNumber);
+    return {
+      contextItemId: Math.floor(readerItemId),
+      pageNumber,
+      pageLabel: String(pageNumber),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Returns the total number of pages in the active PDF, or 0 if no PDF is open.
  */
 export function getPdfPageCount(): number {
