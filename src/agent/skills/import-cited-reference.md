@@ -1,7 +1,7 @@
 ---
 id: import-to-library
 description: Import cited papers into your Zotero library by DOI
-version: 3
+version: 4
 contexts: any
 activation: auto
 match: /\b(add|import|save|get)\b.*\b(to|into)\s*(my\s*)?(library|zotero|collection)\b/i
@@ -46,7 +46,7 @@ If the paper has MinerU cache (mineruCacheDir):
 1. `file_io({ action:'read', filePath:'{mineruCacheDir}/manifest.json' })` — find the "References" section's charStart/charEnd.
 2. `file_io({ action:'read', filePath:'{mineruCacheDir}/full.md', offset:<charStart>, length:<charEnd - charStart> })` — read just the references.
 
-If no MinerU cache, use `paper_read({ mode:'targeted', query:'reference number or References section' })`.
+If no MinerU cache, use `paper_read({ sections:['References'] })` or `paper_query({ query:'reference number or References section' })`.
 
 ### Resolving DOIs
 

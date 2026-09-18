@@ -1,7 +1,7 @@
 ---
 id: simple-paper-qa
 description: Answer open-ended natural-language questions about the content of one specific paper (what it argues, how it compares to X, what figure 3 means). Not for Zotero operations like editing metadata, tagging, or running scripts.
-version: 7
+version: 8
 contexts: single-paper
 activation: auto
 match: /\b(what|who|when|where|which|tell me|explain)\b.*\b(about|paper|article|study|wrote|author|publish|year|journal|abstract|topic|field|contribution|finding|claim|conclusion|argue)\b/i
@@ -19,7 +19,7 @@ match: /\b(tldr|tl;dr|gist|overview|brief)\b/i
   this paper about?", "summarize this", "who are the authors?").
 
   You can customize:
-  - Reading strategy: change when `paper_read` overview vs targeted mode is used
+  - Reading strategy: change when `paper_read()` overview vs `paper_query` retrieval is used
   - Escalation rules: adjust when to do deeper retrieval
   - Answer style: modify how responses are structured
 
@@ -31,8 +31,8 @@ match: /\b(tldr|tl;dr|gist|overview|brief)\b/i
 
 Use Zotero paper tools as resources, not a ritual.
 
-- For broad questions like "what is this paper about?", "summarize this", or "main message", call `paper_read({ mode:'overview' })` once, then answer.
-- If the user asks for a specific claim, method, result, table, or named section that overview cannot answer, make one focused `paper_read({ mode:'targeted', query:'<specific missing claim>' })` call.
+- For broad questions like "what is this paper about?", "summarize this", or "main message", call `paper_read()` once, then answer.
+- If the user asks for a specific claim, method, result, table, or named section that overview cannot answer, make one focused `paper_query({ query:'<specific missing claim>' })` call (or `paper_read({ sections:['<named section>'] })` when the section is named).
 - If overview reports `contentStatus:'no_pdf_attachment'`, answer from Zotero metadata/abstract if sufficient; otherwise one external lookup is allowed and must be labeled as external.
 - If overview reports `contentStatus:'no_extractable_pdf_text'`, answer from metadata/abstract and state the limitation.
 - Apply the system citation contract to paper-specific claims and direct quotations.

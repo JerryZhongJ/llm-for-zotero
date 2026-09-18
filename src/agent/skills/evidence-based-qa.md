@@ -1,7 +1,7 @@
 ---
 id: evidence-based-qa
 description: Locate specific passages in selected papers or collections that support a given claim, returning quoted evidence with page and section citations. Not for general questions — use simple-paper-qa for those.
-version: 5
+version: 6
 contexts: single-paper,paper-set,library-corpus
 activation: auto
 match: /\b(what method|what approach|what technique|what model|how did they|how does it|what results?|what data|what dataset|what experiment|what metric|what performance|what accuracy|what baseline)\b/i
@@ -36,13 +36,13 @@ approach.
 
 **Step 1 — Gather context:**
 
-- For one selected paper, call `paper_read({ mode:'overview' })` first to understand the paper's structure and main claims.
-- For multiple selected papers, call `paper_read({ mode:'targeted', query:'<the specific question>', targets:[...] })` once with explicit `targets`.
+- For one selected paper, call `paper_read()` first to understand the paper's structure and main claims.
+- For multiple selected papers, call `paper_query({ query:'<the specific question>', target:[...] })` once with an explicit `target` array.
 - For a selected collection/folder or whole-library evidence question, do not rely on the active-reader paper as an implicit target. Call `library_retrieve({ query:'<the specific question>', intent:'verify', depth:'evidence' })` for exact presence/absence, `intent:'enumerate'` when the user asks which papers contain evidence, or `intent:'summarize'` when the user asks for commonality, themes, comparison, or overview across the scoped pool. Then use `paper_read` only with explicit `targets` if close reading is still needed.
 - For bounded selected or collection-scoped multi-paper synthesis, prefer the returned body evidence, paper synthesis digest, and coverage frontier over stopping at metadata or abstracts.
 
 **Step 2 — Targeted retrieval (only if Step 1 is insufficient):**
-For a single-paper turn, call `paper_read({ mode:'targeted', query:'<the specific question>' })` with a focused question. For paper sets or collection-selected candidates, call `paper_read({ mode:'targeted', query:'<the specific question>', targets:[...] })` with explicit `targets`. This returns the most relevant passages ranked by relevance.
+For a single-paper turn, call `paper_query({ query:'<the specific question>' })` with a focused question. For paper sets or collection-selected candidates, call `paper_query({ query:'<the specific question>', target:[...] })` with an explicit `target` array. This returns the most relevant passages ranked by relevance.
 
 **Step 3 — Answer from the evidence.**
 Do NOT make additional retrieval calls just to decorate the answer.
@@ -53,6 +53,6 @@ Use only high-signal passages that establish the requested method, result, datas
 
 ### Budget
 
-For one paper, aim for 1–2 tool calls total. `paper_read({ mode:'overview' })` often answers in one call.
+For one paper, aim for 1–2 tool calls total. `paper_read()` often answers in one call.
 For bounded multi-paper library chat, answer quality takes priority over a fixed call count; use `library_retrieve` coverage diagnostics to decide whether enough body evidence was read.
 Only exceed the initial retrieval when the ledger or indexing state shows a concrete missing paper, method, result, or section.

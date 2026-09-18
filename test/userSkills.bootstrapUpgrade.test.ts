@@ -378,9 +378,8 @@ describe("user skill bootstrap upgrades", function () {
       canonicalWriteNote,
       "Path pattern: `{papertitle}/{papertitle}.md`",
     );
-    // Tracks the shipped write-note version; bumped to 10 when the fixed
-    // note template and mandatory footer were removed (structure now
-    // follows the user's instructions).
-    assert.equal(parseSkill(canonicalWriteNote).version, 10);
+    // Tracks the shipped write-note version; bumped to 11 when paper_read
+    // guidance moved to the coordinate interface (overview/paper_query).
+    assert.equal(parseSkill(canonicalWriteNote).version, 11);
   });
 });

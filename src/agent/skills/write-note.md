@@ -1,7 +1,7 @@
 ---
 id: write-note
 description: Write a long-form reading or literature note for a specific paper, saved as a Zotero note or Markdown file. Use ONLY when the user explicitly asks to write, draft, or edit a note.
-version: 10
+version: 11
 contexts: any
 activation: auto
 match: /\b(create|make|write|draft|generate)\b.*\b(note|summary note|reading note|notes?)\b.*\b(for|from|about|on)\b.*\b(paper|article|this)\b/i
@@ -55,7 +55,7 @@ If unclear, default to Zotero note.
 ### Step 1 — Read content
 
 - If `mineruCacheDir` is available: use `file_io({ action:'read', filePath:'{mineruCacheDir}/full.md' })`.
-- Otherwise: use `paper_read({ mode:'overview' })` for the overview, then optionally one `paper_read({ mode:'targeted', query:'...' })` call for key results/methods if the user wants detail beyond the abstract.
+- Otherwise: use `paper_read()` for the overview, then optionally one `paper_query({ query:'...' })` call for key results/methods if the user wants detail beyond the abstract.
 - For multi-paper notes (reviews, comparisons): use `library_retrieve` with the right intent (`enumerate` for comprehensive evidence search, `summarize` for taxonomies/themes/commonality/comparison, or `verify` for exact presence/absence) to search the scoped library/collection resource pool and gather snippets, then use `paper_read` only for papers that the ledger marks as needing close reading.
 - For bounded selected multi-paper notes, prefer body-evidence coverage and the paper synthesis digest before writing.
 - For free-form notes: use whatever the user provides or requests.
@@ -70,13 +70,13 @@ If unclear, default to Zotero note.
 
 **If the user asked about a specific figure, include that figure in the note when an extracted PDF crop is available.**
 For other notes, include figures when they genuinely aid understanding (result plots, diagrams, key tables).
-For Zotero library PDFs, first call `paper_read({ mode:'figures', query:'<figure request>' })`.
-Treat `paper_read({ mode:'figures' })` as the authority for figure crop cache reuse/regeneration.
+For Zotero library PDFs, first call `paper_read({ labels:['<figure label>'], images:true })` (or `paper_read({ images:true })` for all figures).
+Treat `paper_read({ labels:[...], images:true })` as the authority for figure crop cache reuse/regeneration.
 Use its returned crop paths/artifacts as-is and do not inspect or validate `figure_crops` metadata before writing.
 Embed extracted PDF crop paths returned by that tool.
 Do not embed MinerU source image paths.
 Panel suffixes and captions are hints only; do not assume image order proves panel identity.
-If `paper_read({ mode:'figures' })` returns `no_figures`, `mineru_required`, `error`, zero figures, or no image artifact, switch to text-only mode when the user asked for a note — **write a text-only note**.
+If `paper_read({ images:true })` returns `no_figures`, `mineru_required`, `error`, zero figures, or no image artifact, switch to text-only mode when the user asked for a note — **write a text-only note**.
 Do not include figure images, MinerU source images, rendered PDF page screenshots, or extracted-image placeholders in that failure state.
 Explicitly state that figure extraction failed or that no extracted crops are available, and that the explanations are based on captions, figure legends, and surrounding paper text.
 Text-only models may still copy/embed extracted crop paths into notes when crops are available, but must not make unsupported visual claims beyond caption and surrounding-text evidence.
@@ -102,7 +102,7 @@ This failure path does not restrict images the user manually attached or pasted;
 
 1. Create the destination directory: `run_command` with `mkdir -p "{attachmentsPath}/{sanitized-paper-title}"`.
    The folder is named after the **paper title only** (no subtopic, no date) so multiple notes about the same paper share the same images folder.
-2. Copy extracted PDF crop files returned by `paper_read({ mode:'figures' })` to `{attachmentsPath}/{sanitized-paper-title}/` using `run_command`.
+2. Copy extracted PDF crop files returned by `paper_read({ images:true })` to `{attachmentsPath}/{sanitized-paper-title}/` using `run_command`.
    Copy images BEFORE writing the note file.
 3. Compute the **relative path from the note's directory to the image file**.
    Use `..` to climb to the common ancestor, then descend to the image.

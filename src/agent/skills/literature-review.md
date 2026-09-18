@@ -1,7 +1,7 @@
 ---
 id: literature-review
 description: Structured scientific review with thematic synthesis and citations
-version: 4
+version: 5
 contexts: paper-set,library-corpus
 activation: auto
 match: /\b(literature review|lit review|review of (the )?literature)\b/i
@@ -50,9 +50,9 @@ Use `library_retrieve({ query:'<review focus>', intent:'summarize', depth:'evide
 For newly discovered or large corpora, deep-read the most relevant papers and use the `library_retrieve` frontier to report what remains sampled.
 If `library_retrieve` already returned good evidence snippets, use those before calling `paper_read`.
 
-1. Use `paper_read({ mode:'overview', targets:[...] })` for selected papers.
-2. For targeted claims: `paper_read({ mode:'targeted', query:'...', targets:[...] })` with focused questions (e.g., "What methods were used?", "What were the key findings?").
-3. Use `paper_read({ mode:'figures', query:'...' })` only when figures are directly relevant; reserve `mode:'visual'` for explicit page/layout inspection.
+1. Use `paper_read({ target:[...] })` for selected papers.
+2. For targeted claims: `paper_query({ query:'...', target:[...] })` with focused questions (e.g., "What methods were used?", "What were the key findings?").
+3. Use `paper_read({ labels:[...], images:true })` only when figures are directly relevant; reserve `paper_read({ pages:[...], images:true })` for explicit page/layout inspection.
 
 For bounded selected corpora, prioritize body-evidence coverage over shallow breadth.
 For large discovered corpora, use staged breadth first and report the frontier before making exhaustive claims.
@@ -84,8 +84,8 @@ Write the review directly in the chat response. Use this structure:
    - List all cited papers in alphabetical order
    - Format: `Author(s). (Year). Title. *Journal*, Volume(Issue), Pages.`
 
-If key figures from deep-read papers would strengthen a thematic point, first call `paper_read({ mode:'figures', query:'<figure request>' })` and embed the extracted PDF crop paths it returns.
-Treat `paper_read({ mode:'figures' })` as the authority for figure crop cache reuse/regeneration.
+If key figures from deep-read papers would strengthen a thematic point, first call `paper_read({ labels:['<figure label>'], images:true })` and embed the extracted PDF crop paths it returns.
+Treat `paper_read({ labels:[...], images:true })` as the authority for figure crop cache reuse/regeneration.
 Use its returned crop paths/artifacts as-is and do not inspect or validate `figure_crops` metadata before analysis or writing.
 Place figures within the thematic sections they relate to, not in a separate section.
 Do not embed MinerU source image paths.

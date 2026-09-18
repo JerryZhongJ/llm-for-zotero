@@ -3148,7 +3148,7 @@ describe("semantic tool surface", function () {
     assert.include(raw, "prefer one scoped `library_retrieve(");
     assert.include(
       raw,
-      "Make follow-up `paper_read({ mode:'targeted', ... })` calls only for concrete missing dimensions",
+      "Make follow-up `paper_query({ ... })` calls only for concrete missing dimensions",
     );
     assert.include(raw, "Apply the system citation contract");
     assert.notInclude(raw, "include short direct-source blockquotes");

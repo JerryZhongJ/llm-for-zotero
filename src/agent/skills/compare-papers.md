@@ -1,7 +1,7 @@
 ---
 id: compare-papers
 description: Compare selected papers or collection papers by theme, methodology, or findings
-version: 7
+version: 8
 contexts: paper-set,library-corpus
 activation: auto
 match: /\b(compare|contrast|difference|differ|similarities|similarity)\b.*\b(papers?|articles?|studies|works?)\b/i
@@ -35,11 +35,11 @@ For bounded selected or collection-scoped comparison pools, overview is the answ
 Prefer body-evidence coverage and the returned paper synthesis digest before writing the comparison.
 
 - If the user names a comparison dimension such as methods, results, limitations, theory, data, or figures, start with one batched targeted read:
-  `paper_read({ mode:'targeted', query:'methods methodology method section', targets:[...] })`
+  `paper_query({ query:'methods methodology method section', target:[...] })`
 - If the corpus is a selected collection/folder and the dimension is known, prefer one scoped `library_retrieve({ query:'methods methodology method section', intent:'summarize', depth:'evidence' })` before selecting explicit paper targets for deeper comparison.
 - For broad requests like "compare these papers" with no dimension, use bounded evidence coverage first: `library_retrieve({ query:'compare these papers', intent:'summarize', depth:'evidence' })` for collection/library chat, or the selected-paper evidence ledger when it is already supplied.
   Then synthesize from the paper digest and snippets.
 - For method-section requests, do not call overview first unless the targeted result is clearly insufficient.
 - Apply the system citation contract to paper-specific claims and any direct quotations.
   Keep the comparison readable and use only high-signal evidence that supports a concrete contrast.
-- Stop after the evidence ledger covers the selected papers at the needed depth, or explicitly report the coverage frontier. Make follow-up `paper_read({ mode:'targeted', ... })` calls only for concrete missing dimensions or papers that the ledger marks as insufficient.
+- Stop after the evidence ledger covers the selected papers at the needed depth, or explicitly report the coverage frontier. Make follow-up `paper_query({ ... })` calls only for concrete missing dimensions or papers that the ledger marks as insufficient.
