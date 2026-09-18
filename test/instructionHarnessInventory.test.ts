@@ -49,8 +49,7 @@ const STOCK_SKILL_WORKFLOW_MARKERS: Record<string, string[]> = {
     "contentStatus:'no_extractable_pdf_text'",
   ],
   "write-note.md": [
-    "## Note template",
-    "Checklist before writing the note",
+    "Never emit `[@]`",
     "Worked example",
     "USER CUSTOMIZATIONS COME FIRST",
   ],

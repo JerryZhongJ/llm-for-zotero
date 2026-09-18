@@ -1,7 +1,7 @@
 ---
 id: write-note
 description: Write a long-form reading or literature note for a specific paper, saved as a Zotero note or Markdown file. Use ONLY when the user explicitly asks to write, draft, or edit a note.
-version: 9
+version: 10
 contexts: any
 activation: auto
 match: /\b(create|make|write|draft|generate)\b.*\b(note|summary note|reading note|notes?)\b.*\b(for|from|about|on)\b.*\b(paper|article|this)\b/i
@@ -22,7 +22,7 @@ match: /\b(use|apply|with)\b.*\btemplate\b/i
 ---
 
 <!--
-  SKILL: Write Note (includes the default note template)
+  SKILL: Write Note (routing and content gathering)
 
   Everything between the MANAGED-BEGIN and MANAGED-END markers below is
   plugin-owned and refreshed on updates. Content outside those markers is
@@ -30,11 +30,9 @@ match: /\b(use|apply|with)\b.*\btemplate\b/i
   section below the MANAGED-END marker to override or extend the default
   behavior.
 
-  To customize the frontmatter/body structure of your notes, edit the
-  "## Note template" section inside the managed block. If you do, the plugin
-  will treat the file as customized and stop auto-updating it (your edits
-  are safe). Use the preferences Skills popup → Restore to default to
-  re-adopt the shipped template later.
+  The note's structure is NOT prescribed: the agent follows whatever
+  structure the user asks for. If you want a fixed structure or a footer,
+  describe it in a "## Your customizations" section.
 
   Delete this file to recreate from shipped default on next restart.
 -->
@@ -64,98 +62,9 @@ If unclear, default to Zotero note.
 - For one-paper notes, keep the read phase compact: 1 call (overview) or 1–2 calls (overview/targeted).
   For bounded multi-paper notes, answer quality takes priority over a fixed call count.
 
-### Step 2 — Compose the note using the template below
+### Step 2 — Compose the note
 
-Look up `title` (the paper's full title), `citekey`, `doi`, `journal`, `year`, and **authors** from Zotero item metadata via `library_read({ sections:['metadata'] })`. Cite papers using **Pandoc citation syntax** `[@citekey]` **only when `citekey` is non-empty**. If `citekey` is missing or empty (common when Better BibTeX is not installed), reference papers in prose instead (`First-Author et al. (Year)`) and rely on the full citation in the `## References` section. **Never emit `[@]`** — an empty citation is a bug.
-
-For **Zotero notes** (`note_write`): omit the YAML frontmatter block entirely. Use only the heading and section structure.
-
-For **file-based notes** (`file_io`): include the full template with YAML frontmatter.
-
-## Note template
-
-### Template for paper notes
-
-Use this template **exactly**.
-
-**FRONTMATTER LOCK**: the 7 fields listed below (`title`, `citekey`, `doi`, `year`, `journal`, `created`, `tags`) are the COMPLETE AND EXCLUSIVE list. You are FORBIDDEN from adding any other field. Explicitly forbidden (non-exhaustive): `authors`, `note_type`, `figure`, `abstract`, `source`, `url`, `keywords`, `added`, `updated`, `status`, `rating`. If you want to record author names, figure labels, abstracts, or any other metadata, put them in the **body text** of the note, not in frontmatter. Do not invent new fields under any circumstance.
-
-```
----
-title: "{{paperTitle}}"
-citekey: "{{citekey}}"
-doi: "{{doi}}"
-year: {{year}}
-journal: "{{journal}}"
-created: {{created}}
-tags: [zotero, paper-note]
----
-
-# {{paperTitle}}
-
-## Summary
-Brief overview of the paper's main contribution and what problem it addresses.
-
-## Key Findings
-- The most important results, conclusions, or contributions of the paper.
-
-## Methodology
-Summary of the research methodology, experimental setup, or analytical approach.
-
-## My Notes
-Personal thoughts, critiques, open questions, and connections to other work.
-
-## References
-{{fullCitation}}
-
----
-
-Written by LLM-for-Zotero.
-```
-
-### Template for general notes
-
-When creating a non-paper note (literature review, free-form notes, topic summaries, etc.):
-
-```
----
-title: "{{noteTitle}}"
-created: {{created}}
-tags: [zotero]
----
-
-# {{noteTitle}}
-
-{{content}}
-
----
-
-Written by LLM-for-Zotero.
-```
-
-### How to apply the template
-
-- For **paper notes**, `{{paperTitle}}` is **the full title of the paper itself** (e.g., `"A toolbox for representational similarity analysis"`), looked up from Zotero metadata via `library_read({ sections:['metadata'] })`. Use the exact same value in both the `title:` frontmatter field and the `# heading`.
-- For **general notes**, `{{noteTitle}}` is the review topic or user-provided title. Use the same value in both `title:` frontmatter and `# heading`.
-- **Filename and `title:` are independent fields.** The filename uses its own three-part pattern (see Step 4b) that MAY include the note subtopic and date; frontmatter `title:` never does. Never copy any part of the filename into `title:`.
-- Fill in `{{created}}` with today's date in YYYY-MM-DD format. This is when the note was created, not when the paper was published (that's the `year` field).
-- Use the current local date from the runtime platform section for `{{created}}` and filename `{date}`. Do not call `run_command` just to retrieve the date/time.
-- **Required fields that must always be present**: `title`, `created`, `tags`. Never omit these.
-- **Look-up fields**: `citekey`, `doi`, `journal`, `year`. If a value is genuinely missing in Zotero metadata, use an empty string (e.g., `doi: ""`) rather than omitting the key — keep the frontmatter shape consistent.
-- For **non-paper notes**: use the general template. Do not add paper-specific metadata fields (doi, journal, citekey, year).
-- **References section is mandatory for paper notes.** Replace `{{fullCitation}}` with a full human-readable citation for the paper the note is about — format: `Authors (Year). *Title*. Journal, Volume(Issue), Pages. DOI.` — using whatever subset of fields Zotero actually has. If a field is unknown, mark it in brackets (e.g., `[volume unknown]`) rather than omitting silently. When the note cites additional papers beyond the active one, list each as a separate bullet under `## References`.
-- **Footer is mandatory on every note** (paper or general, Zotero or file-based). End the note with a horizontal rule followed by `Written by LLM-for-Zotero.` on its own line, exactly as shown in the templates. For HTML Zotero notes, use `<hr/><p>Written by LLM-for-Zotero.</p>`.
-
-**Checklist before writing the note — verify each item:**
-
-1. `title:` value is the paper's full title from Zotero (paper notes) or the user's note title (general notes) — NOT the filename, NOT the figure/subtopic label, NOT the date.
-2. Frontmatter contains exactly the 7 keys shown above, in that order, and NO others.
-3. You did not add `authors`, `note_type`, `figure`, `abstract`, or any other field.
-4. `created:` is today's date in YYYY-MM-DD.
-5. `tags:` is present.
-6. You identified the `{notetitle}` subtopic (figure label, section name, topic) separately — it goes into the filename in Step 4b, never into `title:`.
-7. `## References` is populated with a full human-readable citation for the paper (or the first cited paper). No bare `[@]`, no empty brackets, no placeholder text.
-8. The note ends with the footer `---` then a blank line then `Written by LLM-for-Zotero.` (or the HTML equivalent for Zotero HTML notes).
+- Look up `citekey`, authors, and year from Zotero item metadata via `library_read({ sections:['metadata'] })` when citing. Cite papers using **Pandoc citation syntax** `[@citekey]` **only when `citekey` is non-empty**. If `citekey` is missing or empty (common when Better BibTeX is not installed), reference papers in prose instead (`First-Author et al. (Year)`). **Never emit `[@]`** — an empty citation is a bug.
 
 ### Step 3 — Include figures
 
@@ -167,12 +76,11 @@ Use its returned crop paths/artifacts as-is and do not inspect or validate `figu
 Embed extracted PDF crop paths returned by that tool.
 Do not embed MinerU source image paths.
 Panel suffixes and captions are hints only; do not assume image order proves panel identity.
-If `paper_read({ mode:'figures' })` returns `no_figures`, `mineru_required`, `error`, zero figures, or no image artifact, switch to text-only mode when the user asked for a note.
+If `paper_read({ mode:'figures' })` returns `no_figures`, `mineru_required`, `error`, zero figures, or no image artifact, switch to text-only mode when the user asked for a note — **write a text-only note**.
 Do not include figure images, MinerU source images, rendered PDF page screenshots, or extracted-image placeholders in that failure state.
-Explicitly state that figure extraction failed or no extracted crops are available.
-Explicitly state that the explanations are based on captions, figure legends, and surrounding paper text.
-Text-only models may still copy/embed extracted crop paths into notes, but must not make unsupported visual claims beyond caption and surrounding-text evidence.
-This failure path does not restrict images the user manually attached or pasted; user-provided image inputs can still be used normally.
+Explicitly state that figure extraction failed or that no extracted crops are available, and that the explanations are based on captions, figure legends, and surrounding paper text.
+Text-only models may still copy/embed extracted crop paths into notes when crops are available, but must not make unsupported visual claims beyond caption and surrounding-text evidence.
+This failure path does not restrict images the user manually attached or pasted; user-provided image inputs can be used normally.
 
 #### For Zotero notes (`note_write`)
 
@@ -215,15 +123,14 @@ Write:        ![Figure 2. RSA toolbox schematic](../imgs/Nili2014/figure-2.jpg)
 
 - `![Figure 2](file:///Users/.../figure-2.jpg)` — `file://` renders as a broken-image icon in Obsidian.
 - `![Figure 2](/Users/.../figure-2.jpg)` — absolute path is outside the vault; viewers refuse.
-- `![Figure 2|400](../imgs/foo.jpg)` — `|400` becomes literal alt text.
-  The image is not resized.
+- `![Figure 2|400](../imgs/foo.jpg)` — `|400` becomes literal alt text. The image is not resized.
 - `![[imgs/foo/figure-2.jpg]]` — wiki-link embed.
   We use standard markdown only.
 
 **If the extracted PDF crop cannot be found**, write a text-only note when the user asked for a note.
 Switch to text-only mode and do not include any figure image artifact.
-Clearly state that figure extraction failed or no extracted crops are available.
-Do NOT fall back to MinerU source images, `file:///`, absolute paths, or any of the negative examples above.
+Clearly state that figure extraction failed or that no extracted crops are available.
+Do NOT fall back to MinerU source images, `file:///`, absolute paths, or any of the negative examples.
 
 ### Step 4a — Write to Zotero (`note_write`)
 
@@ -276,7 +183,7 @@ Three components, joined by single hyphens:
   - "discussion notes" / "notes on the discussion" → `discussion`
   - "key findings" / "summarize the findings" → `key-findings`
   - "summarize this paper" / "reading notes for this paper" (no specific aspect) → **omit `{notetitle}` entirely**, along with the hyphen that would precede it.
-- **`{date}`** — today's date in `YYYY-MM-DD`. This is the same value you write into frontmatter `created:` — reuse it, don't look up a different date.
+- **`{date}`** — today's date in `YYYY-MM-DD`, from the current local date in the runtime platform section.
 
 **Sanitizer for each component** — lowercase, replace any run of non-alphanumeric characters with a single hyphen, strip leading/trailing hyphens, collapse consecutive hyphens to one, trim each component to ~80 characters.
 
@@ -298,9 +205,7 @@ Three components, joined by single hyphens:
    Missing parent directories are created automatically.
 3. If writing fails, report the error clearly with the attempted path.
 
-**Filename is independent of frontmatter.** The frontmatter `title:` stays the paper's full title (paper notes) or the user's note title (general notes) per the template. Do NOT put the subtopic or the date into `title:`.
-
-#### Customize the filename and folder layout
+#### Customize the filename, folder layout, and note structure
 
 Users can override the default filename pattern AND the folder layout by adding a `## Your customizations` section **AFTER** the `LLM-FOR-ZOTERO:MANAGED-END` marker at the bottom of this skill file.
 The agent follows the customization instead of the defaults above, absolutely (see Key rules).
@@ -321,21 +226,27 @@ Path pattern: `{papertitle}/{papertitle}.md`
 Example: attention-is-all-you-need/attention-is-all-you-need.md
 ```
 
-The second example creates one folder per paper under the target directory — useful for growing a paper's notes over time.
-Path patterns may nest folders freely (`{year}/{firstauthor}/{notetitle}.md`, …); missing directories are created automatically by `file_io`.
+A customization may also pin a **note structure** (sections, frontmatter, footer) that every note must follow:
+
+```
+## Your customizations
+
+Note structure: start every note with `# {papertitle}`, end with `---` and `Written by me.`.
+```
+
+The second path example creates one folder per paper under the target directory — useful for growing a paper's notes over time.
+Path patterns may nest folders freely (`{year}/{firstauthor}/{notetitle}`, …); missing directories are created automatically by `file_io`.
 A customization may also name a different base directory entirely — honor it.
 
-Any placeholder the user writes (`{citekey}`, `{firstauthor}`, `{year}`, `{doi}`, etc.) should be resolved from the same Zotero metadata the frontmatter fields use.
+Any placeholder the user writes (`{citekey}`, `{firstauthor}`, `{year}`, `{doi}`, etc.) should be resolved from the same Zotero metadata the note content uses.
 
 ### Key rules
 
 - **Never** output the full note text in chat. Always use `note_write` or `file_io`.
-- Use the note template above — frontmatter is locked to the 7 fields shown; do not add or remove fields.
-- Use `[@citekey]` Pandoc syntax inline **only when `citekey` is non-empty**. When `citekey` is missing/empty, reference in prose (`First-Author et al. (Year)`) and rely on the full citation in `## References`. **Never emit `[@]`.** Adapt citation syntax to the target format (e.g., `[cite:@citekey]` for Org-mode) when citekey exists.
-- **Every note ends with the footer** `---\n\nWritten by LLM-for-Zotero.` — no exceptions, no omissions, regardless of destination or format.
+- Use `[@citekey]` Pandoc syntax inline **only when `citekey` is non-empty**. When `citekey` is missing/empty, reference in prose (`First-Author et al. (Year)`). **Never emit `[@]`.** Adapt citation syntax to the target format (e.g., `[cite:@citekey]` for Org-mode) when citekey exists.
 - Use the native path separator provided in the runtime platform section. Never mix separators.
-- If the user has customized this skill in any way — editing the managed block, replacing it, or **adding sections after the MANAGED-END marker** (e.g. `## Your customizations`) — their customization is authoritative.
-  Follow it absolutely and let it override any conflicting default above: filename pattern, folder layout, destination, template structure, citation style, anything.
+- If the user has customized this skill in any way — editing the managed block, replacing it, or **adding sections after the MANAGED-END marker** (e.g., `## Your customizations`) — their customization is authoritative.
+  Follow it absolutely and let it override any conflicting default above: filename pattern, folder layout, destination, note structure, citation style, anything.
 
 ### Budget
 
