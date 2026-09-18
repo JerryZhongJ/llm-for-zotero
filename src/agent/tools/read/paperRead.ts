@@ -1,7 +1,6 @@
 import type {
   AgentToolContext,
   AgentToolDefinition,
-  AgentToolArtifact,
   AgentToolResult,
 } from "../../types";
 import type { QuoteCitation } from "../../../shared/types";
@@ -10,16 +9,11 @@ import type { PdfPageService } from "../../services/pdfPageService";
 import { parsePageSelectionValue } from "../../services/pdfPageService";
 import type { RetrievalService } from "../../services/retrievalService";
 import type { ZoteroGateway } from "../../services/zoteroGateway";
-import { joinLocalPath } from "../../../utils/localPath";
 import {
   formatPaperCitationLabel,
   formatPaperSourceLabel,
 } from "../../../modules/contextPanel/paperAttribution";
-import { stripMineruSourceImageEmbedsFromMarkdown } from "../../../modules/contextPanel/mineruCache";
-import {
-  buildQuoteCitation,
-  mergeQuoteCitations,
-} from "../../../modules/contextPanel/quoteCitations";
+import { mergeQuoteCitations } from "../../../modules/contextPanel/quoteCitations";
 import {
   fail,
   normalizePositiveInt,
@@ -29,7 +23,6 @@ import {
 } from "../shared";
 import {
   buildCaptureFollowupMessage,
-  inferPdfMode,
   normalizeExplicitTargetSyntax,
   describeNoDefaultPaperTarget,
   resolveDefaultTargets,
@@ -39,77 +32,45 @@ import { createViewPdfPagesTool } from "./viewPdfPages";
 import {
   readDocumentsExhaustively,
   type ExhaustiveBatchAnalyzer,
-  type FullReadCoverageReceipt,
-  type FullReadPaperResult,
 } from "../../../shared/exhaustiveDocumentReader";
 import { resolveFullReadPaperTargets } from "../../../shared/fullReadTargetResolver";
 import { getTurnPapersWithRoles } from "../../context/requestTurnPaperScope";
 import { createCodexAppServerExhaustiveReaderSession } from "../../../codexAppServer/exhaustiveReader";
 import { createZoteroMetadataResolver } from "../../../services/zoteroMetadata/resolver";
-import { projectPaperMetadata } from "../../../services/zoteroMetadata/projections";
 import type {
-  ProjectedPaperMetadata,
-  ZoteroMetadataResolver,
-} from "../../../services/zoteroMetadata/types";
+  PaperReadFigureExtractionService,
+  PaperReadFullResult,
+  PaperReadInput,
+  PaperReadMode,
+} from "./paperReadTypes";
 
-type PaperReadMode =
-  | "overview"
-  | "targeted"
-  | "full"
-  | "figures"
-  | "visual"
-  | "capture";
-
-type PaperReadInput = {
-  mode: PaperReadMode;
-  target?: PdfTarget;
-  targets?: PdfTarget[];
-  query?: string;
-  queryVariants?: string[];
-  sections?: string[];
-  pages?: number[];
-  neighborPages?: number;
-  maxChars?: number;
-  topK?: number;
-  readFullReason?: string;
-  visualInput?: unknown;
-};
-
-export type PaperReadFigureExtractionResult = {
-  mode: "figures";
-  status: "ok" | "mineru_required" | "no_figures" | "error";
-  query?: string;
-  guidance?: string;
-  expectedFigures?: Array<Record<string, unknown>>;
-  missingFigures?: Array<Record<string, unknown>>;
-  figures?: Array<Record<string, unknown>>;
-  artifacts?: AgentToolArtifact[];
-  warnings?: string[];
-};
-
-export type PaperReadFullResult = {
-  mode: "full";
-  status: "complete" | "partial" | "unreadable";
-  papers: FullReadPaperResult[];
-  coverageReceipt: FullReadCoverageReceipt;
-  synthesisContext: string;
-  warnings: string[];
-};
-
-export type PaperReadFigureExtractionService = {
-  extractFigures: (params: {
-    input: PaperReadInput;
-    context: AgentToolContext;
-    paperContexts: NonNullable<PdfTarget["paperContext"]>[];
-  }) => Promise<PaperReadFigureExtractionResult>;
-};
+export type {
+  PaperReadFigureExtractionResult,
+  PaperReadFigureExtractionService,
+  PaperReadFullResult,
+} from "./paperReadTypes";
+export { resolveMetadataOverviewTitleForTests } from "./paperReadOverview";
+import {
+  buildMetadataOverview,
+  tryReadMineruOverview,
+} from "./paperReadOverview";
+import {
+  buildOverviewQuoteCitationPack,
+  buildTargetedPaperGroups,
+  combineWarnings,
+  countGroupedPassages,
+  dedupePaperContexts,
+  extractWarningText,
+  formatSourcePhrase,
+  getUniqueSourceLabels,
+  hydrateFigureTargetsWithMineruMetadata,
+  normalizeString,
+  normalizeStringArray,
+} from "./paperReadShared";
 
 const MAX_OVERVIEW_TARGETS = 5;
 const MAX_TARGETED_TARGETS = 10;
 const MAX_FULL_TARGETS = Number.MAX_SAFE_INTEGER;
-const MAX_OVERVIEW_QUOTES_PER_RESULT = 3;
-const MIN_OVERVIEW_QUOTE_CHARS = 40;
-const MAX_OVERVIEW_QUOTE_CHARS = 360;
 
 function normalizeMode(value: unknown): PaperReadMode {
   return value === "targeted" ||
@@ -122,32 +83,8 @@ function normalizeMode(value: unknown): PaperReadMode {
     : "overview";
 }
 
-function normalizeString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function normalizeStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const entries = value
-    .map((entry) => normalizeString(entry))
-    .filter((entry): entry is string => Boolean(entry));
-  return entries.length ? Array.from(new Set(entries)) : undefined;
-}
-
 function normalizePages(value: unknown): number[] | undefined {
   return parsePageSelectionValue(value)?.pageIndexes;
-}
-
-function dedupePaperContexts(
-  paperContexts: NonNullable<PdfTarget["paperContext"]>[],
-): NonNullable<PdfTarget["paperContext"]>[] {
-  const seen = new Set<string>();
-  return paperContexts.filter((paperContext) => {
-    const key = `${paperContext.libraryID || 0}:${paperContext.itemId}:${paperContext.contextItemId}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function resolveFullReadTargets(params: {
@@ -189,88 +126,6 @@ function resolveFullReadTargets(params: {
     selectedPapers: selected,
     activePaper,
   }).papers;
-}
-
-function readTextFile(filePath: string): Promise<string> {
-  const IOUtils = (globalThis as any).IOUtils;
-  if (IOUtils?.read) {
-    return IOUtils.read(filePath).then((data: Uint8Array | ArrayBuffer) => {
-      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-      return new TextDecoder().decode(bytes);
-    });
-  }
-  const OS = (globalThis as any).OS;
-  if (OS?.File?.read) {
-    return OS.File.read(filePath).then((data: Uint8Array | ArrayBuffer) => {
-      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-      return new TextDecoder().decode(bytes);
-    });
-  }
-  throw new Error("No file reader is available for MinerU markdown");
-}
-
-function selectMineruOverview(
-  fullMd: string,
-  maxChars: number,
-): {
-  text: string;
-  sections: string[];
-} {
-  const clean = fullMd.trim();
-  const sections: string[] = ["frontmatter"];
-  const intro = clean.slice(
-    0,
-    Math.min(clean.length, Math.floor(maxChars * 0.6)),
-  );
-  const headingPattern =
-    /^#{1,6}\s+.*\b(discussion|conclusion|conclusions|summary|general discussion)\b.*$/gim;
-  const matches = Array.from(clean.matchAll(headingPattern));
-  const tailStart = matches.length
-    ? Math.max(0, matches[matches.length - 1].index || 0)
-    : Math.max(0, clean.length - Math.floor(maxChars * 0.4));
-  const tail = clean.slice(tailStart, tailStart + Math.floor(maxChars * 0.5));
-  if (tailStart > 0) sections.push("discussion_or_conclusion");
-  const combined =
-    tail && !intro.includes(tail.slice(0, 200))
-      ? `${intro}\n\n[Later overview section]\n${tail}`
-      : intro;
-  return {
-    text: combined.slice(0, maxChars).trim(),
-    sections,
-  };
-}
-
-async function tryReadMineruOverview(
-  paperContext: NonNullable<PdfTarget["paperContext"]>,
-  maxChars: number,
-): Promise<unknown | null> {
-  const cacheDir = normalizeString(paperContext.mineruCacheDir);
-  if (!cacheDir) return null;
-  try {
-    const filePath = joinLocalPath(cacheDir, "full.md");
-    const fullMd = stripMineruSourceImageEmbedsFromMarkdown(
-      await readTextFile(filePath),
-    );
-    const selected = selectMineruOverview(fullMd, maxChars);
-    return {
-      backend: "mineru",
-      filePath,
-      text: selected.text,
-      sections: selected.sections,
-      citationLabel: formatPaperCitationLabel(paperContext),
-      sourceLabel: formatPaperSourceLabel(paperContext),
-      paperContext,
-    };
-  } catch (error) {
-    return {
-      backend: "mineru",
-      ok: false,
-      warning: `Could not read MinerU full.md: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-      paperContext,
-    };
-  }
 }
 
 function targetForPageTool(input: PaperReadInput): Record<string, unknown> {
@@ -398,416 +253,6 @@ async function buildMineruVisualRedirect(params: {
       `paper_read({ mode:'figures', query:'${query.replace(/'/g, "\\'")}' })`,
     ],
   };
-}
-
-function normalizeMetadataValue(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-}
-
-function resolveMetadataOverviewTitle(
-  metadata: ProjectedPaperMetadata,
-): string {
-  const bibliographicTitle = normalizeMetadataValue(metadata.title);
-  if (bibliographicTitle) return bibliographicTitle;
-  const contentSource = metadata.contentSource;
-  const standaloneContentTitle =
-    contentSource?.itemId === metadata.itemId &&
-    contentSource.parentItemId === undefined
-      ? normalizeMetadataValue(contentSource.title)
-      : "";
-  return standaloneContentTitle || `Paper ${metadata.itemId}`;
-}
-
-export const resolveMetadataOverviewTitleForTests =
-  resolveMetadataOverviewTitle;
-
-function buildMetadataOverview(params: {
-  paperContext: NonNullable<PdfTarget["paperContext"]>;
-  metadataResolver: ZoteroMetadataResolver;
-  warning?: string;
-}): unknown | null {
-  const metadata = projectPaperMetadata(
-    params.metadataResolver.resolvePaperMetadata(params.paperContext),
-    params.paperContext,
-  );
-  const title = resolveMetadataOverviewTitle(metadata);
-  const authors = normalizeMetadataValue(metadata.creatorDisplay);
-  const abstract = normalizeMetadataValue(metadata.abstract);
-  const lines = [
-    `Title: ${title}`,
-    authors ? `Authors: ${authors}` : "",
-    metadata.publicationDate ? `Date: ${metadata.publicationDate}` : "",
-    metadata.year ? `Year: ${metadata.year}` : "",
-    metadata.containerTitle
-      ? `Container: ${metadata.containerTitle} (Zotero field: ${metadata.containerSourceField})`
-      : "",
-    metadata.eventTitle
-      ? `Event: ${metadata.eventTitle} (Zotero field: ${metadata.eventSourceField})`
-      : "",
-    metadata.doi ? `DOI: ${metadata.doi}` : "",
-    abstract ? `Abstract: ${abstract}` : "",
-  ].filter(Boolean);
-  if (!lines.length) return null;
-  const warningText = params.warning || "";
-  const contentStatus = /no\s+pdf\s+attachment/i.test(warningText)
-    ? "no_pdf_attachment"
-    : "no_extractable_pdf_text";
-  return {
-    backend: "zotero_metadata",
-    sourceKind: "zotero_metadata",
-    contentStatus,
-    warning:
-      params.warning ||
-      "No extractable PDF text was available; using Zotero metadata and abstract.",
-    text: lines.join("\n"),
-    citationLabel: formatPaperCitationLabel(params.paperContext),
-    sourceLabel: formatPaperSourceLabel(params.paperContext),
-    paperContext: params.paperContext,
-  };
-}
-
-function paperContextKey(
-  paperContext: NonNullable<PdfTarget["paperContext"]>,
-): string {
-  return `${paperContext.itemId}:${paperContext.contextItemId}`;
-}
-
-function buildTargetedPaperGroups(
-  targets: NonNullable<PdfTarget["paperContext"]>[],
-  results: Array<Record<string, unknown>>,
-  quoteCitationCollector?: QuoteCitation[],
-): Array<Record<string, unknown>> {
-  const groups = new Map<string, Array<Record<string, unknown>>>();
-  for (const result of results) {
-    const paperContext = validateObject<Record<string, unknown>>(
-      result.paperContext,
-    )
-      ? result.paperContext
-      : undefined;
-    const itemId = normalizePositiveInt(paperContext?.itemId);
-    const contextItemId = normalizePositiveInt(paperContext?.contextItemId);
-    if (!itemId || !contextItemId) continue;
-    const key = `${itemId}:${contextItemId}`;
-    const passage: Record<string, unknown> = {
-      text: normalizeString(result.text) || "",
-      sourceLabel: normalizeString(result.sourceLabel),
-      citationLabel: normalizeString(result.citationLabel),
-    };
-    const chunkIndex = Number(result.chunkIndex);
-    if (Number.isFinite(chunkIndex))
-      passage.chunkIndex = Math.floor(chunkIndex);
-    const score = Number(result.score);
-    if (Number.isFinite(score)) passage.score = score;
-    const sectionLabel = normalizeString(result.sectionLabel);
-    if (sectionLabel) passage.sectionLabel = sectionLabel;
-    const chunkKind = normalizeString(result.chunkKind);
-    if (chunkKind) passage.chunkKind = chunkKind;
-    const pageIndex = Number(result.pageIndex);
-    if (Number.isFinite(pageIndex) && pageIndex >= 0) {
-      passage.pageIndex = Math.floor(pageIndex);
-    }
-    const pageLabel = normalizeString(result.pageLabel);
-    if (pageLabel) passage.pageLabel = pageLabel;
-    for (const field of [
-      "sourceStart",
-      "sourceEnd",
-      "pageStart",
-      "pageEnd",
-    ] as const) {
-      const value = Number(result[field]);
-      if (Number.isFinite(value) && value >= 0) {
-        passage[field] = Math.floor(value);
-      }
-    }
-    const sourceFingerprint = normalizeString(result.sourceFingerprint);
-    if (sourceFingerprint) passage.sourceFingerprint = sourceFingerprint;
-    const quoteCitations = buildQuoteCitationsFromResult(result);
-    quoteCitationCollector?.push(...quoteCitations);
-    if (quoteCitations.length) {
-      if (quoteCitations.length === 1) {
-        passage.quoteCitationId = quoteCitations[0].id;
-      }
-      passage.quoteCitationIds = quoteCitations.map((citation) => citation.id);
-      passage.quoteAnchors = quoteCitations.map(
-        (citation) => `[[quote:${citation.id}]]`,
-      );
-    }
-    const entries = groups.get(key) || [];
-    entries.push(passage);
-    groups.set(key, entries);
-  }
-
-  return targets.map((paperContext) => {
-    const passages = groups.get(paperContextKey(paperContext)) || [];
-    return {
-      paperContext,
-      status: passages.length ? "matched" : "no_matches",
-      sourceKind: "paper_text",
-      citationLabel: formatPaperCitationLabel(paperContext),
-      sourceLabel: formatPaperSourceLabel(paperContext),
-      passages,
-    };
-  });
-}
-
-function buildQuoteCitationFromResult(
-  result: Record<string, unknown>,
-  quoteText?: string,
-): ReturnType<typeof buildQuoteCitation> {
-  const paperContext = validateObject<Record<string, unknown>>(
-    result.paperContext,
-  )
-    ? result.paperContext
-    : undefined;
-  const itemId = Number(paperContext?.itemId);
-  const contextItemId = Number(paperContext?.contextItemId);
-  if (
-    !Number.isFinite(itemId) ||
-    itemId <= 0 ||
-    !Number.isFinite(contextItemId) ||
-    contextItemId <= 0
-  ) {
-    return undefined;
-  }
-  const explicitPageIndex = Number(result.pageIndex);
-  const pageStart = Number(result.pageStart);
-  const pageEnd = Number(result.pageEnd);
-  const pageHintIndex =
-    Number.isFinite(explicitPageIndex) && explicitPageIndex >= 0
-      ? Math.floor(explicitPageIndex)
-      : Number.isFinite(pageStart) &&
-          Number.isFinite(pageEnd) &&
-          pageStart >= 0 &&
-          pageStart === pageEnd
-        ? Math.floor(pageStart)
-        : undefined;
-  const exactQuoteText = normalizeString(quoteText) || "";
-  if (!exactQuoteText) return undefined;
-  return buildQuoteCitation({
-    quoteText: exactQuoteText,
-    sourceMatchText: exactQuoteText,
-    sourceMatchKind: "exact",
-    sourceMatchSource:
-      pageHintIndex === undefined ? "context-text" : "pdf-page-text",
-    citationLabel:
-      normalizeString(result.sourceLabel) ||
-      normalizeString(result.citationLabel),
-    sourceSectionLabel: result.sectionLabel,
-    sourceChunkKind: result.chunkKind,
-    contextItemId,
-    itemId,
-    sourceFingerprint: result.sourceFingerprint,
-    pageHintIndex,
-    pageHintLabel: result.pageLabel,
-    allowShortQuoteText: true,
-  });
-}
-
-function buildQuoteCitationsFromResult(
-  result: Record<string, unknown>,
-): QuoteCitation[] {
-  const resultText = normalizeString(result.text) || "";
-  const candidates = splitOverviewQuoteCandidates(resultText);
-  const quoteTexts = candidates.length ? candidates : [resultText];
-  return quoteTexts
-    .map((quoteText) => buildQuoteCitationFromResult(result, quoteText))
-    .filter((entry): entry is QuoteCitation => Boolean(entry));
-}
-
-function splitOverviewQuoteCandidates(text: string): string[] {
-  const withoutChunkMarkers = text.replace(/^\s*\[chunk\s+\d+\]\s*$/gim, "");
-  const blocks = withoutChunkMarkers
-    .split(/\n{2,}/)
-    .map((block) =>
-      block
-        .split("\n")
-        .map((line) => line.replace(/^#{1,6}\s+/, "").trim())
-        .filter(Boolean)
-        .join(" "),
-    )
-    .map((block) => block.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const block of blocks) {
-    const sentences = block.match(/[^.!?。！？]+[.!?。！？]+(?=\s|$)/g) || [
-      block,
-    ];
-    let candidate = "";
-    for (const sentence of sentences) {
-      const next = `${candidate}${candidate ? " " : ""}${sentence.trim()}`;
-      if (next.length > MAX_OVERVIEW_QUOTE_CHARS) break;
-      candidate = next;
-      if (candidate.length >= MIN_OVERVIEW_QUOTE_CHARS) break;
-    }
-    candidate = candidate || block;
-    if (
-      candidate.length < MIN_OVERVIEW_QUOTE_CHARS ||
-      candidate.length > MAX_OVERVIEW_QUOTE_CHARS
-    ) {
-      continue;
-    }
-    if (/^(?:title|authors?|date|publication|doi|abstract):/i.test(candidate)) {
-      continue;
-    }
-    const key = candidate.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(candidate);
-    if (out.length >= MAX_OVERVIEW_QUOTES_PER_RESULT) break;
-  }
-  return out;
-}
-
-function buildOverviewQuoteCitationPack(
-  results: Array<Record<string, unknown>>,
-): {
-  results: Array<Record<string, unknown>>;
-  quoteCitations: QuoteCitation[];
-} {
-  const quoteCitations: QuoteCitation[] = [];
-  const resultsWithAnchors = results.map((result) => {
-    if (
-      normalizeString(result.backend) === "zotero_metadata" ||
-      normalizeString(result.sourceKind) === "zotero_metadata"
-    ) {
-      return result;
-    }
-    const quoteTexts = splitOverviewQuoteCandidates(
-      normalizeString(result.text) || "",
-    );
-    const resultCitations = quoteTexts
-      .map((quoteText) => buildQuoteCitationFromResult(result, quoteText))
-      .filter((entry): entry is QuoteCitation => Boolean(entry));
-    quoteCitations.push(...resultCitations);
-    return resultCitations.length
-      ? {
-          ...result,
-          quoteCitationIds: resultCitations.map((citation) => citation.id),
-          quoteAnchors: resultCitations.map(
-            (citation) => `[[quote:${citation.id}]]`,
-          ),
-        }
-      : result;
-  });
-  return {
-    results: resultsWithAnchors,
-    quoteCitations: mergeQuoteCitations(quoteCitations),
-  };
-}
-
-function getUniqueSourceLabels(entries: unknown[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of entries) {
-    const record = validateObject<Record<string, unknown>>(entry)
-      ? entry
-      : null;
-    const sourceLabel = normalizeString(record?.sourceLabel);
-    if (!sourceLabel || seen.has(sourceLabel)) continue;
-    seen.add(sourceLabel);
-    out.push(sourceLabel);
-  }
-  return out;
-}
-
-function countGroupedPassages(papers: unknown[]): number {
-  return papers.reduce<number>((count, paper) => {
-    const record = validateObject<Record<string, unknown>>(paper)
-      ? paper
-      : null;
-    const passages = Array.isArray(record?.passages) ? record.passages : [];
-    return count + passages.length;
-  }, 0);
-}
-
-function extractWarningText(value: unknown): string | undefined {
-  if (!validateObject<Record<string, unknown>>(value)) return undefined;
-  return normalizeString(value.warning);
-}
-
-function combineWarnings(
-  ...warnings: Array<string | undefined>
-): string | undefined {
-  const unique = Array.from(
-    new Set(warnings.map((entry) => normalizeString(entry)).filter(Boolean)),
-  );
-  return unique.length ? unique.join("; ") : undefined;
-}
-
-function formatSourcePhrase(
-  sourceLabels: string[],
-  fallbackPaperCount?: number,
-): string | null {
-  if (sourceLabels.length === 1) return sourceLabels[0];
-  if (sourceLabels.length > 1) return `${sourceLabels.length} sources`;
-  if (fallbackPaperCount && fallbackPaperCount > 0) {
-    const paperLabel = fallbackPaperCount === 1 ? "paper" : "papers";
-    return `${fallbackPaperCount} ${paperLabel}`;
-  }
-  return null;
-}
-
-async function hydrateFigureTargetsWithMineruMetadata(
-  targets: NonNullable<PdfTarget["paperContext"]>[],
-  zoteroGateway: ZoteroGateway,
-): Promise<NonNullable<PdfTarget["paperContext"]>[]> {
-  const attachmentInfoLoader = (
-    zoteroGateway as unknown as {
-      getAllChildAttachmentInfos?: (itemId: number) => Promise<
-        Array<{
-          contextItemId?: number;
-          mineruCacheDir?: string;
-        }>
-      >;
-    }
-  ).getAllChildAttachmentInfos;
-  const attachmentInfoByItem = new Map<
-    number,
-    Promise<Array<{ contextItemId?: number; mineruCacheDir?: string }>>
-  >();
-  const hydrated: NonNullable<PdfTarget["paperContext"]>[] = [];
-  for (const target of targets) {
-    if (normalizeString(target.mineruCacheDir)) {
-      hydrated.push(target);
-      continue;
-    }
-    if (!attachmentInfoLoader) {
-      hydrated.push(target);
-      continue;
-    }
-    const itemId = Math.floor(Number(target.itemId || 0));
-    const contextItemId = Math.floor(Number(target.contextItemId || 0));
-    if (!itemId || !contextItemId) {
-      hydrated.push(target);
-      continue;
-    }
-    let infoPromise = attachmentInfoByItem.get(itemId);
-    if (!infoPromise) {
-      infoPromise = attachmentInfoLoader.call(zoteroGateway, itemId);
-      attachmentInfoByItem.set(itemId, infoPromise);
-    }
-    let infos: Array<{ contextItemId?: number; mineruCacheDir?: string }> = [];
-    try {
-      infos = await infoPromise;
-    } catch (_error) {
-      void _error;
-    }
-    const matchingAttachment = infos.find(
-      (entry) => Math.floor(Number(entry.contextItemId || 0)) === contextItemId,
-    );
-    const mineruCacheDir = normalizeString(matchingAttachment?.mineruCacheDir);
-    if (!mineruCacheDir) {
-      hydrated.push(target);
-      continue;
-    }
-    hydrated.push({
-      ...target,
-      contentSourceMode: target.contentSourceMode || "mineru",
-      mineruCacheDir,
-    });
-  }
-  return hydrated;
 }
 
 async function readExplicitPageTargets(params: {

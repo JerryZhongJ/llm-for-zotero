@@ -19,7 +19,7 @@ import {
   type PdfFigureCropCache,
 } from "../../modules/contextPanel/pdfFigureCropCache";
 import { joinLocalPath } from "../../utils/localPath";
-import type { PaperReadFigureExtractionResult } from "../tools/read/paperRead";
+import type { PaperReadFigureExtractionResult } from "../tools/read/paperReadTypes";
 import type { PdfTarget } from "../tools/read/pdfToolUtils";
 import type { AgentToolArtifact, AgentToolContext } from "../types";
 import type { PdfPageService } from "./pdfPageService";
