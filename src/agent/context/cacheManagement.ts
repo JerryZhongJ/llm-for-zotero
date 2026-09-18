@@ -61,6 +61,7 @@ type ZoteroDb = {
 
 const READ_TOOL_NAMES = new Set([
   "paper_read",
+  "paper_query",
   "read_paper",
   "search_paper",
   "library_retrieve",
@@ -367,6 +368,10 @@ function buildReadDetail(toolName: string, args: unknown): string | undefined {
   if (toolName === "search_paper") {
     const question = normalizeText(record.question, 120);
     return question ? `question="${question}"` : undefined;
+  }
+  if (toolName === "paper_query") {
+    const query = normalizeText(record.query, 120);
+    return query ? `query="${query}"` : undefined;
   }
   if (toolName === "read_paper" && Array.isArray(record.chunkIndexes)) {
     const chunks = record.chunkIndexes
@@ -721,7 +726,7 @@ function buildEvidenceEntries(
     const entry = buildFileIoEvidenceEntry(activity);
     return entry ? [entry] : [];
   }
-  if (activity.toolName === "paper_read") {
+  if (activity.toolName === "paper_read" || activity.toolName === "paper_query") {
     const entries = buildPaperReadEvidenceEntries(activity);
     if (entries.length) return entries;
   }

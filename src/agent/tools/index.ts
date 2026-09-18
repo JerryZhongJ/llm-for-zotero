@@ -9,6 +9,7 @@ import { createLibraryRetrieveTool } from "./read/libraryRetrieve";
 import { createPaperReadTool } from "./read/paperRead";
 import { createReadPaperTool } from "./read/readPaper";
 import { createSearchPaperTool } from "./read/searchPaper";
+import { createPaperQueryTool } from "./read/paperQuery";
 import { createViewPdfPagesTool } from "./read/viewPdfPages";
 import { createReadAttachmentTool } from "./read/readAttachment";
 import { clearPdfToolCaches } from "./read/pdfToolUtils";
@@ -845,6 +846,13 @@ export function createBuiltInToolRegistry(
       deps.pdfPageService,
       deps.zoteroGateway,
       figureExtractionService,
+    ),
+  );
+  registry.register(
+    createPaperQueryTool(
+      deps.pdfService,
+      deps.retrievalService,
+      deps.zoteroGateway,
     ),
   );
   registry.register(

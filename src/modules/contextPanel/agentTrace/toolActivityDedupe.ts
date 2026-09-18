@@ -20,6 +20,7 @@ const ZOTERO_MCP_TRACE_TOOL_NAMES = new Set([
   "library_read",
   "library_retrieve",
   "paper_read",
+  "paper_query",
   "literature_search",
   "library_update",
   "collection_update",

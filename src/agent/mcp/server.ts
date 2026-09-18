@@ -74,6 +74,7 @@ export const ZOTERO_MCP_SAFE_READ_TOOL_NAMES = [
   "library_read",
   "library_retrieve",
   "paper_read",
+  "paper_query",
   "literature_search",
 ] as const;
 export const ZOTERO_MCP_WRITE_TOOL_NAMES = [
@@ -145,9 +146,11 @@ const MCP_READ_DEDUPE_TOOL_NAMES = new Set([
   "library_read",
   "library_retrieve",
   "paper_read",
+  "paper_query",
 ]);
 const RAW_PDF_RETRIEVAL_TOOL_NAMES = new Set([
   "paper_read",
+  "paper_query",
   "read_paper",
   "search_paper",
   "view_pdf_pages",

@@ -44,6 +44,7 @@ export type LibraryRetrieveShallowSignal = {
 const RETRIEVE_FAMILY_TOOLS = new Set([
   "library_retrieve",
   "paper_read",
+  "paper_query",
   "library_search",
   "library_read",
   "literature_search",

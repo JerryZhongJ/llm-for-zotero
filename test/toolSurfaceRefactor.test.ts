@@ -230,6 +230,7 @@ describe("semantic tool surface", function () {
       "literature_search",
       "note_write",
       "paper_read",
+      "paper_query",
       "revert_changes",
       "run_command",
       "saved_search_update",

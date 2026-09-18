@@ -1109,7 +1109,7 @@ function buildLibraryRetrieveCoverageEntries(
 export function buildAgentCoverageEntriesForActivity(
   activity: AgentCacheEvidenceActivity,
 ): AgentCoverageEntry[] {
-  if (activity.toolName === "paper_read") {
+  if (activity.toolName === "paper_read" || activity.toolName === "paper_query") {
     return buildPaperReadCoverageEntries(activity);
   }
   if (

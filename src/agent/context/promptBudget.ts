@@ -229,6 +229,7 @@ function isEvidenceTool(toolName: string): boolean {
   return (
     normalized === "library_retrieve" ||
     normalized === "paper_read" ||
+    normalized === "paper_query" ||
     normalized === "read_paper" ||
     normalized === "search_paper" ||
     normalized === "read_attachment" ||

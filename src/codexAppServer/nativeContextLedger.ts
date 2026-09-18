@@ -9,6 +9,7 @@ const MAX_LEDGER_ENTRIES = 12;
 const MAX_RENDERED_LEDGER_ENTRIES = 8;
 const READ_TOOL_NAMES = new Set([
   "paper_read",
+  "paper_query",
   "read_paper",
   "search_paper",
   "view_pdf_pages",
@@ -195,6 +196,10 @@ function buildReadDetail(toolName: string, args: unknown): string | undefined {
       pieces.push(`pages=${record.pages.join(", ")}`);
     }
     return pieces.join(", ");
+  }
+  if (toolName === "paper_query") {
+    const query = normalizeText(record.query, 120);
+    return query ? `query="${query}"` : undefined;
   }
   if (toolName === "search_paper") {
     const question = normalizeText(record.question, 120);
