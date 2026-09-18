@@ -1,8 +1,4 @@
-import type {
-  AgentToolContext,
-  AgentToolDefinition,
-  AgentToolResult,
-} from "../../types";
+import type { AgentToolContext, AgentToolDefinition } from "../../types";
 import type { QuoteCitation } from "../../../shared/types";
 import type { PdfService } from "../../services/pdfService";
 import type { PdfPageService } from "../../services/pdfPageService";
@@ -13,14 +9,8 @@ import {
   formatPaperSourceLabel,
 } from "../../../modules/contextPanel/paperAttribution";
 import { mergeQuoteCitations } from "../../../modules/contextPanel/quoteCitations";
+import { fail, ok, PAPER_CONTEXT_REF_SCHEMA, validateObject } from "../shared";
 import {
-  fail,
-  ok,
-  PAPER_CONTEXT_REF_SCHEMA,
-  validateObject,
-} from "../shared";
-import {
-  buildCaptureFollowupMessage,
   normalizeExplicitTargetSyntax,
   describeNoDefaultPaperTarget,
   resolveDefaultTargets,
@@ -601,16 +591,6 @@ export function createPaperReadTool(
         zoteroGateway,
       });
     },
-    async buildFollowupMessage(result: AgentToolResult) {
-      const content =
-        result.content && typeof result.content === "object"
-          ? (result.content as { capturedPageIndex?: unknown })
-          : null;
-      if (content?.capturedPageIndex !== undefined) {
-        return buildCaptureFollowupMessage(result);
-      }
-      return null;
-    },
   };
 }
 
@@ -671,7 +651,8 @@ async function executeFullRead(params: {
         question: context.request.userText || "Read the full text.",
         batchTokenBudget: Math.max(1024, Math.floor(inputTokenCap * 0.5)),
         finalTokenBudget: Math.max(1024, Math.floor(inputTokenCap * 0.45)),
-        analyzeBatch: params.fullReadAnalyzer || nativeReaderSession?.analyzeBatch,
+        analyzeBatch:
+          params.fullReadAnalyzer || nativeReaderSession?.analyzeBatch,
         signal: context.signal,
         llm: {
           model: context.request.model,

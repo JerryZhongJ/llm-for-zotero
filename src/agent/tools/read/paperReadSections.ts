@@ -34,9 +34,10 @@ type UnmatchedSectionPaper = {
   availableSections: string[];
 };
 
-function collectSectionCandidates(
-  chunkMeta: PdfChunkMeta[],
-): { labels: string[]; kindAliases: string[] } {
+function collectSectionCandidates(chunkMeta: PdfChunkMeta[]): {
+  labels: string[];
+  kindAliases: string[];
+} {
   const labels: string[] = [];
   const seenLabels = new Set<string>();
   const kinds: string[] = [];
@@ -142,7 +143,11 @@ export async function executeSectionsRead(params: {
     }
 
     if (matchedLabels.size || matchedKinds.size) {
-      const selected = selectSectionChunks(chunkMeta, matchedLabels, matchedKinds);
+      const selected = selectSectionChunks(
+        chunkMeta,
+        matchedLabels,
+        matchedKinds,
+      );
       results.push(...toResultRows(paperContext, selected, chunkTexts));
     }
     if (unmatchedForPaper.length) {
@@ -173,11 +178,7 @@ export async function executeSectionsRead(params: {
     mode: "sections",
     status: unmatched.length ? "partial" : "matched",
     results,
-    papers: buildTargetedPaperGroups(
-      params.targets,
-      results,
-      quoteCitations,
-    ),
+    papers: buildTargetedPaperGroups(params.targets, results, quoteCitations),
     ...(unmatched.length ? { unmatched } : {}),
     quoteCitations: mergeQuoteCitations(quoteCitations),
   };

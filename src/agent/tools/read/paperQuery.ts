@@ -1,7 +1,4 @@
-import type {
-  AgentToolContext,
-  AgentToolDefinition,
-} from "../../types";
+import type { AgentToolContext, AgentToolDefinition } from "../../types";
 import type { QuoteCitation } from "../../../shared/types";
 import type { PdfService } from "../../services/pdfService";
 import type { RetrievalService } from "../../services/retrievalService";
@@ -52,7 +49,7 @@ export function createPaperQueryTool(
           },
           target: {
             description:
-          "Paper(s) to search — one selector or an array. Omit to use the current turn's paper scope.",
+              "Paper(s) to search — one selector or an array. Omit to use the current turn's paper scope.",
             anyOf: [
               {
                 type: "object",

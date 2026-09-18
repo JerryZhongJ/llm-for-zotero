@@ -29,7 +29,10 @@ export function levenshteinDistance(a: string, b: string): number {
   return previous[b.length];
 }
 
-export function scoreTokenMatch(queryToken: string, targetToken: string): number {
+export function scoreTokenMatch(
+  queryToken: string,
+  targetToken: string,
+): number {
   if (!queryToken || !targetToken) return 0;
   if (queryToken === targetToken) return 1;
   if (
