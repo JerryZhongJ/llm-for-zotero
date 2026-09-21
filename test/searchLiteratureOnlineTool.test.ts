@@ -1,4 +1,5 @@
 import { assert } from "chai";
+import { resetS2ThrottleForTests } from "../src/agent/services/literatureSearchService";
 import { createSearchLiteratureOnlineTool } from "../src/agent/tools/read/searchLiteratureOnline";
 import type { AgentToolContext } from "../src/agent/types";
 import { resolvedAgentRequest } from "./helpers/resolvedAgentRequest";
@@ -23,6 +24,7 @@ describe("search_literature_online tool", function () {
   afterEach(function () {
     (globalThis as typeof globalThis & { fetch?: typeof fetch }).fetch =
       originalFetch;
+    resetS2ThrottleForTests();
   });
 
   it("supports metadata lookups through the unified online tool", async function () {

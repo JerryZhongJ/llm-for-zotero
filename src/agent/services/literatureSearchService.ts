@@ -1,5 +1,6 @@
 import { config } from "../../../package.json";
 import type { PaperContextRef } from "../../shared/types";
+import { createRequestThrottle } from "../../utils/requestThrottle";
 import type { AgentToolContext } from "../types";
 import type { EditableArticleMetadataPatch } from "./zoteroGateway";
 import type { ZoteroGateway } from "./zoteroGateway";
@@ -79,6 +80,8 @@ type FetchJsonResponse = {
   ok: boolean;
   status: number;
   json: () => Promise<unknown>;
+  /** Optional so hand-rolled test fetch stubs stay valid without it. */
+  headers?: { get(name: string): string | null };
 };
 
 type FetchTextResponse = {
@@ -128,6 +131,33 @@ function normalizeString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * Non-2xx fetch outcome. The message keeps the `HTTP <status>` format that
+ * existing message-regex checks (e.g. isNotFoundError) rely on; `status` and
+ * `retryAfterMs` let callers react to rate limiting instead of re-fetching
+ * blindly.
+ */
+export class HttpError extends Error {
+  readonly status: number;
+  readonly retryAfterMs?: number;
+
+  constructor(status: number, retryAfterMs?: number) {
+    super(`HTTP ${status}`);
+    this.name = "HttpError";
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** Parse `Retry-After` as delay in ms; seconds form only (S2 sends seconds). */
+function parseRetryAfterMs(headers?: { get(name: string): string | null }) {
+  const raw = headers?.get("retry-after");
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds < 0) return undefined;
+  return Math.ceil(seconds * 1000);
+}
+
 function stripHtmlTags(value: string): string {
   return value
     .replace(/<[^>]+>/g, " ")
@@ -149,7 +179,7 @@ async function fetchJson(
     },
   });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw new HttpError(response.status, parseRetryAfterMs(response.headers));
   }
   return response.json();
 }
@@ -223,9 +253,70 @@ export function setSemanticScholarApiKey(value: string): void {
   );
 }
 
+/**
+ * S2 throttles at ~1 req/s for both the shared public pool and free-tier
+ * keys, and the agent can fan out several searches (e.g. discover-related
+ * fires three graph calls at once). Serialize every S2 request through one
+ * queue paced above 1 req/s, and back off on 429 instead of failing fast.
+ */
+const S2_MIN_REQUEST_INTERVAL_MS = 1100;
+const S2_RETRY_DELAYS_MS = [1000, 3000];
+/** Retry-After can ask for very long waits; give up beyond this. */
+const S2_MAX_BACKOFF_MS = 30_000;
+
+const s2Throttle = createRequestThrottle(S2_MIN_REQUEST_INTERVAL_MS);
+let s2RetryDelaysForTests: readonly number[] | null = null;
+
+/** Test seam: drop pacing and pending backoff state so tests don't wait. */
+export function resetS2ThrottleForTests(): void {
+  s2Throttle.setInterval(0);
+  s2Throttle.reset();
+  s2RetryDelaysForTests = null;
+}
+
+/** Test seam: observe real pacing with a small interval before resetting. */
+export function setS2ThrottleIntervalForTests(ms: number): void {
+  s2Throttle.setInterval(ms);
+}
+
+/** Test seam: inject backoff delays (null restores production values). */
+export function setS2RetryDelaysForTests(delays: readonly number[] | null) {
+  s2RetryDelaysForTests = delays;
+}
+
+function s2BackoffDelayMs(attempt: number, retryAfterMs?: number): number {
+  if (retryAfterMs !== undefined) {
+    return Math.min(retryAfterMs, S2_MAX_BACKOFF_MS);
+  }
+  const delays = s2RetryDelaysForTests ?? S2_RETRY_DELAYS_MS;
+  return delays[Math.min(attempt, delays.length - 1)] ?? S2_RETRY_DELAYS_MS[0];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function s2FetchJson(url: string): Promise<unknown> {
   const apiKey = getSemanticScholarApiKey();
-  return fetchJson(url, apiKey ? { "x-api-key": apiKey } : undefined);
+  const headers = apiKey ? { "x-api-key": apiKey } : undefined;
+  const maxAttempts = (s2RetryDelaysForTests ?? S2_RETRY_DELAYS_MS).length + 1;
+  return s2Throttle.run(async () => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await fetchJson(url, headers);
+      } catch (error) {
+        if (
+          error instanceof HttpError &&
+          error.status === 429 &&
+          attempt < maxAttempts
+        ) {
+          await sleep(s2BackoffDelayMs(attempt - 1, error.retryAfterMs));
+          continue;
+        }
+        throw error;
+      }
+    }
+  });
 }
 
 /** fetchJson throws `HTTP <status>`; S2 signals unknown identifiers with 404. */
@@ -1353,10 +1444,14 @@ const semanticScholarSource: SearchSourceDefinition = {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       Zotero.debug(`[llm-for-zotero] Semantic Scholar search failed: ${msg}`);
+      const rateLimited =
+        error instanceof HttpError && error.status === 429;
       return {
         results: [],
         source: "Semantic Scholar",
-        message: `Semantic Scholar search failed: ${msg}`,
+        message: rateLimited
+          ? 'Semantic Scholar is rate-limiting requests (HTTP 429) even after backing off. Wait a moment before retrying, or repeat this search with source "openalex".'
+          : `Semantic Scholar search failed: ${msg}`,
       };
     }
   },
