@@ -103,6 +103,15 @@ import {
 } from "./runtimeSystemControls";
 import { buildDefaultClaudeGlobalConversationKey } from "../../claudeCode/constants";
 import {
+  isClaudeSystem,
+  isCodexSystem,
+  isRuntimeSystem,
+} from "./conversationBackend/systemPredicates";
+import {
+  createGlobalPortalItemForSystem,
+  resolveInitialGlobalConversationKey,
+} from "./conversationBackend/initialConversationIdentity";
+import {
   resolveRememberedClaudeConversationKey,
   invalidateAllClaudeHotRuntimes,
   refreshClaudeSlashCommands,
@@ -527,10 +536,11 @@ export function openStandaloneChat(options?: {
     resolvedSourceState.item || sourceItem,
   );
   const isClaudeConversationSystem = () =>
-    currentConversationSystem === "claude_code";
-  const isCodexConversationSystem = () => currentConversationSystem === "codex";
+    isClaudeSystem(currentConversationSystem);
+  const isCodexConversationSystem = () =>
+    isCodexSystem(currentConversationSystem);
   const isRuntimeConversationSystem = () =>
-    isClaudeConversationSystem() || isCodexConversationSystem();
+    isRuntimeSystem(currentConversationSystem);
   const initialLibraryID =
     Number(
       resolvedSourceState.item?.libraryID ||
@@ -557,9 +567,6 @@ export function openStandaloneChat(options?: {
           : initialBasePaperItem
             ? "paper"
             : "open";
-  const lockedKey = isRuntimeConversationSystem()
-    ? null
-    : getLockedGlobalConversationKey(libraryID);
   const sourceClaudeGlobalKey =
     resolvedSourceState.item &&
     (resolvedSourceState.item as any).__llmClaudeGlobalPortalItem === true
@@ -579,36 +586,32 @@ export function openStandaloneChat(options?: {
     : isGlobalPortalItem(sourceItem)
       ? Number(sourceItem?.id || 0)
       : 0;
-  const rememberedUpstreamGlobalKey =
-    activeGlobalConversationByLibrary.get(libraryID) ??
-    getLastUsedUpstreamGlobalConversationKey(libraryID);
-  const conversationKey = isClaudeConversationSystem()
-    ? sourceClaudeGlobalKey > 0
-      ? sourceClaudeGlobalKey
-      : resolveRememberedClaudeConversationKey({
-          libraryID,
-          kind: "global",
-        }) || buildDefaultClaudeGlobalConversationKey(libraryID)
-    : isCodexConversationSystem()
-      ? sourceCodexGlobalKey > 0
-        ? sourceCodexGlobalKey
-        : activeCodexGlobalConversationByLibrary.get(
-            buildCodexLibraryStateKey(libraryID),
-          ) ||
-          getLastUsedCodexGlobalConversationKey(libraryID) ||
-          buildDefaultCodexGlobalConversationKey(libraryID)
-      : sourceUpstreamGlobalKey > 0
-        ? sourceUpstreamGlobalKey
-        : (lockedKey ??
-          (rememberedUpstreamGlobalKey === GLOBAL_CONVERSATION_KEY_BASE
-            ? buildDefaultUpstreamGlobalConversationKey(libraryID)
-            : rememberedUpstreamGlobalKey) ??
-          buildDefaultUpstreamGlobalConversationKey(libraryID));
-  const globalPortalItem = isClaudeConversationSystem()
-    ? createClaudeGlobalPortalItem(libraryID, conversationKey)
-    : isCodexConversationSystem()
-      ? createCodexGlobalPortalItem(libraryID, conversationKey)
-      : createGlobalPortalItem(libraryID, conversationKey);
+  const upstreamIdentityDeps = {
+    getLockedGlobalConversationKey,
+    activeGlobalConversationByLibrary,
+    getLastUsedUpstreamGlobalConversationKey,
+    buildDefaultUpstreamGlobalConversationKey,
+    globalConversationKeyBase: GLOBAL_CONVERSATION_KEY_BASE,
+    createGlobalPortalItem,
+  };
+  const conversationKey = resolveInitialGlobalConversationKey(
+    {
+      system: currentConversationSystem,
+      libraryID,
+      sourceClaudeGlobalKey,
+      sourceCodexGlobalKey,
+      sourceUpstreamGlobalKey,
+      claude: { resolveRememberedClaudeConversationKey },
+      codex: { getLastUsedCodexGlobalConversationKey },
+    },
+    upstreamIdentityDeps,
+  );
+  const globalPortalItem = createGlobalPortalItemForSystem(
+    currentConversationSystem,
+    libraryID,
+    conversationKey,
+    upstreamIdentityDeps,
+  );
   const initialPaperItem =
     initialMode === "paper"
       ? resolvedSourceState.item || initialBasePaperItem

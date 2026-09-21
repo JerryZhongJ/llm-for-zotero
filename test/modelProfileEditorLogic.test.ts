@@ -178,8 +178,8 @@ describe("model profile editor logic", function () {
         protocol: "openai_chat_compat",
       });
       assert.isTrue(
-        detected.reasoning.options.every((o) => !o.controls),
-        "precondition: hosted legacy profiles declare no bodies",
+        detected.reasoning.options.every((o) => o.controls),
+        "precondition: the family fallback ladder declares its built-in bodies",
       );
       const draft = computeProfileOverrideDraft({
         rows: [{ id: "medium" }, { id: "ultra" }],
@@ -188,9 +188,10 @@ describe("model profile editor logic", function () {
         modelName: "gpt-5",
       });
       const options = draft.override?.reasoning?.options || [];
-      assert.isUndefined(
-        options.find((o) => o.id === "medium")?.controls,
-        "suggested levels keep their per-protocol built-in encoding",
+      assert.deepEqual(
+        options.find((o) => o.id === "medium")?.controls?.body,
+        { reasoning_effort: "medium" },
+        "existing levels keep their declared built-in encoding",
       );
       assert.deepEqual(options.find((o) => o.id === "ultra")?.controls?.body, {
         reasoning_effort: "ultra",

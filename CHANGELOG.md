@@ -4,6 +4,73 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
+## Unreleased
+
+### Added
+
+- **`paper_query` — find passages by what they say.** Relevance-ranked
+  textual evidence for a natural-language query (`paper_query({ query })`),
+  with retrieval planning (translations, acronyms, notation variants)
+  handled internally. Semantic search no longer hides inside `paper_read`.
+- **`paper_read` reads whole sections.** `sections:['Related Work']` returns
+  the full section text through real section-label matching (numbering-,
+  case-, and typo-tolerant), and unmatched names come back with near-miss
+  suggestions and the paper's available section list instead of silence.
+- **`labels` select figures by name.** `paper_read({ labels:['Figure 3'],
+images:true })` extracts precisely those crops; `images:true` alone
+  returns all figures; bare page ranges (`'16-18'`) now parse as the schema
+  always claimed.
+- **The open reader page joins the turn as ambient context.** The envelope
+  now shows where the user is looking (`Open reader page: contextItemId=…,
+page="7"`) so "this page" resolves without a tool call.
+
+### Changed
+
+- **BREAKING: `paper_read` takes structured coordinates, not a mode enum.**
+  The `mode` parameter is gone — the presence of `sections`/`pages`/
+  `labels`/`images`/`readFullReason` selects the path, and a call with no
+  locator arguments is the overview preset. `query`, `queryVariants`,
+  `topK`, `neighborPages`, `maxChars`, and `targets` are removed (an array
+  goes into `target`; semantic search lives in `paper_query`); `capture` is
+  gone in favor of the ambient reader page. Old-style calls fail with a
+  one-hop migration error pointing at the new syntax.
+- **Model knowledge is registry data, end to end.** The registry gained a
+  `familyFallbacks` section (schema 2, additive; revision 8) carrying the
+  per-family optimistic reasoning ladders for models no entry matches, a
+  `suffix` matcher for "starts-with and ends-with" model patterns, and
+  reasoning ladders for the qwen variants and every claude generation —
+  the code-side profile table (`utils/reasoning/profile.ts`) and six
+  per-family encoders (openai, grok, gemini, deepseek, kimi, mimo) are
+  gone, along with the profile facade's per-family queries. Adding a
+  model, a new claude generation's ladder, or retuning a family's
+  fallback levels is now a JSON edit; the gpt-3/4 "no reasoning" guards
+  became explicit `kind:"none"` registry entries. qwen and anthropic keep
+  custom encoders for what data cannot express — qwen's host-dependent
+  field placement and "default sends nothing" tri-state, anthropic's
+  adaptive/manual mode negotiation with a max-tokens-clamped budget — but
+  both read their ladders from the registry, and registry controls outrank
+  them whenever present. A unified family surface (`utils/llmFamilies.ts`)
+  exposes limits, reasoning options, defaults, reserve budgets, and
+  encoding behind one key — `LLM_FAMILIES[provider]` — with one encoder
+  per family chosen from a table (the generic registry translator shared
+  by every declarative family, plus the two custom ones).
+- **DIP/LoD remediation across the LLM stack** (behavior-preserving). The
+  utility-LLM planner's eight-spelling probe for thinking budgets became a
+  single capability-layer resolver (`getReasoningOptionReserveTokens`); the
+  Gemini thinkingConfig camel/snake duality is decoded once
+  (`extractGeminiThinkingConfig`) instead of being carried by two
+  consumers; "this family starts with reasoning off" is profile data
+  (`prefersReasoningOff`) instead of four hardcoded provider checks; the
+  reasoning types stopped being re-exported through the 4k-line llmClient
+  (payload builders split into `utils/llmPayloads.ts`); and
+  the panel's per-runtime branching gained shared building blocks under
+  `contextPanel/conversationBackend/` (runtime catalog state machine,
+  active-conversation memory, standalone identity resolution, upstream
+  reasoning selection ladder, codex-native turn predicate) — replacing
+  hand-rolled copies in setupHandlers/chat/standaloneWindow. The send/retry
+  main-flow merge is deliberately deferred until its branch coverage has
+  unit tests.
+
 ## 3.11.2 - 2026-09-18
 
 ### Added

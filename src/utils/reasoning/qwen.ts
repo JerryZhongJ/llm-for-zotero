@@ -1,3 +1,13 @@
+/**
+ * The qwen family's custom encoder. Its menu ladder lives in the registry
+ * (per-model entries for the instruct/thinking/qwq variants plus a family
+ * fallback); what stays here is the wire: the host fork (DashScope gets a
+ * top-level enable_thinking, everyone else gets chat_template_kwargs) and
+ * the "default sends no payload" tri-state, neither of which registry
+ * controls can express. The variant rules below mirror the registry
+ * entries' semantics for encoding only.
+ */
+
 import {
   cloneLevelMap,
   defaultLevelOfProfile,
@@ -6,6 +16,7 @@ import {
 } from "./shared";
 import {
   emptyReasoningPayload,
+  type ProfileRule,
   type ProviderProfile,
   type QwenReasoningProfile,
   type ReasoningAdapter,
@@ -54,7 +65,7 @@ const QWEN_NON_THINKING_ONLY_PROFILE: ProviderProfile = {
   },
 };
 
-export const QWEN_RULES = [
+const QWEN_RULES: readonly ProfileRule[] = [
   {
     match: /(^|[/:])qwen3-[\w.-]*instruct-2507(?:\b|[.-])/,
     profile: QWEN_NON_THINKING_ONLY_PROFILE,
@@ -63,22 +74,14 @@ export const QWEN_RULES = [
     match: /(^|[/:])(?:qwen3-[\w.-]*thinking-2507|qwq)(?:\b|[.-])/,
     profile: QWEN_THINKING_ONLY_PROFILE,
   },
-  {
-    match: /(^|[/:])qwen(?:\d+)?(?:\b|[.-])/,
-    profile: QWEN_TOGGLE_PROFILE,
-  },
 ];
 
-export const QWEN_FALLBACK_PROFILE = QWEN_TOGGLE_PROFILE;
-
-function resolveProfile(modelName?: string): ProviderProfile {
-  return resolveProfileForRules(QWEN_RULES, QWEN_FALLBACK_PROFILE, modelName);
-}
-
-export function getQwenReasoningProfileForModel(
-  modelName?: string,
-): QwenReasoningProfile {
-  const profile = resolveProfile(modelName);
+function resolveQwenProfile(modelName?: string): QwenReasoningProfile {
+  const profile = resolveProfileForRules(
+    QWEN_RULES,
+    QWEN_TOGGLE_PROFILE,
+    modelName,
+  );
   const qwenProfile = profile.qwen || QWEN_TOGGLE_PROFILE.qwen;
   const defaultLevel = defaultLevelOfProfile(profile) || "default";
   return {
@@ -124,7 +127,7 @@ function encode({
   modelName,
   apiBase,
 }: ReasoningEncodeInput): ReasoningPayload {
-  const profile = getQwenReasoningProfileForModel(modelName);
+  const profile = resolveQwenProfile(modelName);
   const enableThinking = resolveQwenEnableThinking(reasoning.level, profile);
   if (enableThinking === null) {
     return emptyReasoningPayload();

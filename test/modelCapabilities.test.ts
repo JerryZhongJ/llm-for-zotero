@@ -12,6 +12,7 @@ import {
   validateRegistry,
   type ModelCapabilityRegistry,
 } from "../src/modelCapabilities";
+import { findRegistryEntry } from "../src/modelCapabilities/registry";
 import {
   getModelInputTokenLimit,
   resolveContextWindowTokens,
@@ -221,7 +222,7 @@ describe("model capability service", function () {
           return new Response(
             JSON.stringify({
               schemaVersion: 1,
-              revision: 7,
+              revision: 9,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },
@@ -288,7 +289,7 @@ describe("model capability service", function () {
           text: async () =>
             JSON.stringify({
               schemaVersion: 1,
-              revision: 7,
+              revision: 9,
               models: [
                 {
                   match: { provider: "kimi", exact: "kimi-v4" },
@@ -657,6 +658,149 @@ describe("registry schema version 2 (controlsByProtocol)", function () {
         },
       },
     );
+  });
+
+  it("accepts a familyFallbacks section for the declarative families", function () {
+    const accepted = validateRegistry({
+      schemaVersion: 2,
+      revision: 8,
+      models: [],
+      familyFallbacks: {
+        openai: {
+          kind: "select",
+          defaultOptionId: "default",
+          options: [{ id: "low", label: "low" }],
+        },
+      },
+    });
+    assert.isNotNull(accepted);
+    assert.equal(accepted?.familyFallbacks?.openai?.kind, "select");
+  });
+
+  it("accepts suffix matchers, alone or combined with a prefix", function () {
+    const accepted = validateRegistry({
+      schemaVersion: 2,
+      revision: 8,
+      models: [
+        {
+          match: {
+            provider: "qwen",
+            prefix: "qwen3",
+            suffix: "instruct-2507",
+          },
+          reasoning: { kind: "none", options: [] },
+        },
+        {
+          match: { suffix: "-preview" },
+          limits: { contextWindowTokens: 128000 },
+        },
+      ],
+    });
+    assert.isNotNull(accepted);
+  });
+
+  it("rejects exact combined with suffix and matcher-less entries", function () {
+    for (const badMatch of [
+      { exact: "m1", suffix: "-preview" },
+      {},
+      { provider: "qwen" },
+    ]) {
+      assert.isNull(
+        validateRegistry({
+          schemaVersion: 2,
+          revision: 8,
+          models: [{ match: badMatch }],
+        }),
+      );
+    }
+  });
+
+  it("matches prefix+suffix with boundaries and ranks below exact", function () {
+    const registry = validateRegistry({
+      schemaVersion: 2,
+      revision: 8,
+      models: [
+        {
+          match: {
+            provider: "qwen",
+            prefix: "qwen3",
+            suffix: "instruct-2507",
+          },
+          reasoning: { kind: "none", options: [] },
+        },
+        {
+          match: {
+            provider: "qwen",
+            prefix: "qwen3",
+            suffix: "thinking-2507",
+          },
+          reasoning: {
+            kind: "fixed",
+            defaultOptionId: "default",
+            options: [{ id: "default", label: "enabled" }],
+          },
+        },
+      ],
+    });
+    assert.isNotNull(registry);
+    const found = findRegistryEntry(
+      registry!,
+      "qwen",
+      "qwen3-32b-instruct-2507",
+    );
+    assert.equal(found?.reasoning.kind, "none");
+    const thinking = findRegistryEntry(
+      registry!,
+      "qwen",
+      "qwen3-8b-thinking-2507",
+    );
+    assert.equal(thinking?.reasoning.kind, "fixed");
+    // boundary: a longer tail must not match the suffix
+    assert.isNull(
+      findRegistryEntry(registry!, "qwen", "qwen3-32b-instruct-25077"),
+    );
+    // combined matcher loses to an exact match on the same model
+    const withExact = validateRegistry({
+      schemaVersion: 2,
+      revision: 8,
+      models: [
+        ...registry!.models,
+        {
+          match: { provider: "qwen", exact: "qwen3-8b-thinking-2507" },
+          reasoning: { kind: "none", options: [] },
+        },
+      ],
+    });
+    assert.equal(
+      findRegistryEntry(withExact!, "qwen", "qwen3-8b-thinking-2507")?.reasoning
+        .kind,
+      "none",
+    );
+  });
+
+  it("rejects familyFallbacks for unknown families or bad shapes", function () {
+    for (const bad of [
+      { glm: { kind: "select", options: [{ id: "low", label: "low" }] } },
+      { openai: { kind: "not-a-kind", options: [] } },
+      {
+        openai: {
+          kind: "select",
+          options: [
+            { id: "low", label: "low", controls: { body: { messages: [] } } },
+          ],
+        },
+      },
+      "not-an-object",
+    ]) {
+      assert.isNull(
+        validateRegistry({
+          schemaVersion: 2,
+          revision: 8,
+          models: [],
+          familyFallbacks: bad,
+        }),
+      );
+    }
   });
 
   it("rejects controlsByProtocol in a schema 1 registry", function () {

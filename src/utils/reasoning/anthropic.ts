@@ -1,3 +1,13 @@
+/**
+ * The anthropic family's custom encoder. Its menu ladders and the default
+ * wire shapes (adaptive efforts, manual budgets) live in the registry's
+ * claude entries; what stays here is the runtime negotiation the data
+ * cannot express — the adaptive/manual mode override, the degraded
+ * adaptive-to-manual recovery, and clamping manual budgets to the
+ * request's max_tokens. The variant rules below mirror the registry
+ * entries for those imperative paths.
+ */
+
 import {
   cloneLevelMap,
   defaultLevelOfProfile,
@@ -8,6 +18,7 @@ import {
   type AnthropicAdaptiveEffort,
   type AnthropicReasoningModeOverride,
   type AnthropicReasoningProfile,
+  type ProfileRule,
   type ProviderProfile,
   type ReasoningAdapter,
   type ReasoningEncodeInput,
@@ -15,6 +26,12 @@ import {
   type ReasoningPayload,
   type RuntimeReasoningOption,
 } from "./types";
+
+const UNSUPPORTED_PROFILE: ProviderProfile = {
+  supportsReasoning: false,
+  defaultLevel: null,
+  options: [],
+};
 
 const ANTHROPIC_ADAPTIVE_MAX_OPTIONS: RuntimeReasoningOption[] = [
   { level: "low", label: "low", enabled: true },
@@ -118,7 +135,7 @@ const ANTHROPIC_MANUAL_THINKING_PROFILE: ProviderProfile = {
   },
 };
 
-export const ANTHROPIC_RULES = [
+const ANTHROPIC_RULES: readonly ProfileRule[] = [
   {
     match: /(^|[/:.])claude-mythos-preview(?:\b|[.-])/,
     profile: ANTHROPIC_ADAPTIVE_ONLY_PROFILE,
@@ -142,24 +159,14 @@ export const ANTHROPIC_RULES = [
   },
 ];
 
-export const ANTHROPIC_FALLBACK_PROFILE: ProviderProfile = {
-  supportsReasoning: false,
-  defaultLevel: null,
-  options: [],
-};
-
-function resolveProfile(modelName?: string): ProviderProfile {
-  return resolveProfileForRules(
-    ANTHROPIC_RULES,
-    ANTHROPIC_FALLBACK_PROFILE,
-    modelName,
-  );
-}
-
-export function getAnthropicReasoningProfileForModel(
+function resolveAnthropicProfile(
   modelName?: string,
 ): AnthropicReasoningProfile {
-  const profile = resolveProfile(modelName);
+  const profile = resolveProfileForRules(
+    ANTHROPIC_RULES,
+    UNSUPPORTED_PROFILE,
+    modelName,
+  );
   const anthropicProfile = profile.anthropic;
   const defaultLevel = defaultLevelOfProfile(profile) || "high";
   return {
@@ -291,7 +298,7 @@ function encode({
   if (protocol !== "anthropic_messages") {
     return { extra: {}, omitTemperature: false };
   }
-  const profile = getAnthropicReasoningProfileForModel(modelName);
+  const profile = resolveAnthropicProfile(modelName);
   const mode = resolveAnthropicThinkingMode({
     profile,
     override: anthropicModeOverride,
@@ -346,7 +353,7 @@ export function getAnthropicRecoverySelection(params: {
     }
   | undefined
   | null {
-  const profile = getAnthropicReasoningProfileForModel(params.modelName);
+  const profile = resolveAnthropicProfile(params.modelName);
   const currentMode = resolveAnthropicThinkingMode({
     profile,
     override: params.anthropicModeOverride,

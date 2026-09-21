@@ -238,7 +238,12 @@ function validateEntry(value: unknown): value is RegistryModelEntry {
     typeof match.exact === "string" && Boolean(match.exact.trim());
   const hasPrefix =
     typeof match.prefix === "string" && Boolean(match.prefix.trim());
-  if (hasExact === hasPrefix) return false;
+  const hasSuffix =
+    typeof match.suffix === "string" && Boolean(match.suffix.trim());
+  // `exact` is exclusive; `prefix` and `suffix` may combine into a
+  // starts-with-and-ends-with pattern. At least one matcher is required.
+  if (hasExact === (hasPrefix || hasSuffix)) return false;
+  if (!hasExact && !hasPrefix && !hasSuffix) return false;
   if (
     match.provider !== undefined &&
     (typeof match.provider !== "string" || match.provider.length > 64)
@@ -294,7 +299,36 @@ export function validateRegistry(
   if (schemaVersion === 1 && carriesControlsByProtocol(value.models)) {
     return null;
   }
+  if (
+    value.familyFallbacks !== undefined &&
+    !validateFamilyFallbacks(value.familyFallbacks)
+  ) {
+    return null;
+  }
   return cloneRegistry(value as ModelCapabilityRegistry);
+}
+
+/** Family ids allowed to carry a registry-miss fallback ladder. Adding a
+ * key here is a deliberate act: it turns the family's optimistic fallback
+ * into remote data, which only makes sense while the family's encoding is
+ * fully declarative. */
+const ALLOWED_FAMILY_FALLBACK_KEYS = new Set([
+  "openai",
+  "grok",
+  "gemini",
+  "qwen",
+  "anthropic",
+]);
+
+function validateFamilyFallbacks(
+  value: unknown,
+): value is ModelCapabilityRegistry["familyFallbacks"] {
+  if (!isRecord(value)) return false;
+  for (const [family, reasoning] of Object.entries(value)) {
+    if (!ALLOWED_FAMILY_FALLBACK_KEYS.has(family)) return false;
+    if (!validateReasoning(reasoning)) return false;
+  }
+  return true;
 }
 
 function carriesControlsByProtocol(models: unknown[]): boolean {
@@ -321,6 +355,12 @@ function matchesPrefix(value: string, prefix: string): boolean {
   return !next || /[._:/-]/.test(next);
 }
 
+function matchesSuffix(value: string, suffix: string): boolean {
+  if (!value.endsWith(suffix)) return false;
+  const prev = value[value.length - suffix.length - 1];
+  return !prev || /[._:/-]/.test(prev);
+}
+
 export function findRegistryEntry(
   registry: ModelCapabilityRegistry,
   provider: string,
@@ -345,14 +385,19 @@ export function findRegistryEntry(
     const providerSpecificity = matchProvider ? 100 : 0;
     const exact = normalized(entry.match.exact);
     const prefix = normalized(entry.match.prefix);
+    const suffix = normalized(entry.match.suffix);
     let score = -1;
     if (exact && modelCandidates.includes(exact)) {
       score = providerSpecificity + 100000 + exact.length;
     } else if (
-      prefix &&
-      modelCandidates.some((candidate) => matchesPrefix(candidate, prefix))
+      (prefix || suffix) &&
+      modelCandidates.some((candidate) => {
+        if (prefix && !matchesPrefix(candidate, prefix)) return false;
+        if (suffix && !matchesSuffix(candidate, suffix)) return false;
+        return true;
+      })
     ) {
-      score = providerSpecificity + 1000 + prefix.length;
+      score = providerSpecificity + 1000 + prefix.length + suffix.length;
     }
     if (score < 0) continue;
     if (!best || score > best.score) best = { entry, score };

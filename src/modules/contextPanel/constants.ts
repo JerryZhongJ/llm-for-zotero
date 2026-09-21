@@ -1,6 +1,6 @@
 import { config } from "../../../package.json";
 import { t } from "../../utils/i18n";
-import { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
+import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/reasoningProfiles";
 import {
   buildDefaultUpstreamGlobalConversationKey,
   isConversationKeyForKind,

@@ -1,4 +1,4 @@
-import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
+import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/reasoningProfiles";
 import type { ReasoningProvider } from "../../utils/provider";
 import type { ContextAttachmentSupport } from "./contextAttachmentTypes";
 import type {

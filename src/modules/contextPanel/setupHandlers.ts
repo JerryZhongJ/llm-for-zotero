@@ -157,6 +157,10 @@ import {
   buildPaperStateKey,
 } from "./prefHelpers";
 import { resolveLibraryChatAmbientContext } from "./ambientContext";
+import { prefersReasoningOff } from "../../utils/reasoningProfiles";
+import { createRuntimeCatalogController } from "./conversationBackend/runtimeCatalogController";
+import { rememberActiveConversation } from "./conversationBackend/activeConversationMemory";
+import { resolveUpstreamSelectedLevel } from "./conversationBackend/upstreamReasoningSelection";
 import { refreshConfiguredProviderModelCatalogs } from "../../utils/modelProviders";
 import {
   refreshModelCapabilityRegistry,
@@ -299,7 +303,7 @@ import type {
   ResolvedContextSource,
   SelectedTextContext,
 } from "./types";
-import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/llmClient";
+import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/reasoningProfiles";
 import type { ReasoningConfig as LLMReasoningConfig } from "../../utils/llmClient";
 import {
   browseAllItemCandidates,
@@ -906,21 +910,6 @@ export function setupHandlers(
   syncQueuedFollowUpRegistration();
   const isClaudeModeAvailable = () => getClaudeCodeModeEnabled();
   const isCodexModeAvailable = () => isCodexAppServerModeEnabled();
-  let claudeModelCatalogStatus: "idle" | "loading" | "ready" | "error" = "idle";
-  let claudeModelCatalogError = "";
-  let claudeModelCatalogModels: ClaudeModelCatalogEntry[] = [];
-  let claudeModelCatalogLegacy = false;
-  let claudeModelCatalogInFlight: Promise<void> | null = null;
-  let claudeModelCatalogInFlightForced = false;
-  let claudeModelCatalogRequestId = 0;
-  let claudeModelCatalogIdentity = "";
-  let claudeModelCatalogLoadedAt = 0;
-  const CLAUDE_MODEL_CATALOG_UI_TTL_MS = 60_000;
-  let codexModelCatalogStatus: "idle" | "loading" | "ready" | "error" = "idle";
-  let codexModelCatalogError = "";
-  let codexModelCatalogModels: CodexAppServerModelCatalogEntry[] = [];
-  let codexModelCatalogInFlight: Promise<void> | null = null;
-  let codexModelCatalogPath = "";
   const resolveClaudeModelCatalogContext = ():
     | ClaudeModelCatalogRequestContext
     | undefined => {
@@ -975,78 +964,33 @@ export function setupHandlers(
     }
     positionFloatingMenu(body, modelMenu, modelBtn);
   };
+  const claudeCatalog = createRuntimeCatalogController<{
+    models: ClaudeModelCatalogEntry[];
+    legacy: boolean;
+  }>({
+    identity: () => resolveClaudeModelCatalogIdentity(),
+    ttlMs: 60_000,
+    canReuseInFlight: (requestedForce, inFlightForce) =>
+      !requestedForce || inFlightForce,
+    load: (force) => {
+      const context = resolveClaudeModelCatalogContext();
+      return initAgentSubsystem().then((coreRuntime) =>
+        listClaudeModels(coreRuntime, force, context),
+      );
+    },
+    onRefreshUi: refreshOpenClaudeModelMenu,
+    onError: (error) =>
+      ztoolkit.log("Claude Code: failed to load model catalog", error),
+    errorLabel: "Claude Code",
+  });
+  const claudeCatalogModels = () => claudeCatalog.getSnapshot()?.models ?? [];
   const ensureClaudeModelCatalogLoaded = (force = false): Promise<void> => {
     if (!isClaudeConversationSystem()) return Promise.resolve();
-    const context = resolveClaudeModelCatalogContext();
-    const identity = resolveClaudeModelCatalogIdentity(context);
-    const identityChanged = identity !== claudeModelCatalogIdentity;
-    if (
-      !force &&
-      !identityChanged &&
-      claudeModelCatalogStatus === "ready" &&
-      Date.now() - claudeModelCatalogLoadedAt < CLAUDE_MODEL_CATALOG_UI_TTL_MS
-    ) {
-      return Promise.resolve();
-    }
-    if (
-      claudeModelCatalogInFlight &&
-      !identityChanged &&
-      (!force || claudeModelCatalogInFlightForced)
-    ) {
-      // Rapid re-opens piggyback on the running FORCED fetch instead of
-      // launching a parallel one; an unforced in-flight load never satisfies
-      // a forced request (its data may come from the bridge cache).
-      return claudeModelCatalogInFlight;
-    }
-    if (identityChanged) {
-      claudeModelCatalogModels = [];
-      claudeModelCatalogLegacy = false;
-      claudeModelCatalogLoadedAt = 0;
-    }
-    claudeModelCatalogStatus = "loading";
-    claudeModelCatalogError = "";
-    claudeModelCatalogIdentity = identity;
-    claudeModelCatalogInFlightForced = force;
-    const requestId = ++claudeModelCatalogRequestId;
-    refreshOpenClaudeModelMenu();
-    claudeModelCatalogInFlight = initAgentSubsystem()
-      .then((coreRuntime) => listClaudeModels(coreRuntime, force, context))
-      .then((catalog) => {
-        if (
-          requestId !== claudeModelCatalogRequestId ||
-          identity !== resolveClaudeModelCatalogIdentity()
-        ) {
-          return;
-        }
-        claudeModelCatalogModels = catalog.models;
-        claudeModelCatalogLegacy = catalog.legacy;
-        claudeModelCatalogStatus = "ready";
-        claudeModelCatalogError = "";
-        claudeModelCatalogLoadedAt = Date.now();
-      })
-      .catch((error: unknown) => {
-        if (
-          requestId !== claudeModelCatalogRequestId ||
-          identity !== resolveClaudeModelCatalogIdentity()
-        ) {
-          return;
-        }
-        claudeModelCatalogStatus = "error";
-        claudeModelCatalogError =
-          error instanceof Error ? error.message : String(error);
-        ztoolkit.log("Claude Code: failed to load model catalog", error);
-      })
-      .finally(() => {
-        if (requestId !== claudeModelCatalogRequestId) return;
-        claudeModelCatalogInFlight = null;
-        claudeModelCatalogInFlightForced = false;
-        refreshOpenClaudeModelMenu();
-      });
-    return claudeModelCatalogInFlight;
+    return claudeCatalog.ensure(force);
   };
   const getClaudeRuntimeModelEntries = (): RuntimeModelEntry[] =>
     buildClaudeRuntimeModelEntries({
-      models: claudeModelCatalogModels,
+      models: claudeCatalogModels(),
       selectedModel: getClaudeRuntimeModelPref(),
     });
   const getSelectedClaudeRuntimeEntry = (): RuntimeModelEntry => {
@@ -1062,17 +1006,20 @@ export function setupHandlers(
     resolveCodexAppServerReasoningSelection({
       mode: getCodexReasoningModePref(),
       choices: getCodexAppServerReasoningChoices({
-        models: codexModelCatalogModels,
+        models: codexCatalogModels(),
         selectedModel: getCodexRuntimeModelPref(),
       }),
-      catalogReady: codexModelCatalogStatus === "ready",
+      catalogReady: codexCatalog.getStatus() === "ready",
     });
   const getCodexReasoningChoices = () =>
     resolveCurrentCodexReasoningSelection().choices;
   const reconcileSelectedCodexReasoningMode = () => {
     const currentMode = getCodexReasoningModePref();
     const reconciledMode = resolveCurrentCodexReasoningSelection().mode;
-    if (codexModelCatalogStatus === "ready" && reconciledMode !== currentMode) {
+    if (
+      codexCatalog.getStatus() === "ready" &&
+      reconciledMode !== currentMode
+    ) {
       setCodexReasoningModePref(reconciledMode);
     }
     return reconciledMode;
@@ -1092,44 +1039,33 @@ export function setupHandlers(
     }
     positionFloatingMenu(body, modelMenu, modelBtn);
   };
+  const codexCatalog = createRuntimeCatalogController<
+    CodexAppServerModelCatalogEntry[]
+  >({
+    identity: () => getConfiguredCodexAppServerBinaryPath(),
+    clearSnapshotOnError: true,
+    load: () =>
+      loadCodexAppServerModelCatalog({
+        codexPath: getConfiguredCodexAppServerBinaryPath(),
+      }).then((catalog) => catalog.models),
+    onRefreshUi: refreshOpenCodexModelMenu,
+    onError: (error) =>
+      ztoolkit.log("Codex app-server: failed to load model catalog", error),
+    errorLabel: "Codex app-server",
+  });
+  const codexCatalogModels = () => codexCatalog.getSnapshot() ?? [];
   const ensureCodexModelCatalogLoaded = (): Promise<void> => {
     if (!isCodexConversationSystem()) return Promise.resolve();
-    const codexPath = getConfiguredCodexAppServerBinaryPath();
-    if (
-      codexModelCatalogStatus === "ready" &&
-      codexPath === codexModelCatalogPath
-    ) {
-      return Promise.resolve();
-    }
-    if (codexModelCatalogInFlight) return codexModelCatalogInFlight;
-    codexModelCatalogStatus = "loading";
-    codexModelCatalogError = "";
-    codexModelCatalogPath = codexPath;
-    refreshOpenCodexModelMenu();
-    codexModelCatalogInFlight = loadCodexAppServerModelCatalog({ codexPath })
-      .then((catalog) => {
-        codexModelCatalogModels = catalog.models;
-        codexModelCatalogStatus = "ready";
-        codexModelCatalogError = "";
+    return codexCatalog.ensure().then(() => {
+      if (codexCatalog.getStatus() === "ready") {
         reconcileSelectedCodexReasoningMode();
-      })
-      .catch((error: unknown) => {
-        codexModelCatalogModels = [];
-        codexModelCatalogStatus = "error";
-        codexModelCatalogError =
-          error instanceof Error ? error.message : String(error);
-        ztoolkit.log("Codex app-server: failed to load model catalog", error);
-      })
-      .finally(() => {
-        codexModelCatalogInFlight = null;
-        refreshOpenCodexModelMenu();
-      });
-    return codexModelCatalogInFlight;
+      }
+    });
   };
   const getCodexRuntimeModelEntries = (): RuntimeModelEntry[] => {
     const model = getCodexRuntimeModelPref();
     return buildCodexRuntimeModelEntries({
-      models: codexModelCatalogModels,
+      models: codexCatalogModels(),
       selectedModel: model,
       codexPath: getConfiguredCodexAppServerBinaryPath(),
     });
@@ -1594,82 +1530,33 @@ export function setupHandlers(
       historyToggleBtn.style.display = "";
     }
     if (item && libraryID > 0 && mode && !noteSession) {
-      if (isClaudeConversationSystem()) {
-        activeClaudeConversationModeByLibrary.set(
-          buildClaudeLibraryStateKey(libraryID),
+      rememberActiveConversation(
+        {
+          system: getConversationSystem(),
+          libraryID,
           mode,
-        );
-        setLastUsedClaudeConversationMode(libraryID, mode);
-      } else if (isCodexConversationSystem()) {
-        activeCodexConversationModeByLibrary.set(
-          buildCodexLibraryStateKey(libraryID),
-          mode,
-        );
-        setLastUsedCodexConversationMode(libraryID, mode);
-        if (mode === "global") {
-          activeCodexGlobalConversationByLibrary.set(
-            buildCodexLibraryStateKey(libraryID),
-            item.id,
-          );
-          setLastUsedCodexGlobalConversationKey(libraryID, item.id);
-        } else if (
-          Number.isFinite(conversationKey) &&
-          (conversationKey as number) > 0 &&
-          Number.isFinite(currentBasePaperItemID) &&
-          currentBasePaperItemID > 0
-        ) {
-          const normalizedConversationKey = Math.floor(
-            conversationKey as number,
-          );
-          const paperStateKey = buildCodexPaperStateKey(
-            libraryID,
-            Math.floor(currentBasePaperItemID),
-          );
-          activeCodexPaperConversationByPaper.set(
-            paperStateKey,
-            normalizedConversationKey,
-          );
-          setLastUsedCodexPaperConversationKey(
-            libraryID,
-            Math.floor(currentBasePaperItemID),
-            normalizedConversationKey,
-          );
-        }
-      } else {
-        // Upstream surfaces no longer persist a conversation mode — the kind
-        // is fixed by the surface — only the conversation keys are remembered.
-        if (mode === "global") {
-          activeGlobalConversationByLibrary.set(libraryID, item.id);
-          setLastUsedUpstreamGlobalConversationKey(libraryID, item.id);
-        } else if (
-          Number.isFinite(conversationKey) &&
-          (conversationKey as number) > 0 &&
-          Number.isFinite(currentBasePaperItemID) &&
-          currentBasePaperItemID > 0
-        ) {
-          const lockedGlobalKey = getLockedGlobalConversationKey(libraryID);
-          if (lockedGlobalKey !== null) {
-            setLockedGlobalConversationKey(libraryID, null);
-            removeAutoLockedGlobalConversationKey(lockedGlobalKey);
-          }
-          const normalizedConversationKey = Math.floor(
-            conversationKey as number,
-          );
-          const paperStateKey = buildPaperStateKey(
-            libraryID,
-            Math.floor(currentBasePaperItemID),
-          );
-          activePaperConversationByPaper.set(
-            paperStateKey,
-            normalizedConversationKey,
-          );
-          setLastUsedPaperConversationKey(
-            libraryID,
-            Math.floor(currentBasePaperItemID),
-            normalizedConversationKey,
-          );
-        }
-      }
+          itemID: item.id,
+          conversationKey:
+            Number.isFinite(conversationKey) && (conversationKey as number) > 0
+              ? Math.floor(conversationKey as number)
+              : 0,
+          basePaperItemID:
+            Number.isFinite(currentBasePaperItemID) &&
+            currentBasePaperItemID > 0
+              ? Math.floor(currentBasePaperItemID)
+              : 0,
+        },
+        {
+          activeGlobalConversationByLibrary,
+          activePaperConversationByPaper,
+          setLastUsedUpstreamGlobalConversationKey,
+          setLastUsedPaperConversationKey,
+          getLockedGlobalConversationKey,
+          setLockedGlobalConversationKey,
+          removeAutoLockedGlobalConversationKey,
+          buildPaperStateKey,
+        },
+      );
     }
     syncRequestUiForCurrentConversation();
     if (historyModeIndicator) {
@@ -4980,21 +4867,20 @@ export function setupHandlers(
     if (!isCodexConversationSystem()) return;
     appendModelCatalogStatus({
       menu,
-      status: codexModelCatalogStatus,
-      modelCount: codexModelCatalogModels.length,
+      status: codexCatalog.getStatus(),
+      modelCount: codexCatalogModels().length,
       loadingMessage: t("Loading Codex models…"),
       errorMessage: t(
         "Could not load Codex models. Showing current model only.",
       ),
-      errorTitle: codexModelCatalogError,
+      errorTitle: codexCatalog.getError(),
       emptyMessage: t("Codex did not return any available models."),
       retryLabel: t("Retry loading Codex models"),
       onRetry: (event) => {
         if (!isPrimaryPointerEvent(event)) return;
         event.preventDefault();
         event.stopPropagation();
-        codexModelCatalogStatus = "idle";
-        codexModelCatalogError = "";
+        codexCatalog.reset();
         void ensureCodexModelCatalogLoaded();
       },
     });
@@ -5004,15 +4890,15 @@ export function setupHandlers(
     if (!isClaudeConversationSystem()) return;
     const statusHandled = appendModelCatalogStatus({
       menu,
-      status: claudeModelCatalogStatus,
-      modelCount: claudeModelCatalogModels.length,
-      loadingMessage: claudeModelCatalogModels.length
+      status: claudeCatalog.getStatus(),
+      modelCount: claudeCatalogModels().length,
+      loadingMessage: claudeCatalogModels().length
         ? t("Refreshing Claude models…")
         : t("Loading Claude models…"),
-      errorMessage: claudeModelCatalogModels.length
+      errorMessage: claudeCatalogModels().length
         ? t("Could not refresh Claude models. Showing the last known list.")
         : t("Could not load Claude models. Showing the current model only."),
-      errorTitle: claudeModelCatalogError,
+      errorTitle: claudeCatalog.getError(),
       emptyMessage: t("Claude Code did not return any available models."),
       retryLabel: t("Retry loading Claude models"),
       onRetry: (event) => {
@@ -5023,7 +4909,10 @@ export function setupHandlers(
       },
     });
     if (statusHandled) return;
-    if (claudeModelCatalogStatus === "ready" && claudeModelCatalogLegacy) {
+    if (
+      claudeCatalog.getStatus() === "ready" &&
+      (claudeCatalog.getSnapshot()?.legacy ?? false)
+    ) {
       appendModelMenuEmptyState(
         menu,
         t(
@@ -5038,8 +4927,8 @@ export function setupHandlers(
       return `${entry.providerLabel} · ${entry.model}`;
     }
     const catalogModel =
-      claudeModelCatalogModels.find((model) => model.value === entry.model) ||
-      claudeModelCatalogModels.find(
+      claudeCatalogModels().find((model) => model.value === entry.model) ||
+      claudeCatalogModels().find(
         (model) => model.resolvedModel === entry.model,
       );
     return [
@@ -5570,31 +5459,11 @@ export function setupHandlers(
     const enabledLevels = options
       .filter((option) => option.enabled)
       .map((option) => option.level);
-    const cachedProvider = selectedReasoningProviderCache.get(item.id);
-    const cachedLevel =
-      cachedProvider === provider ? selectedReasoningCache.get(item.id) : null;
-    let selectedLevel =
-      cachedLevel ||
-      getLastUsedReasoningLevelForProvider(provider) ||
-      (provider === "anthropic"
-        ? "none"
-        : getLastUsedReasoningLevel() || "none");
-    if (provider === "anthropic") {
-      if (!enabledLevels.includes(selectedLevel as LLMReasoningLevel)) {
-        selectedLevel = "none";
-      }
-    } else if (enabledLevels.length > 0) {
-      if (
-        selectedLevel === "none" ||
-        !enabledLevels.includes(selectedLevel as LLMReasoningLevel)
-      ) {
-        selectedLevel = enabledLevels[0];
-      }
-    } else {
-      selectedLevel = "none";
-    }
-    selectedReasoningCache.set(item.id, selectedLevel);
-    selectedReasoningProviderCache.set(item.id, provider);
+    const { selectedLevel } = resolveUpstreamSelectedLevel({
+      itemId: item.id,
+      provider,
+      enabledLevels,
+    });
     return { provider, currentModel, options, enabledLevels, selectedLevel };
   };
 
@@ -5983,7 +5852,7 @@ export function setupHandlers(
           selectedReasoningCache.set(item.id, "none");
           selectedReasoningProviderCache.set(item.id, provider);
           setLastUsedReasoningLevelForProvider(provider, "none");
-          if (provider !== "anthropic") {
+          if (!prefersReasoningOff(provider)) {
             setLastUsedReasoningLevel("none");
           }
         }
@@ -6055,7 +5924,7 @@ export function setupHandlers(
             selectedReasoningCache.set(item.id, level);
             selectedReasoningProviderCache.set(item.id, provider);
             setLastUsedReasoningLevelForProvider(provider, level);
-            if (provider !== "anthropic") {
+            if (!prefersReasoningOff(provider)) {
               setLastUsedReasoningLevel(level);
             }
           }
@@ -6385,7 +6254,7 @@ export function setupHandlers(
     }
     if (isCodexConversationSystem()) {
       const mode =
-        codexModelCatalogStatus === "ready"
+        codexCatalog.getStatus() === "ready"
           ? reconcileSelectedCodexReasoningMode()
           : getCodexReasoningModePref();
       return buildCodexAppServerReasoningConfig(mode);

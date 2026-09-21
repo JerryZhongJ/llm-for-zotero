@@ -1,5 +1,5 @@
 import type { ReasoningOption, ReasoningProviderKind } from "../../types";
-import type { ReasoningLevel as LLMReasoningLevel } from "../../../../utils/llmClient";
+import type { ReasoningLevel as LLMReasoningLevel } from "../../../../utils/reasoningProfiles";
 import type { ModelInputMode } from "../../../../shared/types";
 
 import {

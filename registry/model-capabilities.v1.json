@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "revision": 6,
+  "revision": 8,
   "models": [
     {
       "match": {
@@ -685,6 +685,10 @@
       "limits": {
         "contextWindowTokens": 1047576,
         "inputTokens": 1047576
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
       }
     },
     {
@@ -694,6 +698,10 @@
       "limits": {
         "contextWindowTokens": 1047576,
         "inputTokens": 1047576
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
       }
     },
     {
@@ -703,6 +711,10 @@
       "limits": {
         "contextWindowTokens": 1047576,
         "inputTokens": 1047576
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
       }
     },
     {
@@ -748,6 +760,10 @@
       "limits": {
         "contextWindowTokens": 128000,
         "inputTokens": 128000
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
       }
     },
     {
@@ -758,6 +774,80 @@
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
         "outputTokens": 128000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "low",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "low"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "medium"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "xhigh",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "xhigh"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -768,6 +858,80 @@
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
         "outputTokens": 128000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "low",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "low"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "medium"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "max",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "max"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -778,6 +942,80 @@
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
         "outputTokens": 64000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "low",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "low"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "medium"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "max",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "max"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -788,6 +1026,72 @@
         "contextWindowTokens": 200000,
         "inputTokens": 200000,
         "outputTokens": 64000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "1024",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 1024
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "2000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "10000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "32000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 32000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -3528,6 +3832,847 @@
           }
         ]
       }
+    },
+    {
+      "match": {
+        "prefix": "gpt-3"
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
+      }
+    },
+    {
+      "match": {
+        "prefix": "gpt-4"
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
+      }
+    },
+    {
+      "match": {
+        "prefix": "gpt-35"
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
+      }
+    },
+    {
+      "match": {
+        "prefix": "chatgpt-3"
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
+      }
+    },
+    {
+      "match": {
+        "prefix": "chatgpt-4"
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
+      }
+    },
+    {
+      "match": {
+        "prefix": "chatgpt-4o"
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
+      }
+    },
+    {
+      "match": {
+        "provider": "qwen",
+        "prefix": "qwen3",
+        "suffix": "instruct-2507"
+      },
+      "reasoning": {
+        "kind": "none",
+        "options": []
+      }
+    },
+    {
+      "match": {
+        "provider": "qwen",
+        "prefix": "qwen3",
+        "suffix": "thinking-2507"
+      },
+      "reasoning": {
+        "kind": "fixed",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "provider": "qwen",
+        "prefix": "qwq"
+      },
+      "reasoning": {
+        "kind": "fixed",
+        "defaultOptionId": "default",
+        "options": [
+          {
+            "id": "default",
+            "label": "enabled"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "claude-opus-4-5"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "1024",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 1024
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "2000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "10000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "32000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 32000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "claude-opus-4-1"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "1024",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 1024
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "2000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "10000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "32000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 32000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "claude-opus-4"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "1024",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 1024
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "2000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "10000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "32000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 32000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "claude-sonnet-4-5"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "1024",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 1024
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "2000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "10000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "32000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 32000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "claude-sonnet-4"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "1024",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 1024
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "2000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "10000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "32000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 32000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "claude-3-7-sonnet"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "1024",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 1024
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "2000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "10000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "32000",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 32000
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "prefix": "claude-mythos-preview"
+      },
+      "limits": {
+        "contextWindowTokens": 200000,
+        "inputTokens": 200000
+      },
+      "reasoning": {
+        "kind": "select",
+        "defaultOptionId": "low",
+        "options": [
+          {
+            "id": "low",
+            "label": "low",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "low"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "medium",
+            "label": "medium",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "medium"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "high",
+            "label": "high",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "high"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          },
+          {
+            "id": "xhigh",
+            "label": "max",
+            "controlsByProtocol": {
+              "anthropic_messages": {
+                "body": {
+                  "thinking": {
+                    "type": "adaptive"
+                  },
+                  "output_config": {
+                    "effort": "max"
+                  }
+                },
+                "omitTemperature": true
+              }
+            }
+          }
+        ]
+      }
     }
-  ]
+  ],
+  "familyFallbacks": {
+    "openai": {
+      "kind": "select",
+      "defaultOptionId": "default",
+      "options": [
+        {
+          "id": "default",
+          "label": "default",
+          "controls": {
+            "body": {},
+            "omitTemperature": true
+          },
+          "controlsByProtocol": {
+            "responses_api": {
+              "body": {
+                "reasoning": {
+                  "summary": "detailed"
+                }
+              },
+              "omitTemperature": true
+            }
+          }
+        },
+        {
+          "id": "low",
+          "label": "low",
+          "controls": {
+            "body": {
+              "reasoning_effort": "low"
+            },
+            "omitTemperature": true
+          },
+          "controlsByProtocol": {
+            "responses_api": {
+              "body": {
+                "reasoning": {
+                  "summary": "detailed",
+                  "effort": "low"
+                }
+              },
+              "omitTemperature": true
+            }
+          }
+        },
+        {
+          "id": "medium",
+          "label": "medium",
+          "controls": {
+            "body": {
+              "reasoning_effort": "medium"
+            },
+            "omitTemperature": true
+          },
+          "controlsByProtocol": {
+            "responses_api": {
+              "body": {
+                "reasoning": {
+                  "summary": "detailed",
+                  "effort": "medium"
+                }
+              },
+              "omitTemperature": true
+            }
+          }
+        },
+        {
+          "id": "high",
+          "label": "high",
+          "controls": {
+            "body": {
+              "reasoning_effort": "high"
+            },
+            "omitTemperature": true
+          },
+          "controlsByProtocol": {
+            "responses_api": {
+              "body": {
+                "reasoning": {
+                  "summary": "detailed",
+                  "effort": "high"
+                }
+              },
+              "omitTemperature": true
+            }
+          }
+        }
+      ]
+    },
+    "grok": {
+      "kind": "fixed",
+      "defaultOptionId": "default",
+      "options": [
+        {
+          "id": "default",
+          "label": "enabled",
+          "controlsByProtocol": {
+            "responses_api": {
+              "body": {
+                "reasoning": {
+                  "summary": "detailed"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "gemini": {
+      "kind": "select",
+      "defaultOptionId": "medium",
+      "options": [
+        {
+          "id": "medium",
+          "label": "medium",
+          "controls": {
+            "body": {
+              "extra_body": {
+                "google": {
+                  "thinking_config": {
+                    "include_thoughts": true,
+                    "thinking_level": "medium"
+                  }
+                }
+              }
+            }
+          },
+          "controlsByProtocol": {
+            "gemini_native": {
+              "body": {
+                "thinkingConfig": {
+                  "includeThoughts": true,
+                  "thinkingLevel": "medium"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "low",
+          "label": "low",
+          "controls": {
+            "body": {
+              "extra_body": {
+                "google": {
+                  "thinking_config": {
+                    "include_thoughts": true,
+                    "thinking_level": "low"
+                  }
+                }
+              }
+            }
+          },
+          "controlsByProtocol": {
+            "gemini_native": {
+              "body": {
+                "thinkingConfig": {
+                  "includeThoughts": true,
+                  "thinkingLevel": "low"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "high",
+          "label": "high",
+          "controls": {
+            "body": {
+              "extra_body": {
+                "google": {
+                  "thinking_config": {
+                    "include_thoughts": true,
+                    "thinking_level": "high"
+                  }
+                }
+              }
+            }
+          },
+          "controlsByProtocol": {
+            "gemini_native": {
+              "body": {
+                "thinkingConfig": {
+                  "includeThoughts": true,
+                  "thinkingLevel": "high"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "qwen": {
+      "kind": "select",
+      "defaultOptionId": "default",
+      "options": [
+        {
+          "id": "default",
+          "label": "default"
+        },
+        {
+          "id": "high",
+          "label": "enabled"
+        },
+        {
+          "id": "low",
+          "label": "disabled"
+        }
+      ]
+    }
+  }
 }

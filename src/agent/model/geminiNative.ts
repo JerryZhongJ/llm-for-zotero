@@ -1,5 +1,5 @@
 import { resolveUserExtraBody } from "../../utils/llmClient";
-import { geminiThinkingConfigFromProfile } from "../../utils/reasoning/gemini";
+import { extractGeminiThinkingConfig } from "../../utils/reasoning/gemini";
 import {
   compileReasoningControls,
   isRecord,
@@ -242,15 +242,11 @@ function resolveGeminiReasoningConfig(request: AgentRuntimeRequest) {
     }),
     request.reasoning,
   );
-  const declarativeConfig =
-    declarative?.extra.thinkingConfig || declarative?.extra.thinking_config;
+  const declarativeConfig = extractGeminiThinkingConfig(declarative);
   if (isRecord(declarativeConfig)) {
     return withGeminiThoughtSummaries(declarativeConfig);
   }
-  return geminiThinkingConfigFromProfile(
-    request.model,
-    request.reasoning.level,
-  );
+  return undefined;
 }
 
 async function buildGeminiParts(

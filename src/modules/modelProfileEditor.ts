@@ -38,7 +38,6 @@ import {
   type ResolvedModelCapabilities,
 } from "../modelCapabilities";
 import { el, iconBtn } from "../utils/domHelpers";
-import { getGeminiReasoningProfileForModel } from "../utils/reasoningProfiles";
 
 /**
  * Suggestions only — the level id is free text.
@@ -197,10 +196,7 @@ export function resolveReasoningParameterKey(
             : "thinkingConfig.thinkingLevel";
         }
       }
-      return getGeminiReasoningProfileForModel(detected.model).param ===
-        "thinking_budget"
-        ? "thinkingConfig.thinkingBudget"
-        : "thinkingConfig.thinkingLevel";
+      return "thinkingConfig.thinkingLevel";
     default:
       return "reasoning_effort";
   }

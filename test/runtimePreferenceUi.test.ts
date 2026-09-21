@@ -106,11 +106,16 @@ describe("runtime preference UI", function () {
     // In-flight dedupe must engage for forced opens too: rapid re-opens
     // piggyback on the running forced fetch instead of launching another,
     // while an unforced in-flight load never satisfies a forced request.
-    assert.include(setupHandlers, "claudeModelCatalogInFlight &&");
-    assert.include(
-      setupHandlers,
-      "(!force || claudeModelCatalogInFlightForced)",
+    // The machine lives in the shared runtime catalog controller now.
+    const catalogController = source(
+      "src/modules/contextPanel/conversationBackend/runtimeCatalogController.ts",
     );
+    assert.include(catalogController, "inFlight &&");
+    assert.include(
+      catalogController,
+      "canReuseInFlight(force, inFlightForced)",
+    );
+    assert.include(setupHandlers, "!requestedForce || inFlightForce");
     assert.include(embeddedPanel, "setupHandlers(body, rawItem)");
     assert.include(standalonePanel, "setupHandlers(contentArea, mountedItem");
   });

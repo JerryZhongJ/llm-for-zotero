@@ -136,6 +136,10 @@ export type RegistryMatch = {
   provider?: string;
   exact?: string;
   prefix?: string;
+  /** Matches the model name's tail (boundary-checked). Combinable with
+   * `prefix` for "starts with X and ends with Y" patterns (qwen3-*-instruct);
+   * exclusive with `exact`. */
+  suffix?: string;
 };
 
 export type RegistryModelEntry = {
@@ -159,6 +163,15 @@ export type ModelCapabilityRegistry = {
   schemaVersion: 1 | 2;
   revision: number;
   models: RegistryModelEntry[];
+  /**
+   * Per-family optimistic reasoning ladders for models no `models` entry
+   * matches — the registry-miss path, so family-level fallback data lives
+   * in this document next to the per-model entries it backs up. Keys are
+   * provider family ids; values are the same shape as an entry's
+   * `reasoning`. Unknown to older readers (they ignore it and keep their
+   * bundled code-side fallback), so it is additive on schema 2.
+   */
+  familyFallbacks?: Partial<Record<string, ModelReasoningCapability>>;
 };
 
 export type DiscoveredModel = {

@@ -1,22 +1,11 @@
-import {
-  getAnthropicReasoningProfileForModel,
-  getDeepseekReasoningProfileForModel,
-  getGeminiReasoningProfileForModel,
-  getMimoReasoningProfileForModel,
-  getOpenAIReasoningProfileForModel,
-  getQwenReasoningProfileForModel,
-  getRuntimeReasoningOptionsForModel,
-  getReasoningDefaultLevelForModel,
-  getReasoningLevelAlias,
-  supportsReasoningForModel,
-  type ReasoningProvider,
-} from "../utils/reasoningProfiles";
+import { getReasoningLevelAlias } from "../utils/reasoning/shared";
 import { MAX_ALLOWED_TOKENS } from "../utils/llmDefaults";
 import { BUNDLED_MODEL_CAPABILITY_REGISTRY } from "./bundled";
 import {
   inferProviderFromApiBase,
   isReasoningProvider,
   resolveProviderOrLocal,
+  type ReasoningProvider,
 } from "../utils/provider";
 import {
   fetchOllamaCatalog,
@@ -34,6 +23,7 @@ import {
   applyControlPatch,
   cloneRegistry,
   findRegistryEntry,
+  isRecord,
   MODEL_CAPABILITY_MAX_TOKEN_LIMIT,
   MODEL_CAPABILITY_REGISTRY_MAX_BYTES,
   MODEL_CAPABILITY_REGISTRY_URL,
@@ -50,6 +40,7 @@ import type {
   ModelCatalogIdentity,
   ModelControlPatch,
   ModelReasoningCapability,
+  ReasoningCapabilityOption,
   ModelSamplingCapability,
   RegistryModelEntry,
   ResolvedModelCapabilities,
@@ -180,43 +171,30 @@ function legacyReasoning(
   model: string,
 ): ModelReasoningCapability {
   const legacyProviderName = legacyReasoningProvider(provider);
-  if (
-    !legacyProviderName ||
-    !supportsReasoningForModel(legacyProviderName, model)
-  ) {
-    return { kind: "none", options: [] };
-  }
-  const options = getRuntimeReasoningOptionsForModel(legacyProviderName, model)
-    .filter((option) => option.enabled)
-    .map((option) => ({
-      id: option.level,
-      label: option.label || option.level,
-      enabled: option.enabled,
-    }));
-  const defaultOptionId = options[0]?.id;
-  return options.length
-    ? {
-        kind: options.length === 1 ? "fixed" : "select",
-        options,
-        defaultOptionId,
-      }
-    : { kind: "none", options: [] };
+  if (!legacyProviderName) return { kind: "none", options: [] };
+  // Every family's registry-miss ladder — declarative and imperative
+  // alike — now reads from the registry's familyFallbacks section (controls
+  // included, so the menu and the wire come from the same data).
+  return familyFallbackFor(legacyProviderName) ?? { kind: "none", options: [] };
 }
 
-function legacyReasoningProfiles(
-  provider: ModelCapabilityProvider,
-  model: string,
-): void {
-  // Touching these profiles here keeps the adapter boundary explicit.  Their
-  // detailed encoders remain in llmClient until all provider transports have
-  // moved to declarative controls.
-  if (provider === "openai" || provider === "grok")
-    getOpenAIReasoningProfileForModel(model);
-  if (provider === "gemini") getGeminiReasoningProfileForModel(model);
-  if (provider === "anthropic") getAnthropicReasoningProfileForModel(model);
-  if (provider === "qwen") getQwenReasoningProfileForModel(model);
-  if (provider === "deepseek") getDeepseekReasoningProfileForModel(model);
-  if (provider === "mimo") getMimoReasoningProfileForModel(model);
+/**
+ * A family's registry-miss reasoning ladder, from the registry's
+ * `familyFallbacks` section — the data-side replacement for the code-side
+ * optimistic fallbacks. The active registry wins; the bundled copy backs it
+ * up so a hand-edited or partial remote document cannot remove the fallback.
+ */
+function familyFallbackFor(provider: string): ModelReasoningCapability | null {
+  const fallback =
+    activeRegistry.familyFallbacks?.[provider] ??
+    BUNDLED_MODEL_CAPABILITY_REGISTRY.familyFallbacks?.[provider];
+  return fallback ? cloneRegistryModelReasoning(fallback) : null;
+}
+
+function cloneRegistryModelReasoning(
+  value: ModelReasoningCapability,
+): ModelReasoningCapability {
+  return JSON.parse(JSON.stringify(value));
 }
 
 function buildCatalogKey(identity: ModelCapabilityIdentity): string {
@@ -327,7 +305,6 @@ function mergeReasoning(
   protocol?: string,
 ): { reasoning: ModelReasoningCapability; source: CapabilitySource } {
   const legacy = legacyReasoning(provider, model);
-  legacyReasoningProfiles(provider, model);
   if (live?.reasoningSupported === false) {
     return { reasoning: { kind: "none", options: [] }, source: "live" };
   }
@@ -696,14 +673,58 @@ export function getModelReasoningDefaultLevel(
   const capabilities = getModelCapabilities(identity);
   const reasoning = capabilities.reasoning;
   if (reasoning.kind === "none") return null;
-  const legacyProvider = legacyReasoningProvider(capabilities.provider);
   return (
     reasoning.defaultOptionId ||
     reasoning.options[0]?.id ||
-    (legacyProvider
-      ? getReasoningDefaultLevelForModel(legacyProvider, identity.model)
-      : null)
+    legacyReasoning(capabilities.provider, identity.model).defaultOptionId ||
+    null
   );
+}
+
+/**
+ * Context tokens a reasoning option reserves for its thinking, read from the
+ * option's declared controls. The shape knowledge (which nesting a budget
+ * hides behind, per family and protocol) lives here in the capability layer
+ * so consumers do not have to enumerate it — the utility-LLM planner used to
+ * keep its own eight-spelling probe that silently degraded on new shapes.
+ * Values below zero are Gemini's dynamic/off sentinels, not budgets, and are
+ * rejected.
+ */
+export function getReasoningOptionReserveTokens(
+  option: ReasoningCapabilityOption | undefined,
+): number | undefined {
+  const body = option?.controls?.body;
+  if (!isRecord(body)) return undefined;
+  const candidates = [
+    body.thinking_budget,
+    body.thinkingBudget,
+    isRecord(body.thinking_config)
+      ? body.thinking_config.thinking_budget
+      : undefined,
+    isRecord(body.thinkingConfig)
+      ? body.thinkingConfig.thinkingBudget
+      : undefined,
+    isRecord(body.generation_config) &&
+    isRecord(body.generation_config.thinking_config)
+      ? body.generation_config.thinking_config.thinking_budget
+      : undefined,
+    isRecord(body.generationConfig) &&
+    isRecord(body.generationConfig.thinkingConfig)
+      ? body.generationConfig.thinkingConfig.thinkingBudget
+      : undefined,
+    // Registry gemini entries declare the chat-compat shape nested under
+    // extra_body.google.thinking_config.
+    isRecord(body.extra_body) && isRecord(body.extra_body.google)
+      ? isRecord(body.extra_body.google.thinking_config)
+        ? body.extra_body.google.thinking_config.thinking_budget
+        : undefined
+      : undefined,
+  ];
+  const numeric = candidates.find(
+    (value): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0,
+  );
+  return numeric === undefined ? undefined : Math.floor(numeric);
 }
 
 export function getRuntimeReasoningOptions(

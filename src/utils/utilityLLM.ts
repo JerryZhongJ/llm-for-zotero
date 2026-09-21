@@ -8,16 +8,14 @@ import type { ModelProviderAuthMode } from "./modelProviders";
 import type { ProviderProtocol } from "./providerProtocol";
 import {
   getModelCapabilities,
+  getReasoningOptionReserveTokens,
   type ModelCapabilityProvider,
   type ModelProfileOverride,
   type ModelReasoningCapability,
   type ReasoningCapabilityOption,
 } from "../modelCapabilities";
 import type { ReasoningLevel, ReasoningProvider } from "./reasoningProfiles";
-import {
-  getGeminiReasoningProfileForModel,
-  REASONING_RESERVE_TOKENS_BY_LEVEL,
-} from "./reasoningProfiles";
+import { REASONING_RESERVE_TOKENS_BY_LEVEL } from "./reasoningProfiles";
 import { ALL_REASONING_PROVIDERS } from "./provider";
 import { callLLMWithTimeout } from "./llmCallTimeout";
 
@@ -142,57 +140,6 @@ function providerForReasoning(
   return undefined;
 }
 
-function numericReserveFromControls(
-  option: ReasoningCapabilityOption | undefined,
-): number | undefined {
-  const body = option?.controls?.body;
-  if (!body) return undefined;
-  const candidates = [
-    body.thinking_budget,
-    body.thinkingBudget,
-    isRecord(body.thinking_config)
-      ? body.thinking_config.thinking_budget
-      : undefined,
-    isRecord(body.thinkingConfig)
-      ? body.thinkingConfig.thinkingBudget
-      : undefined,
-    isRecord(body.generation_config) &&
-    isRecord(body.generation_config.thinking_config)
-      ? body.generation_config.thinking_config.thinking_budget
-      : undefined,
-    isRecord(body.generationConfig) &&
-    isRecord(body.generationConfig.thinkingConfig)
-      ? body.generationConfig.thinkingConfig.thinkingBudget
-      : undefined,
-    // Registry gemini entries declare the chat-compat shape nested under
-    // extra_body.google.thinking_config.
-    isRecord(body.extra_body) && isRecord(body.extra_body.google)
-      ? isRecord(body.extra_body.google.thinking_config)
-        ? body.extra_body.google.thinking_config.thinking_budget
-        : undefined
-      : undefined,
-  ];
-  const numeric = candidates.find(
-    (value): value is number =>
-      typeof value === "number" && Number.isFinite(value) && value >= 0,
-  );
-  return numeric === undefined ? undefined : Math.floor(numeric);
-}
-
-function numericGeminiReserve(
-  model: string,
-  level: ReasoningLevel,
-): number | undefined {
-  const value = getGeminiReasoningProfileForModel(model).levelToValue[level];
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? Math.floor(value)
-    : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
 function findLowestSupportedOption(
   reasoning: ModelReasoningCapability,
 ): ReasoningCapabilityOption | undefined {
@@ -272,10 +219,7 @@ function buildReasoningPlan(params: {
     return {
       reasoning: { provider, level },
       reserveTokens:
-        numericReserveFromControls(option) ??
-        (capabilities.provider === "gemini"
-          ? numericGeminiReserve(params.model, level)
-          : undefined) ??
+        getReasoningOptionReserveTokens(option) ??
         REASONING_RESERVE_TOKENS_BY_LEVEL[level] ??
         1_024,
     };

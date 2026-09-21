@@ -1,14 +1,5 @@
 import { assert } from "chai";
 import {
-  getAnthropicReasoningProfileForModel,
-  getDeepseekReasoningProfileForModel,
-  getMimoReasoningProfileForModel,
-  getOpenAIReasoningProfileForModel,
-  getReasoningDefaultLevelForModel,
-  getRuntimeReasoningOptionsForModel,
-  supportsReasoningForModel,
-} from "../src/utils/reasoningProfiles";
-import {
   getModelReasoningDefaultLevel,
   getRuntimeReasoningOptions as getRegistryReasoningOptions,
 } from "../src/modelCapabilities";
@@ -148,16 +139,12 @@ describe("reasoningProfiles", function () {
     it("offers no reasoning levels for the gpt-3 and gpt-4 families", function () {
       for (const model of NON_REASONING_MODELS) {
         assert.deepEqual(
-          getRuntimeReasoningOptionsForModel("openai", model),
+          getRegistryReasoningOptions({ provider: "openai", model }),
           [],
           `${model} should offer no reasoning levels`,
         );
-        assert.isFalse(
-          supportsReasoningForModel("openai", model),
-          `${model} should not claim reasoning support`,
-        );
         assert.isNull(
-          getReasoningDefaultLevelForModel("openai", model),
+          getModelReasoningDefaultLevel({ provider: "openai", model }),
           `${model} should have no default reasoning level`,
         );
       }
@@ -181,15 +168,14 @@ describe("reasoningProfiles", function () {
 
     it("keeps the optimistic level set for an unrecognized OpenAI model", function () {
       // Guard against anyone narrowing this into a fallback swap: a model
-      // OpenAI has not shipped yet must still get a usable level set without
-      // a code change, which is the whole point of the optimistic fallback.
+      // OpenAI has not shipped yet must still get a usable level set
+      // without a code change — now via the registry's familyFallbacks.
       assert.deepEqual(
-        getRuntimeReasoningOptionsForModel("openai", "gpt-6").map(
+        getRegistryReasoningOptions({ provider: "openai", model: "gpt-6" }).map(
           (option) => option.level,
         ),
         ["default", "low", "medium", "high"],
       );
-      assert.isTrue(supportsReasoningForModel("openai", "gpt-6"));
     });
   });
 
@@ -364,30 +350,47 @@ describe("reasoningProfiles", function () {
 
   describe("Anthropic profiles", function () {
     it("classifies current Opus, Sonnet, and Haiku thinking modes", function () {
-      const opus47 = getAnthropicReasoningProfileForModel("claude-opus-4-7");
-      assert.isTrue(opus47.supportsAdaptiveThinking);
-      assert.isFalse(opus47.supportsManualThinking);
-      assert.equal(opus47.preferredMode, "adaptive");
-      assert.equal(opus47.levelToEffort.xhigh, "xhigh");
-
-      const sonnet46 =
-        getAnthropicReasoningProfileForModel("claude-sonnet-4-6");
-      assert.isTrue(sonnet46.supportsAdaptiveThinking);
-      assert.isTrue(sonnet46.supportsManualThinking);
-      assert.equal(sonnet46.preferredMode, "adaptive");
-      assert.equal(sonnet46.levelToEffort.xhigh, "max");
-
-      const haiku45 = getAnthropicReasoningProfileForModel(
-        "claude-haiku-4-5-20251001",
+      // The ladders live in the registry's claude entries; the mode
+      // semantics (adaptive vs manual, budgets) are pinned on the wire
+      // below and in the registry-miss snapshots.
+      assert.deepEqual(
+        getRegistryReasoningOptions({
+          provider: "anthropic",
+          model: "claude-opus-4-7",
+        }).map((option) => option.label),
+        ["low", "medium", "high", "xhigh"],
       );
-      assert.isFalse(haiku45.supportsAdaptiveThinking);
-      assert.isTrue(haiku45.supportsManualThinking);
-      assert.equal(haiku45.preferredMode, "manual");
+
+      assert.deepEqual(
+        getRegistryReasoningOptions({
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+        }).map((option) => option.label),
+        ["low", "medium", "high", "max"],
+      );
+
+      assert.deepEqual(
+        getRegistryReasoningOptions({
+          provider: "anthropic",
+          model: "claude-haiku-4-5-20251001",
+        }).map((option) => option.label),
+        ["1024", "2000", "10000", "32000"],
+      );
+      assert.equal(
+        getModelReasoningDefaultLevel({
+          provider: "anthropic",
+          model: "claude-haiku-4-5-20251001",
+        }),
+        "low",
+      );
     });
 
     it("does not expose reasoning options for unknown Claude models", function () {
       assert.deepEqual(
-        getRuntimeReasoningOptionsForModel("anthropic", "claude-unknown-3"),
+        getRegistryReasoningOptions({
+          provider: "anthropic",
+          model: "claude-unknown-3",
+        }),
         [],
       );
     });

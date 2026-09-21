@@ -90,7 +90,6 @@ import {
   type PreparedChatRequest,
   ReasoningConfig as LLMReasoningConfig,
   ReasoningEvent,
-  ReasoningLevel as LLMReasoningLevel,
   UsageStats,
   checkEmbeddingAvailability,
 } from "../../utils/llmClient";
@@ -111,6 +110,12 @@ import {
   ALL_REASONING_PROVIDERS,
   isReasoningProvider,
 } from "../../utils/provider";
+import { resolveUpstreamSelectedLevel } from "./conversationBackend/upstreamReasoningSelection";
+import {
+  isCodexNativeConversationTurn,
+  resolveTurnRunMode,
+} from "./conversationBackend/turnDispatch";
+import type { ReasoningLevel as LLMReasoningLevel } from "../../utils/reasoningProfiles";
 import type { ProviderProtocol } from "../../utils/providerProtocol";
 import { inferLegacyProviderProtocol } from "../../utils/providerProtocol";
 import { isLocalModelApiBase } from "../../utils/providerPresets";
@@ -2654,25 +2659,11 @@ export function getSelectedReasoningForItem(
     .map((option) => option.level);
   if (!enabledLevels.length) return undefined;
 
-  const cachedProvider = selectedReasoningProviderCache.get(itemId);
-  const cachedLevel =
-    cachedProvider === provider ? selectedReasoningCache.get(itemId) : null;
-  let selectedLevel =
-    cachedLevel ||
-    getLastUsedReasoningLevelForProvider(provider) ||
-    (provider === "anthropic" ? "none" : getLastUsedReasoningLevel() || "none");
-  if (provider === "anthropic") {
-    if (!enabledLevels.includes(selectedLevel as LLMReasoningLevel)) {
-      selectedLevel = "none";
-    }
-  } else if (
-    selectedLevel === "none" ||
-    !enabledLevels.includes(selectedLevel as LLMReasoningLevel)
-  ) {
-    selectedLevel = enabledLevels[0];
-  }
-  selectedReasoningCache.set(itemId, selectedLevel);
-  selectedReasoningProviderCache.set(itemId, provider);
+  const { selectedLevel } = resolveUpstreamSelectedLevel({
+    itemId,
+    provider,
+    enabledLevels,
+  });
   setLastUsedReasoningLevelForProvider(provider, selectedLevel);
   if (selectedLevel === "none") return undefined;
 
@@ -7644,9 +7635,10 @@ export async function editLatestUserMessageAndRetry(
     autoLoadedPaperContext.fullTextPaperContexts;
   const activePaperContext = autoLoadedPaperContext.activePaperContext;
   const editRetryCodexNativeMcpLightContext = shouldUseCodexNativeLightContext({
-    isCodexNativeTurn:
-      retryConversationSystem === "codex" &&
-      retryRequestConfig.authMode === "codex_app_server",
+    isCodexNativeTurn: isCodexNativeConversationTurn(
+      retryConversationSystem,
+      retryRequestConfig.authMode,
+    ),
   });
   if (editRetryCodexNativeMcpLightContext) {
     const [enrichedPaperContexts, enrichedFullTextPaperContexts] =
@@ -7996,10 +7988,11 @@ export async function retryLatestAssistantResponse(
       item,
       conversationSystem: effectiveConversationSystem,
     }) || effectiveConversationSystem;
-  const isCodexNativeTurn =
-    effectiveConversationSystem === "codex" &&
-    effectiveRequestConfig.authMode === "codex_app_server";
-  assistantMessage.runMode = isCodexNativeTurn ? "agent" : "chat";
+  const isCodexNativeTurn = isCodexNativeConversationTurn(
+    effectiveConversationSystem,
+    effectiveRequestConfig.authMode,
+  );
+  assistantMessage.runMode = resolveTurnRunMode(isCodexNativeTurn, "chat");
   assistantMessage.modelName = effectiveRequestConfig.model;
   assistantMessage.modelEntryId = effectiveRequestConfig.modelEntryId;
   assistantMessage.modelProviderLabel =
@@ -10454,9 +10447,10 @@ export async function sendQuestion(
   });
   const shouldPersistTurn =
     effectiveRequestConfig.providerProtocol !== "web_sync";
-  const isCodexNativeTurn =
-    effectiveConversationSystem === "codex" &&
-    effectiveRequestConfig.authMode === "codex_app_server";
+  const isCodexNativeTurn = isCodexNativeConversationTurn(
+    effectiveConversationSystem,
+    effectiveRequestConfig.authMode,
+  );
   const isCodexNativeCompactCommand =
     isCodexNativeTurn && isCompactCommandText(question);
   if (isCodexNativeCompactCommand) {
