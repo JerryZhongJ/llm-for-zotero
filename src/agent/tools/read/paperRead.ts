@@ -369,6 +369,13 @@ export function createPaperReadTool(
       const images = args.images === true;
       const sections = normalizeStringArray(args.sections);
       const pages = normalizePages(args.pages);
+      // An unparseable pages value must fail loudly: silently dropping it
+      // would degrade the call to an overview read the model never asked for.
+      if (hasArg(args, "pages") && !pages?.length) {
+        return fail(
+          "Could not parse pages. Pass exact PDF pages as numbers (17), an array ([16,17,18]), or a bare range string ('16-20').",
+        );
+      }
       const labels = normalizeStringArray(args.labels);
       const readFullReason = normalizeString(args.readFullReason);
 

@@ -651,6 +651,33 @@ describe("semantic tool surface", function () {
     assert.equal(attachmentImageTarget.ok, true);
   });
 
+  it("paper_read fails loudly when a provided pages value cannot be parsed", function () {
+    const tool = createPaperReadTool(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    for (const badPages of ["PDF 11-12", "", [], [0], [-2], "abc"]) {
+      const validated = tool.validate({ pages: badPages });
+      assert.equal(
+        validated.ok,
+        false,
+        `pages ${JSON.stringify(badPages)} should fail validation`,
+      );
+      if (!validated.ok) {
+        assert.include(validated.error, "Could not parse pages");
+      }
+    }
+
+    // Parseable forms keep validating: bare range, prefixed range, array.
+    assert.equal(tool.validate({ pages: "11-12" }).ok, true);
+    assert.equal(tool.validate({ pages: "pp. 11-12" }).ok, true);
+    assert.equal(tool.validate({ pages: [11, 12] }).ok, true);
+    assert.equal(tool.validate({ pages: 11 }).ok, true);
+  });
+
   it("paper_read advertises selector-shaped target coordinates", function () {
     const tool = createPaperReadTool(
       {} as never,
