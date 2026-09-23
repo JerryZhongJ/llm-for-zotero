@@ -511,7 +511,7 @@ function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
     return (
       "TURN RULE: The user explicitly requested exhaustive full-text reading. " +
       "Your very first action MUST be to call `paper_read({ readFullReason:'the user explicitly requested exhaustive full-text reading' })` targeting only the requested paper(s). " +
-      "Overview and passage retrieval do not satisfy this request. Preserve the coverage receipt and do not claim complete reading when it is partial or unreadable."
+      "Section and passage retrieval do not satisfy this request. Preserve the coverage receipt and do not claim complete reading when it is partial or unreadable."
     );
   }
   const allHaveMineruCache = fullTextPapers.every((entry) =>
@@ -520,14 +520,14 @@ function buildAutoReadInstruction(request: AgentRuntimeRequest): string {
   if (allHaveMineruCache) {
     return (
       "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
-      "your very first action MUST be to call `paper_read()` targeting only those full-text papers. " +
-      "The overview read dispatches to the available MinerU or PDF text path; use `paper_query({ query:'...' })` only for a specific missing claim. " +
+      "your very first action MUST be to call `paper_read({ sections:['Abstract','Introduction','Conclusion'] })` targeting only those full-text papers. " +
+      "The section read dispatches to the available MinerU or PDF text path; use `paper_query({ query:'...' })` only for a specific missing claim. " +
       "Do this before answering, even if the answer seems obvious."
     );
   }
   return (
     "TURN RULE: Because the user marked specific paper(s) for full-text use on this turn, " +
-    "your very first action MUST be to call `paper_read()` targeting only those full-text papers. " +
+    "your very first action MUST be to call `paper_read({ sections:['Abstract','Introduction','Conclusion'] })` targeting only those full-text papers. " +
     "Do this before answering, even if the answer seems obvious. " +
     "Do not include retrieval-only papers in that mandatory first read."
   );

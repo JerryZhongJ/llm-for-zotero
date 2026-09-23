@@ -10,7 +10,6 @@ import {
 import { AgentToolRegistry } from "../src/agent/tools/registry";
 import {
   createPaperReadTool as createResolvedPaperReadTool,
-  resolveMetadataOverviewTitleForTests,
 } from "../src/agent/tools/read/paperRead";
 import {
   createPaperQueryTool as createResolvedPaperQueryTool,
@@ -127,54 +126,6 @@ describe("semantic tool surface", function () {
     currentAnswerText: "",
     modelName: "gpt-5.5",
   };
-
-  it("uses content-source titles only for genuinely standalone attachments", function () {
-    assert.equal(
-      resolveMetadataOverviewTitleForTests({
-        source: "live",
-        itemId: 77,
-        contextItemId: 77,
-        creators: [],
-        contentSource: {
-          itemId: 77,
-          title: "Standalone preprint.pdf",
-        },
-        warnings: [],
-      }),
-      "Standalone preprint.pdf",
-    );
-    assert.equal(
-      resolveMetadataOverviewTitleForTests({
-        source: "live",
-        itemId: 42,
-        contextItemId: 101,
-        title: "Bibliographic title",
-        creators: [],
-        contentSource: {
-          itemId: 101,
-          parentItemId: 42,
-          title: "Full Text PDF",
-        },
-        warnings: [],
-      }),
-      "Bibliographic title",
-    );
-    assert.equal(
-      resolveMetadataOverviewTitleForTests({
-        source: "live",
-        itemId: 42,
-        contextItemId: 101,
-        creators: [],
-        contentSource: {
-          itemId: 101,
-          parentItemId: 42,
-          title: "Full Text PDF",
-        },
-        warnings: [],
-      }),
-      "Paper 42",
-    );
-  });
 
   function resolvedSkillRequest(
     fields: Partial<import("../src/agent/types").AgentRuntimeRequestInput>,
@@ -507,6 +458,7 @@ describe("semantic tool surface", function () {
     );
     const validated = tool.validate({
       target: { itemId: 999, contextItemId: 1000 },
+      sections: ["Abstract"],
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -599,6 +551,7 @@ describe("semantic tool surface", function () {
 
     const emptyEntry = tool.validate({
       target: [{}],
+      sections: ["Abstract"],
     });
     assert.equal(emptyEntry.ok, false);
     if (!emptyEntry.ok) {
@@ -607,6 +560,7 @@ describe("semantic tool surface", function () {
 
     const visualOnly = tool.validate({
       target: { attachmentId: "upload-1" },
+      sections: ["Abstract"],
     });
     assert.equal(visualOnly.ok, false);
     if (!visualOnly.ok) {
@@ -618,6 +572,7 @@ describe("semantic tool surface", function () {
         ...Array.from({ length: 20 }, (_, index) => ({ itemId: index + 1 })),
         {},
       ],
+      sections: ["Abstract"],
     });
     assert.equal(lateEmptyEntry.ok, false);
     if (!lateEmptyEntry.ok) {
@@ -678,6 +633,27 @@ describe("semantic tool surface", function () {
     assert.equal(tool.validate({ pages: 11 }).ok, true);
   });
 
+  it("paper_read fails loudly when called without a locator", function () {
+    const tool = createPaperReadTool(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    for (const args of [{}, { target: { itemId: 1 } }]) {
+      const validated = tool.validate(args);
+      assert.equal(
+        validated.ok,
+        false,
+        `${JSON.stringify(args)} should fail validation`,
+      );
+      if (!validated.ok) {
+        assert.include(validated.error, "paper_read requires a locator");
+      }
+    }
+  });
+
   it("paper_read advertises selector-shaped target coordinates", function () {
     const tool = createPaperReadTool(
       {} as never,
@@ -707,9 +683,16 @@ describe("semantic tool surface", function () {
     };
     const tool = createPaperReadTool(
       {
-        getOverviewExcerpt: async () => ({
-          text: "should not be read",
-          paperContext: activeReaderPaper,
+        ensurePaperContext: async () => ({
+          chunks: ["should not be read"],
+          chunkMeta: [
+            {
+              chunkIndex: 0,
+              text: "should not be read",
+              sectionLabel: "Abstract",
+              chunkKind: "abstract",
+            },
+          ],
         }),
       } as never,
       {} as never,
@@ -723,7 +706,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => activeReaderPaper,
       } as never,
     );
-    const validated = tool.validate({});
+    const validated = tool.validate({ sections: ["Abstract"] });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
 
@@ -756,14 +739,17 @@ describe("semantic tool surface", function () {
     };
     const tool = createPaperReadTool(
       {
-        getOverviewExcerpt: async ({
-          paperContext,
-        }: {
-          paperContext: unknown;
-        }) => ({
-          backend: "pdf",
-          text: "active paper overview",
-          paperContext,
+        ensurePaperContext: async (paperContext: unknown) => ({
+          chunks: ["active paper abstract"],
+          chunkMeta: [
+            {
+              chunkIndex: 0,
+              text: "active paper abstract",
+              sectionLabel: "Abstract",
+              chunkKind: "abstract",
+              paperContext,
+            },
+          ],
         }),
       } as never,
       {} as never,
@@ -773,7 +759,7 @@ describe("semantic tool surface", function () {
         resolvePaperContextTarget: () => activeReaderPaper,
       } as never,
     );
-    const validated = tool.validate({});
+    const validated = tool.validate({ sections: ["Abstract"] });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
 
@@ -801,14 +787,16 @@ describe("semantic tool surface", function () {
     };
     const tool = createPaperReadTool(
       {
-        getOverviewExcerpt: async ({
-          paperContext,
-        }: {
-          paperContext: unknown;
-        }) => ({
-          backend: "pdf",
-          text: "collection paper overview",
-          paperContext,
+        ensurePaperContext: async () => ({
+          chunks: ["collection paper abstract"],
+          chunkMeta: [
+            {
+              chunkIndex: 0,
+              text: "collection paper abstract",
+              sectionLabel: "Abstract",
+              chunkKind: "abstract",
+            },
+          ],
         }),
       } as never,
       {} as never,
@@ -820,6 +808,7 @@ describe("semantic tool surface", function () {
     );
     const validated = tool.validate({
       target: [{ itemId: 11, contextItemId: 22 }],
+      sections: ["Abstract"],
     });
     assert.equal(validated.ok, true);
     if (!validated.ok) return;
@@ -837,490 +826,6 @@ describe("semantic tool surface", function () {
     const first = (output as { results: Array<Record<string, unknown>> })
       .results[0];
     assert.deepEqual(first.paperContext, collectionPaper);
-  });
-
-  it("paper_read overview falls back to Zotero metadata when PDF text is unavailable", async function () {
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "Metadata Only Paper",
-      firstCreator: "Charest",
-      year: "2014",
-    };
-    const tool = createPaperReadTool(
-      {
-        getOverviewExcerpt: async () => {
-          throw new Error("No extractable PDF text available for this paper");
-        },
-      } as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-        getItem: (itemId: number) =>
-          itemId === 11
-            ? ({
-                id: 11,
-                libraryID: 1,
-                key: "METAONLY",
-                itemTypeID: 1,
-                itemType: "journalArticle",
-                isRegularItem: () => true,
-                isAttachment: () => false,
-                isNote: () => false,
-                getDisplayTitle: () => "Metadata Only Paper",
-                getField: (fieldName: string) =>
-                  ({
-                    title: "Metadata Only Paper",
-                    abstractNote:
-                      "This abstract is enough for a high-level overview.",
-                    publicationTitle: "Journal of Tests",
-                    date: "2014",
-                    DOI: "10.1000/meta",
-                  })[fieldName] || "",
-                getCreatorsJSON: () => [
-                  {
-                    creatorType: "author",
-                    firstName: "Iva",
-                    lastName: "Charest",
-                    fieldMode: 0,
-                  },
-                ],
-              } as unknown as Zotero.Item)
-            : null,
-        resolveMetadataItem: () => ({ id: 11 }),
-        getEditableArticleMetadata: () => ({
-          itemId: 11,
-          itemType: "journalArticle",
-          title: "Metadata Only Paper",
-          fields: {
-            title: "Metadata Only Paper",
-            shortTitle: "",
-            abstractNote: "This abstract is enough for a high-level overview.",
-            publicationTitle: "Journal of Tests",
-            journalAbbreviation: "",
-            proceedingsTitle: "",
-            date: "2014",
-            volume: "",
-            issue: "",
-            pages: "",
-            DOI: "10.1000/meta",
-            url: "",
-            language: "",
-            extra: "",
-            ISSN: "",
-            ISBN: "",
-            publisher: "",
-            place: "",
-          },
-          creators: [
-            {
-              creatorType: "author",
-              firstName: "Iva",
-              lastName: "Charest",
-            },
-          ],
-        }),
-      } as never,
-    );
-    const validated = tool.validate({});
-    assert.equal(validated.ok, true);
-    if (!validated.ok) return;
-    const output = await tool.execute(validated.value, baseContext);
-    const result = (output as { results?: Array<Record<string, unknown>> })
-      .results?.[0];
-    assert.equal(result?.backend, "zotero_metadata");
-    assert.equal(result?.sourceKind, "zotero_metadata");
-    assert.equal(result?.contentStatus, "no_extractable_pdf_text");
-    assert.include(String(result?.text || ""), "Title: Metadata Only Paper");
-    assert.include(String(result?.text || ""), "This abstract is enough");
-    assert.equal(result?.sourceLabel, "(Charest, 2014)");
-    assert.lengthOf(
-      (output as { quoteCitations?: unknown[] }).quoteCitations || [],
-      0,
-    );
-  });
-
-  it("paper_read overview never promotes a child attachment title over a cleared live paper title", async function () {
-    const paperContext = {
-      libraryID: 1,
-      itemId: 42,
-      contextItemId: 101,
-      title: "Stored stale title",
-    };
-    const items = new Map<number, Zotero.Item>([
-      [
-        42,
-        {
-          id: 42,
-          libraryID: 1,
-          key: "PARENT42",
-          itemTypeID: 1,
-          itemType: "journalArticle",
-          isRegularItem: () => true,
-          isAttachment: () => false,
-          isNote: () => false,
-          getDisplayTitle: () => "Item 42",
-          getField: () => "",
-          getCreatorsJSON: () => [],
-        } as unknown as Zotero.Item,
-      ],
-      [
-        101,
-        {
-          id: 101,
-          libraryID: 1,
-          key: "PDF101",
-          parentID: 42,
-          itemTypeID: 14,
-          itemType: "attachment",
-          attachmentFilename: "paper.pdf",
-          attachmentContentType: "application/pdf",
-          isRegularItem: () => false,
-          isAttachment: () => true,
-          isNote: () => false,
-          getDisplayTitle: () => "Full Text PDF",
-          getField: (fieldName: string) =>
-            fieldName === "title" ? "Full Text PDF" : "",
-          getCreatorsJSON: () => [],
-          getFilename: () => "paper.pdf",
-        } as unknown as Zotero.Item,
-      ],
-    ]);
-    const tool = createPaperReadTool(
-      {
-        getOverviewExcerpt: async () => {
-          throw new Error("No extractable PDF text available");
-        },
-      } as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-        getItem: (itemId: number) => items.get(itemId) || null,
-      } as never,
-    );
-    const validated = tool.validate({});
-    assert.isTrue(validated.ok);
-    if (!validated.ok) return;
-
-    const output = await tool.execute(validated.value, baseContext);
-    const result = (output as { results?: Array<Record<string, unknown>> })
-      .results?.[0];
-    const text = String(result?.text || "");
-    assert.include(text, "Title: Paper 42");
-    assert.notInclude(text, "Full Text PDF");
-    assert.notInclude(text, "Stored stale title");
-  });
-
-  it("paper_read overview keeps MinerU failure warning while using Zotero metadata fallback", async function () {
-    const globalScope = globalThis as typeof globalThis & {
-      IOUtils?: { read?: unknown };
-    };
-    const originalIOUtils = globalScope.IOUtils;
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "Metadata After MinerU Failure",
-      firstCreator: "Charest",
-      year: "2014",
-      mineruCacheDir: "/tmp/missing-mineru-paper",
-    };
-    globalScope.IOUtils = {
-      read: async () => {
-        throw new Error("full.md disappeared");
-      },
-    };
-    try {
-      const tool = createPaperReadTool(
-        {
-          getOverviewExcerpt: async () => {
-            throw new Error("PDF text extraction failed");
-          },
-        } as never,
-        {} as never,
-        {} as never,
-        {
-          listPaperContexts: () => [paperContext],
-          resolvePaperContextTarget: () => paperContext,
-          getItem: (itemId: number) =>
-            itemId === 11
-              ? ({
-                  id: 11,
-                  libraryID: 1,
-                  key: "METAAFTERFAILURE",
-                  itemTypeID: 1,
-                  itemType: "journalArticle",
-                  isRegularItem: () => true,
-                  isAttachment: () => false,
-                  isNote: () => false,
-                  getDisplayTitle: () => "Metadata After MinerU Failure",
-                  getField: (fieldName: string) =>
-                    ({
-                      title: "Metadata After MinerU Failure",
-                      abstractNote:
-                        "Abstract fallback should still be available.",
-                    })[fieldName] || "",
-                  getCreatorsJSON: () => [
-                    {
-                      creatorType: "author",
-                      firstName: "Iva",
-                      lastName: "Charest",
-                      fieldMode: 0,
-                    },
-                  ],
-                } as unknown as Zotero.Item)
-              : null,
-          resolveMetadataItem: () => ({ id: 11 }),
-          getEditableArticleMetadata: () => ({
-            itemId: 11,
-            itemType: "journalArticle",
-            title: "Metadata After MinerU Failure",
-            fields: {
-              title: "Metadata After MinerU Failure",
-              abstractNote: "Abstract fallback should still be available.",
-            },
-            creators: [
-              {
-                creatorType: "author",
-                firstName: "Iva",
-                lastName: "Charest",
-              },
-            ],
-          }),
-        } as never,
-      );
-      const validated = tool.validate({});
-      assert.equal(validated.ok, true);
-      if (!validated.ok) return;
-      const output = await tool.execute(validated.value, baseContext);
-      const result = (output as { results?: Array<Record<string, unknown>> })
-        .results?.[0];
-      assert.equal(result?.backend, "zotero_metadata");
-      assert.include(String(result?.text || ""), "Abstract fallback");
-      assert.include(String(result?.warning || ""), "full.md disappeared");
-      assert.include(
-        String(result?.warning || ""),
-        "PDF text extraction failed",
-      );
-    } finally {
-      if (originalIOUtils === undefined) {
-        delete globalScope.IOUtils;
-      } else {
-        globalScope.IOUtils = originalIOUtils;
-      }
-    }
-  });
-
-  it("paper_read overview labels metadata fallback when no PDF is attached", async function () {
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 11,
-      title: "Metadata Only Paper",
-      firstCreator: "Charest",
-      year: "2014",
-    };
-    const tool = createPaperReadTool(
-      {
-        getOverviewExcerpt: async () => {
-          throw new Error(
-            "No PDF attachment is available for this Zotero item",
-          );
-        },
-      } as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-        getItem: (itemId: number) =>
-          itemId === 11
-            ? ({
-                id: 11,
-                libraryID: 1,
-                key: "NOPDF",
-                itemTypeID: 1,
-                itemType: "journalArticle",
-                isRegularItem: () => true,
-                isAttachment: () => false,
-                isNote: () => false,
-                getDisplayTitle: () => "Metadata Only Paper",
-                getField: (fieldName: string) =>
-                  ({
-                    title: "Metadata Only Paper",
-                    abstractNote: "This abstract is all that exists locally.",
-                  })[fieldName] || "",
-                getCreatorsJSON: () => [
-                  {
-                    creatorType: "author",
-                    firstName: "Iva",
-                    lastName: "Charest",
-                    fieldMode: 0,
-                  },
-                ],
-              } as unknown as Zotero.Item)
-            : null,
-        resolveMetadataItem: () => ({ id: 11 }),
-        getEditableArticleMetadata: () => ({
-          itemId: 11,
-          itemType: "journalArticle",
-          title: "Metadata Only Paper",
-          fields: {
-            title: "Metadata Only Paper",
-            abstractNote: "This abstract is all that exists locally.",
-          },
-          creators: [
-            {
-              creatorType: "author",
-              firstName: "Iva",
-              lastName: "Charest",
-            },
-          ],
-        }),
-      } as never,
-    );
-    const validated = tool.validate({});
-    assert.equal(validated.ok, true);
-    if (!validated.ok) return;
-    const output = await tool.execute(validated.value, baseContext);
-    const result = (output as { results?: Array<Record<string, unknown>> })
-      .results?.[0];
-    assert.equal(result?.backend, "zotero_metadata");
-    assert.equal(result?.contentStatus, "no_pdf_attachment");
-    assert.include(String(result?.warning || ""), "No PDF attachment");
-    assert.equal(result?.sourceLabel, "(Charest, 2014)");
-  });
-
-  it("paper_read MinerU overview uses citation-compatible source labels", async function () {
-    const globalScope = globalThis as typeof globalThis & {
-      IOUtils?: { read?: unknown };
-    };
-    const originalIOUtils = globalScope.IOUtils;
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "MinerU Paper",
-      firstCreator: "Miller",
-      year: "2025",
-      mineruCacheDir: "/tmp/mineru-paper",
-    };
-    const abstractText =
-      "MinerU preserves this substantive finding directly from the original paper text without requiring a PDF page number.";
-    const discussionText =
-      "The discussion explains why the observed effect remains reliable across repeated measurements.";
-    globalScope.IOUtils = {
-      read: async () =>
-        new TextEncoder().encode(
-          `# MinerU Paper\n\n${abstractText}\n\n# Discussion\n\n${discussionText}`,
-        ),
-    };
-    try {
-      const tool = createPaperReadTool(
-        {} as never,
-        {} as never,
-        {} as never,
-        {
-          listPaperContexts: () => [paperContext],
-          resolvePaperContextTarget: () => paperContext,
-        } as never,
-      );
-      const validated = tool.validate({});
-      assert.equal(validated.ok, true);
-      if (!validated.ok) return;
-      const output = await tool.execute(validated.value, baseContext);
-      const result = (output as { results?: Array<Record<string, unknown>> })
-        .results?.[0];
-      const quoteCitations =
-        (
-          output as {
-            quoteCitations?: Array<Record<string, unknown>>;
-          }
-        ).quoteCitations || [];
-      assert.equal(result?.backend, "mineru");
-      assert.equal(result?.citationLabel, "Miller, 2025");
-      assert.equal(result?.sourceLabel, "(Miller, 2025)");
-      assert.deepEqual(
-        quoteCitations.map((citation) => citation.quoteText),
-        [abstractText, discussionText],
-      );
-      assert.deepEqual(
-        quoteCitations.map((citation) => citation.sourceMatchSource),
-        ["context-text", "context-text"],
-      );
-      assert.isUndefined(quoteCitations[0]?.pageHintIndex);
-      assert.deepEqual(
-        result?.quoteAnchors,
-        quoteCitations.map((citation) => `[[quote:${citation.id}]]`),
-      );
-    } finally {
-      if (originalIOUtils === undefined) {
-        delete globalScope.IOUtils;
-      } else {
-        globalScope.IOUtils = originalIOUtils;
-      }
-    }
-  });
-
-  it("paper_read MinerU overview strips legacy source image embeds", async function () {
-    const originalIOUtils = globalScope.IOUtils;
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "MinerU Paper",
-      firstCreator: "Miller",
-      year: "2025",
-      mineruCacheDir: "/tmp/mineru-paper",
-    };
-    globalScope.IOUtils = {
-      read: async () =>
-        encoder.encode(
-          [
-            "# MinerU Paper",
-            "",
-            "Abstract text.",
-            "",
-            "![](images/raw-abstract.jpg)",
-            "",
-            "# Discussion",
-            "",
-            "Discussion text.",
-            "",
-            "![panel](images/raw-discussion.png)",
-          ].join("\n"),
-        ),
-    };
-    try {
-      const tool = createPaperReadTool(
-        {} as never,
-        {} as never,
-        {} as never,
-        {
-          listPaperContexts: () => [paperContext],
-          resolvePaperContextTarget: () => paperContext,
-        } as never,
-      );
-      const validated = tool.validate({});
-      assert.equal(validated.ok, true);
-      if (!validated.ok) return;
-      const output = await tool.execute(validated.value, baseContext);
-      const result = (output as { results?: Array<Record<string, unknown>> })
-        .results?.[0];
-      const text = String(result?.text || "");
-      assert.equal(result?.backend, "mineru");
-      assert.include(text, "Abstract text.");
-      assert.include(text, "Discussion text.");
-      assert.notInclude(text, "images/raw-abstract.jpg");
-      assert.notInclude(text, "images/raw-discussion.png");
-      assert.notInclude(text, "![](");
-    } finally {
-      if (originalIOUtils === undefined) {
-        delete globalScope.IOUtils;
-      } else {
-        globalScope.IOUtils = originalIOUtils;
-      }
-    }
   });
 
   it("paper_read labels without images fail with an actionable fix", function () {
@@ -1890,237 +1395,6 @@ describe("semantic tool surface", function () {
     assert.deepEqual(requestedPages, [1]);
     assert.equal(output.content?.pageCount, 1);
     assert.lengthOf(output.artifacts || [], 1);
-  });
-
-  it("paper_read overview dedupes default paper contexts and traces the source label", async function () {
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "Memory Palace Paper",
-      firstCreator: "Chandra et al.",
-      year: "2025",
-    };
-    let overviewCalls = 0;
-    const tool = createPaperReadTool(
-      {
-        getOverviewExcerpt: async () => {
-          overviewCalls += 1;
-          return {
-            backend: "pdf",
-            text: "Overview text.",
-            citationLabel: "Chandra et al., 2025",
-            sourceLabel: "(Chandra et al., 2025)",
-            paperContext,
-          };
-        },
-      } as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [paperContext, { ...paperContext }],
-        resolvePaperContextTarget: () => paperContext,
-      } as never,
-    );
-    const validated = tool.validate({});
-    assert.equal(validated.ok, true);
-    if (!validated.ok) return;
-    const output = await tool.execute(validated.value, baseContext);
-    assert.equal(overviewCalls, 1);
-    assert.lengthOf((output as { results?: unknown[] }).results || [], 1);
-    const onSuccess = tool.presentation?.summaries?.onSuccess;
-    assert.isFunction(onSuccess);
-    if (typeof onSuccess !== "function") return;
-    assert.equal(
-      onSuccess({ label: "Read Paper", content: output }),
-      "Read paper overview from (Chandra et al., 2025)",
-    );
-    assert.equal(
-      onSuccess({
-        label: "Read Paper",
-        content: {
-          mode: "overview",
-          results: [
-            { sourceLabel: "(Chandra et al., 2025)" },
-            { sourceLabel: "(Miller, 2024)" },
-          ],
-        },
-      }),
-      "Read paper overviews from 2 sources",
-    );
-  });
-
-  it("paper_read overview keeps verified quotes without page metadata", async function () {
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "Recurrent Attention Paper",
-      firstCreator: "Mnih et al.",
-      year: "2014",
-    };
-    const tool = createPaperReadTool(
-      {
-        getOverviewExcerpt: async () => ({
-          backend: "raw_pdf_text",
-          text:
-            "[chunk 0]\nRecurrent models reduce computation by selecting only a sequence of image locations.\n\n" +
-            "[chunk 4]\nThe agent learns where to attend using reinforcement learning from task reward.",
-          chunkIndexes: [0, 4],
-          totalChunks: 5,
-          citationLabel: "Mnih et al., 2014",
-          sourceLabel: "(Mnih et al., 2014)",
-          paperContext,
-        }),
-      } as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-      } as never,
-    );
-    const validated = tool.validate({});
-    assert.equal(validated.ok, true);
-    if (!validated.ok) return;
-    const output = (await tool.execute(validated.value, baseContext)) as {
-      results?: Array<{
-        quoteCitationIds?: string[];
-        quoteAnchors?: string[];
-      }>;
-      quoteCitations?: Array<{
-        id: string;
-        quoteText: string;
-        citationLabel: string;
-        sourceMatchKind?: string;
-        sourceMatchSource?: string;
-        pageHintIndex?: number;
-        pageHintLabel?: string;
-      }>;
-    };
-
-    assert.lengthOf(output.quoteCitations || [], 2);
-    assert.equal(
-      output.quoteCitations?.[0]?.quoteText,
-      "Recurrent models reduce computation by selecting only a sequence of image locations.",
-    );
-    assert.equal(
-      output.quoteCitations?.[0]?.citationLabel,
-      "(Mnih et al., 2014)",
-    );
-    assert.equal(output.quoteCitations?.[0]?.sourceMatchKind, "exact");
-    assert.equal(output.quoteCitations?.[0]?.sourceMatchSource, "context-text");
-    assert.isUndefined(output.quoteCitations?.[0]?.pageHintIndex);
-    assert.isUndefined(output.quoteCitations?.[0]?.pageHintLabel);
-    assert.deepEqual(
-      output.results?.[0]?.quoteCitationIds,
-      output.quoteCitations?.map((citation) => citation.id),
-    );
-    assert.deepEqual(
-      output.results?.[0]?.quoteAnchors,
-      output.quoteCitations?.map((citation) => `[[quote:${citation.id}]]`),
-    );
-  });
-
-  it("paper_read overview does not trust text without source paper identity", async function () {
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "Unresolved Source Paper",
-      firstCreator: "Unknown",
-      year: "2026",
-    };
-    const tool = createPaperReadTool(
-      {
-        getOverviewExcerpt: async () => ({
-          backend: "raw_pdf_text",
-          text: "This substantive-looking sentence has no paper identity on its source result and therefore must not become a verified quote.",
-          chunkIndexes: [0],
-          totalChunks: 1,
-          citationLabel: "Unknown, 2026",
-          sourceLabel: "(Unknown, 2026)",
-        }),
-      } as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-      } as never,
-    );
-    const validated = tool.validate({});
-    assert.equal(validated.ok, true);
-    if (!validated.ok) return;
-    const output = (await tool.execute(validated.value, baseContext)) as {
-      results?: Array<{ quoteAnchors?: string[] }>;
-      quoteCitations?: unknown[];
-    };
-
-    assert.lengthOf(output.quoteCitations || [], 0);
-    assert.isUndefined(output.results?.[0]?.quoteAnchors);
-  });
-
-  it("paper_read overview does not anchor publisher DOI boilerplate", async function () {
-    const paperContext = {
-      itemId: 11,
-      contextItemId: 22,
-      title: "Visual Cortex Paper",
-      firstCreator: "Liu et al.",
-      year: "2026",
-    };
-    const substantiveSentence =
-      "Task learning increased information redundancy in macaque visual cortex without reducing population-level information.";
-    const boilerplate =
-      "Full article and list of author affiliations: https://doi.org/10.1126/science.adw7707";
-    const tool = createPaperReadTool(
-      {
-        getOverviewExcerpt: async () => ({
-          backend: "raw_pdf_text",
-          text:
-            `[chunk 0]\n${boilerplate}\n\n` +
-            `[chunk 4]\n${substantiveSentence}`,
-          citationLabel: "Liu et al., 2026",
-          sourceLabel: "(Liu et al., 2026)",
-          pageIndex: 4,
-          pageLabel: "5",
-          paperContext,
-        }),
-      } as never,
-      {} as never,
-      {} as never,
-      {
-        listPaperContexts: () => [paperContext],
-        resolvePaperContextTarget: () => paperContext,
-      } as never,
-    );
-    const validated = tool.validate({});
-    assert.equal(validated.ok, true);
-    if (!validated.ok) return;
-    const output = (await tool.execute(validated.value, {
-      ...baseContext,
-      request: {
-        ...baseContext.request,
-        userText: "Read the complete text.",
-      },
-    })) as {
-      results?: Array<{ quoteAnchors?: string[] }>;
-      quoteCitations?: Array<{
-        quoteText: string;
-        sourceMatchSource?: string;
-        pageHintIndex?: number;
-      }>;
-    };
-
-    assert.lengthOf(output.quoteCitations || [], 1);
-    assert.equal(output.quoteCitations?.[0]?.quoteText, substantiveSentence);
-    assert.equal(
-      output.quoteCitations?.[0]?.sourceMatchSource,
-      "pdf-page-text",
-    );
-    assert.equal(output.quoteCitations?.[0]?.pageHintIndex, 4);
-    assert.notInclude(
-      output.quoteCitations?.map((citation) => citation.quoteText).join("\n"),
-      boilerplate,
-    );
-    assert.lengthOf(output.results?.[0]?.quoteAnchors || [], 1);
   });
 
   it("paper_query returns grouped per-paper evidence while preserving flat results", async function () {

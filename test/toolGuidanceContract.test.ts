@@ -211,7 +211,7 @@ describe("tool guidance contracts", function () {
     }
     assert.include(
       agentPersona,
-      "Use paper_read with no arguments for a broad single-paper overview",
+      "combine ['Abstract','Introduction','Conclusion'] for a broad picture",
     );
     assert.include(
       fileIoTool,

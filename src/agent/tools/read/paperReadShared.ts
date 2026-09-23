@@ -250,43 +250,6 @@ export function splitOverviewQuoteCandidates(text: string): string[] {
   return out;
 }
 
-export function buildOverviewQuoteCitationPack(
-  results: Array<Record<string, unknown>>,
-): {
-  results: Array<Record<string, unknown>>;
-  quoteCitations: QuoteCitation[];
-} {
-  const quoteCitations: QuoteCitation[] = [];
-  const resultsWithAnchors = results.map((result) => {
-    if (
-      normalizeString(result.backend) === "zotero_metadata" ||
-      normalizeString(result.sourceKind) === "zotero_metadata"
-    ) {
-      return result;
-    }
-    const quoteTexts = splitOverviewQuoteCandidates(
-      normalizeString(result.text) || "",
-    );
-    const resultCitations = quoteTexts
-      .map((quoteText) => buildQuoteCitationFromResult(result, quoteText))
-      .filter((entry): entry is QuoteCitation => Boolean(entry));
-    quoteCitations.push(...resultCitations);
-    return resultCitations.length
-      ? {
-          ...result,
-          quoteCitationIds: resultCitations.map((citation) => citation.id),
-          quoteAnchors: resultCitations.map(
-            (citation) => `[[quote:${citation.id}]]`,
-          ),
-        }
-      : result;
-  });
-  return {
-    results: resultsWithAnchors,
-    quoteCitations: mergeQuoteCitations(quoteCitations),
-  };
-}
-
 export function getUniqueSourceLabels(entries: unknown[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
