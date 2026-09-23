@@ -11490,6 +11490,10 @@ label.llm-search-results-item:hover {
   flex: 0 0 auto;
   min-width: 0;
   border-top: 1px solid var(--fill-quinary);
+  /* Vertical continuation of the left rail's divider: the panel row sits below
+     the reader, where neither the context pane splitter nor the reader's own
+     sidebar border reaches, so the panel must draw its own left edge. */
+  border-left: 1px solid var(--fill-quinary);
   background: var(--material-background);
   box-sizing: border-box;
 }
