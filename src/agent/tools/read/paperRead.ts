@@ -54,6 +54,18 @@ const LEGACY_MODE_MESSAGE =
   "paper_read no longer takes 'mode'. Coordinates select the path instead: sections:[...] for section text, pages:[...] for exact pages (add images:true for rendered pages), labels:[...] with images:true for figure crops, readFullReason for an exhaustive whole-document read. For relevance-ranked evidence use paper_query({query}).";
 
 function normalizePages(value: unknown): number[] | undefined {
+  // Some models serialize the array as a JSON string ("[2, 3, 4]"). The
+  // intent is still exact pages, so unwrap it before the shared parser;
+  // anything that is not a JSON array (or parses to junk) falls through
+  // and fails loudly in validate.
+  if (typeof value === "string" && value.trim().startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(value.trim());
+      if (Array.isArray(parsed)) value = parsed;
+    } catch {
+      // Not valid JSON — leave the string to the shared parser.
+    }
+  }
   // Bare page syntax ("16-18") is documented in the schema; the shared
   // parser only understands the "p16-18" form, so prefix bare digits.
   const normalized =
