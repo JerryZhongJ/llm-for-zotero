@@ -204,6 +204,14 @@ export type PdfContext = {
   embeddingPromiseKey?: string;
   /** Last embedding attempt that failed; suppresses retry storms for the same config. */
   embeddingFailureKey?: string;
+  /**
+   * Real document sections with char offsets into sourceText. Present on the
+   * MinerU manifest path, where headings give exact boundaries; section reads
+   * slice these instead of filtering chunks.
+   */
+  sectionIndex?: PaperSectionIndexEntry[];
+  /** Raw source text the sectionIndex offsets refer to. */
+  sourceText?: string;
   sourceType?:
     | "mineru"
     | "zotero-worker"
@@ -212,6 +220,13 @@ export type PdfContext = {
     | "attachment-html"
     | "attachment-txt"
     | "attachment-docx";
+};
+
+export type PaperSectionIndexEntry = {
+  heading: string;
+  charStart: number;
+  charEnd: number;
+  page?: number;
 };
 
 export type PdfChunkKind =

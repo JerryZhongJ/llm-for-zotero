@@ -58,6 +58,7 @@ import type {
   PaperContextCandidate,
   PdfChunkMeta,
   PdfChunkKind,
+  PaperSectionIndexEntry,
   QuoteCitation,
 } from "./types";
 import {
@@ -170,6 +171,17 @@ function convertHtmlTablesToMarkdown(mdText: string): string {
       return tableBlock; // Keep original on error
     }
   });
+}
+
+/**
+ * Apply the same raw→readable postprocessing the chunk pipeline uses, so
+ * section slices match chunk text conventions (HTML tables converted,
+ * MinerU source-image embeds stripped).
+ */
+export function postprocessSectionSlice(text: string): string {
+  return convertHtmlTablesToMarkdown(
+    stripMineruSourceImageEmbedsFromMarkdown(text),
+  ).trim();
 }
 
 function formatErrorForLog(error: unknown): string {
@@ -521,6 +533,8 @@ async function cachePDFText(
 
       let chunks: string[];
       let chunkMeta: PdfChunkMeta[];
+      let sectionIndex: PaperSectionIndexEntry[] | undefined;
+      let sourceText: string | undefined;
 
       if (manifest && !manifest.noSections && manifest.sections.length > 0) {
         // Manifest-aware chunking: slice from the raw markdown (offsets match raw full.md),
@@ -549,6 +563,15 @@ async function cachePDFText(
             chunkMeta[i].text = chunks[i];
             chunkMeta[i].normalizedText = normalizeEvidenceText(chunks[i]);
           }
+          // Real section boundaries: section reads slice sourceText by these
+          // offsets instead of filtering chunks.
+          sectionIndex = manifest.sections.map((section) => ({
+            heading: section.heading,
+            charStart: section.charStart,
+            charEnd: section.charEnd,
+            ...(section.page !== undefined ? { page: section.page } : {}),
+          }));
+          sourceText = rawMd;
         } catch (e) {
           ztoolkit.log(
             "LLM: MinerU manifest chunking failed; using full markdown fallback",
@@ -582,7 +605,9 @@ async function cachePDFText(
         docFreq,
         avgChunkLength,
         fullLength: pdfText.length,
-
+        ...(sectionIndex?.length && sourceText
+          ? { sectionIndex, sourceText }
+          : {}),
         sourceType,
       });
     } else {

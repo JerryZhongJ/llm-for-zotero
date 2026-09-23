@@ -2355,6 +2355,93 @@ describe("semantic tool surface", function () {
     );
   });
 
+  it("paper_read sections slices whole sections from a real section index", async function () {
+    const paperContext = {
+      itemId: 11,
+      contextItemId: 22,
+      title: "Indexed Paper",
+      firstCreator: "Garcia",
+      year: "2024",
+    };
+    const sourceText =
+      "# Abstract\nShort abstract.\n\n# 1 Introduction\nIntro paragraph.\n\n# 2 Related Work\nFirst related-work paragraph.\n\nSecond related-work paragraph spanning another chunk-sized block.\n\n# 3 Methods\nMethods text.\n";
+    const heading = (title: string) => sourceText.indexOf(title);
+    const tool = createPaperReadTool(
+      {
+        ensurePaperContext: async () => ({
+          chunks: ["chunked text"],
+          chunkMeta: [
+            {
+              chunkIndex: 0,
+              text: "chunked text",
+              chunkKind: "body",
+            },
+          ],
+          sectionIndex: [
+            {
+              heading: "Abstract",
+              charStart: heading("# Abstract"),
+              charEnd: heading("# 1 Introduction"),
+            },
+            {
+              heading: "1 Introduction",
+              charStart: heading("# 1 Introduction"),
+              charEnd: heading("# 2 Related Work"),
+            },
+            {
+              heading: "2 Related Work",
+              charStart: heading("# 2 Related Work"),
+              charEnd: heading("# 3 Methods"),
+              page: 11,
+            },
+            {
+              heading: "3 Methods",
+              charStart: heading("# 3 Methods"),
+              charEnd: sourceText.length,
+            },
+          ],
+          sourceText,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+      {
+        listPaperContexts: () => [paperContext],
+        resolvePaperContextTarget: () => paperContext,
+      } as never,
+    );
+    const validated = tool.validate({ sections: ["Related Work"] });
+    assert.equal(validated.ok, true);
+    if (!validated.ok) return;
+    const output = (await tool.execute(validated.value, baseContext)) as {
+      mode?: string;
+      status?: string;
+      results?: Array<{
+        text?: string;
+        sectionLabel?: string;
+        pageStart?: number;
+      }>;
+      unmatched?: Array<{ requested?: string[] }>;
+    };
+
+    // The whole contiguous section comes back even though the chunk list
+    // never mentioned it — the section index is the source of truth.
+    assert.equal(output.mode, "sections");
+    assert.equal(output.status, "matched");
+    assert.lengthOf(output.results || [], 1);
+    assert.equal(output.results?.[0]?.sectionLabel, "2 Related Work");
+    assert.include(
+      output.results?.[0]?.text || "",
+      "First related-work paragraph.",
+    );
+    assert.include(
+      output.results?.[0]?.text || "",
+      "Second related-work paragraph",
+    );
+    assert.equal(output.results?.[0]?.pageStart, 11);
+    assert.isUndefined(output.unmatched);
+  });
+
   it("paper_read sections reports unmatched names with suggestions", async function () {
     const paperContext = {
       itemId: 11,

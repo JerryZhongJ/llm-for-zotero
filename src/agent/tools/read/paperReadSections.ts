@@ -4,7 +4,13 @@ import {
   formatPaperCitationLabel,
   formatPaperSourceLabel,
 } from "../../../modules/contextPanel/paperAttribution";
-import type { PdfChunkMeta } from "../../../modules/contextPanel/types";
+import {
+  postprocessSectionSlice,
+} from "../../../modules/contextPanel/pdfContext";
+import type {
+  PaperSectionIndexEntry,
+  PdfChunkMeta,
+} from "../../../modules/contextPanel/types";
 import type { QuoteCitation } from "../../../shared/types";
 import { mergeQuoteCitations } from "../../../modules/contextPanel/quoteCitations";
 import { buildTargetedPaperGroups } from "./paperReadShared";
@@ -98,10 +104,72 @@ function toResultRows(
 }
 
 /**
- * Deterministic section read: match requested section names against the
- * chunk section labels (raw headings on the MinerU path), return the full
- * text of the matched chunks, and report unmatched names with near-miss
- * suggestions instead of failing silently.
+ * Structural section read: when the paper carries a real section index
+ * (MinerU manifest headings), match requested names against actual document
+ * headings and return each section's whole contiguous text sliced from the
+ * source. Falls back to chunk-label matching when no index exists.
+ */
+function readSectionsFromIndex(params: {
+  paperContext: NonNullable<PdfTarget["paperContext"]>;
+  sectionIndex: PaperSectionIndexEntry[];
+  sourceText: string;
+  sectionNames: string[];
+  results: Array<Record<string, unknown>>;
+  unmatched: UnmatchedSectionPaper[];
+}): void {
+  const { paperContext, sectionIndex, sourceText, sectionNames } = params;
+  const headings = sectionIndex.map((section) => section.heading);
+  const matchedSections = new Set<PaperSectionIndexEntry>();
+  const unmatchedForPaper: string[] = [];
+  const suggestionsForPaper: string[] = [];
+
+  for (const requested of sectionNames) {
+    const match = matchSectionName(requested, headings);
+    if (!match) {
+      unmatchedForPaper.push(requested);
+      for (const suggestion of suggestSections(requested, headings)) {
+        if (!suggestionsForPaper.includes(suggestion)) {
+          suggestionsForPaper.push(suggestion);
+        }
+      }
+      continue;
+    }
+    const entry = sectionIndex.find(
+      (section) => section.heading === match.candidate,
+    );
+    if (entry) matchedSections.add(entry);
+  }
+
+  for (const entry of matchedSections) {
+    params.results.push({
+      paperContext,
+      sectionLabel: entry.heading,
+      text: postprocessSectionSlice(
+        sourceText.slice(entry.charStart, entry.charEnd),
+      ),
+      score: 1,
+      ...(entry.page !== undefined ? { pageStart: entry.page } : {}),
+      citationLabel: formatPaperCitationLabel(paperContext),
+      sourceLabel: formatPaperSourceLabel(paperContext),
+    });
+  }
+  if (unmatchedForPaper.length) {
+    params.unmatched.push({
+      paperContext,
+      status: "no_matching_sections",
+      requested: unmatchedForPaper,
+      suggestions: suggestionsForPaper,
+      availableSections: headings.slice(0, MAX_AVAILABLE_SECTION_NAMES),
+    });
+  }
+}
+
+/**
+ * Deterministic section read: prefer the paper's real section index (whole
+ * contiguous section text); without one, match requested section names
+ * against the chunk section labels and return the matched chunks' full text.
+ * Unmatched names are reported with near-miss suggestions instead of failing
+ * silently.
  */
 export async function executeSectionsRead(params: {
   targets: NonNullable<PdfTarget["paperContext"]>[];
@@ -114,6 +182,17 @@ export async function executeSectionsRead(params: {
 
   for (const paperContext of params.targets) {
     const pdfContext = await params.pdfService.ensurePaperContext(paperContext);
+    if (pdfContext?.sectionIndex?.length && pdfContext.sourceText) {
+      readSectionsFromIndex({
+        paperContext,
+        sectionIndex: pdfContext.sectionIndex,
+        sourceText: pdfContext.sourceText,
+        sectionNames: params.sectionNames,
+        results,
+        unmatched,
+      });
+      continue;
+    }
     const chunkMeta = pdfContext?.chunkMeta ?? [];
     const chunkTexts = pdfContext?.chunks ?? [];
     const { labels, kindAliases } = collectSectionCandidates(chunkMeta);
