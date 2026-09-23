@@ -48,6 +48,11 @@ import {
   stripMineruSourceImageEmbedsFromMarkdown,
 } from "./mineruCache";
 import type { MineruManifest, ManifestSection } from "./mineruCache";
+import {
+  buildOutlineSectionIndex,
+  collectReaderPdfOutline,
+  type OutlineHeading,
+} from "./pdfOutlineSections";
 import { ensureMineruRuntimeCacheForAttachment } from "./mineruSync";
 import { isMineruEnabled } from "../../utils/mineruConfig";
 import type {
@@ -596,6 +601,37 @@ async function cachePDFText(
         });
       }
 
+      // Plain PDFs have no manifest sections, but when the paper is open in
+      // a reader tab its PDF outline (the TOC the reader sidebar shows) is a
+      // real section index. Chunk-label matching stays as the fallback for
+      // papers with no reader and no outline.
+      if (
+        !sectionIndex?.length &&
+        sourceType === "zotero-worker" &&
+        pdfWorkerPageChars &&
+        pdfItem
+      ) {
+        try {
+          const outline = await collectReaderPdfOutline(pdfItem.id);
+          if (outline?.length) {
+            const outlineIndex = buildOutlineSectionIndex(
+              pdfText,
+              pdfWorkerPageChars,
+              outline,
+            );
+            if (outlineIndex.length) {
+              sectionIndex = outlineIndex;
+              sourceText = pdfText;
+            }
+          }
+        } catch (e) {
+          ztoolkit.log(
+            "LLM: PDF outline section index failed",
+            formatErrorForLog(e),
+          );
+        }
+      }
+
       const { chunkStats, docFreq, avgChunkLength } = buildChunkIndex(chunks);
       pdfTextCache.set(item.id, {
         title,
@@ -669,6 +705,33 @@ export async function ensurePDFTextCached(
   })();
   pdfTextLoadingTasks.set(item.id, task);
   await task;
+}
+
+/**
+ * Upgrade a cached plain-PDF context that was built before its paper opened
+ * in a reader tab: when a live reader outline is now available, rebuild the
+ * cache once so it carries a real sectionIndex. No-op when the entry
+ * already has sections, is not a plain PDFWorker extraction, or no reader
+ * shows the paper.
+ */
+export async function upgradePlainPdfCacheWithOutline(
+  item: Zotero.Item,
+  options?: { sourceMode?: PaperContentSourceMode },
+): Promise<boolean> {
+  const cached = pdfTextCache.get(item.id);
+  if (!cached) return false;
+  if (cached.sectionIndex?.length) return true;
+  if (cached.sourceType !== "zotero-worker") return false;
+  let outline: OutlineHeading[] | null = null;
+  try {
+    outline = await collectReaderPdfOutline(item.id);
+  } catch {
+    outline = null;
+  }
+  if (!outline?.length) return false;
+  pdfTextCache.delete(item.id);
+  await ensurePDFTextCached(item, options);
+  return Boolean(pdfTextCache.get(item.id)?.sectionIndex?.length);
 }
 
 async function cacheNoteText(item: Zotero.Item) {
