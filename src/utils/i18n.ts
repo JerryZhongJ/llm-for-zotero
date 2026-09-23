@@ -32,6 +32,12 @@ const zhCN: Record<string, string> = {
   "How much the agent may change the library without asking (manual / semi-auto / auto)":
     "Agent 修改文献库前需要询问的程度（手动 / 半自动 / 自动）",
   "Conversation history": "对话历史",
+  "MinerU Parsed": "已用 MinerU 解析",
+  "This paper has been parsed with MinerU": "这篇论文已经用 MinerU 解析过",
+  "Parsing…": "解析中…",
+  "Parsing this paper with MinerU": "正在用 MinerU 解析这篇论文",
+  "Parse this paper with MinerU": "用 MinerU 解析这篇论文",
+  "A MinerU batch is already running": "MinerU 批处理正在运行",
   "Item note": "条目笔记",
   "Standalone note": "独立笔记",
   "Library chat": "文献库对话",
