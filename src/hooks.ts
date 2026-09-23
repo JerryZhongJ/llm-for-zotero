@@ -3,7 +3,6 @@ import { initI18n } from "./utils/i18n";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { config, PREFERENCES_PANE_ID } from "./modules/contextPanel/constants";
 import {
-  registerReaderContextPanel,
   registerLLMStyles,
   registerNoteEditingSelectionTracking,
   registerReaderSelectionTracking,
@@ -18,6 +17,16 @@ import {
   unregisterLibraryChatPanel,
   unregisterAllLibraryChatPanels,
 } from "./modules/contextPanel/libraryPanel";
+import {
+  registerReaderChatPanel,
+  unregisterReaderChatPanelsForWindow,
+  unregisterAllReaderChatPanels,
+} from "./modules/contextPanel/readerPanel";
+import { setEmbeddedItemChangeNotifier } from "./modules/contextPanel/itemChangeBus";
+import {
+  isStandaloneWindowActive,
+  notifyStandaloneItemChanged,
+} from "./modules/contextPanel/standaloneWindow";
 import { zoteroChangeDispatcher } from "./services/zoteroChangeDispatcher";
 import { registerZoteroItemContextMenu } from "./modules/contextPanel/zoteroItemContextMenu";
 import { initChatStore } from "./utils/chatStore";
@@ -377,9 +386,16 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   );
 
   registerLLMStyles(win);
-  registerReaderContextPanel();
   registerReaderSelectionTracking();
   registerNoteEditingSelectionTracking(win);
+  // Embedded surfaces forward selection/tab item changes to the standalone
+  // window through the bus (they cannot import standaloneWindow directly —
+  // it imports them for its restore path).
+  setEmbeddedItemChangeNotifier((item) => {
+    if (isStandaloneWindowActive()) {
+      notifyStandaloneItemChanged(item);
+    }
+  });
   registerZoteroItemContextMenu({
     ztoolkit,
     getSelectedItems: () => {
@@ -439,6 +455,8 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
 
   // Library-tab bottom chat panel (independent of item selection).
   registerLibraryChatPanel(win);
+  // Reader-tab bottom chat panels (one per reader tab, paper conversations).
+  registerReaderChatPanel(win);
 }
 
 function registerPrefsPane() {
@@ -453,6 +471,7 @@ function registerPrefsPane() {
 
 async function onMainWindowUnload(win: Window): Promise<void> {
   unregisterLibraryChatPanel(win);
+  unregisterReaderChatPanelsForWindow(win);
   unregisterNoteEditingSelectionTracking(win);
   ztoolkit.unregisterAll();
   closeAllAddonDialogs();
@@ -465,6 +484,8 @@ async function onShutdown(): Promise<void> {
   unregisterPaperConversationRestoreNotifications();
   await shutdownPaperRestoreSelections();
   unregisterAllLibraryChatPanels();
+  unregisterAllReaderChatPanels();
+  setEmbeddedItemChangeNotifier(null);
   ztoolkit.unregisterAll();
   unregisterReaderSelectionTracking();
   unregisterAllNoteEditingSelectionTracking();

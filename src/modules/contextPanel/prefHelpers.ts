@@ -571,6 +571,53 @@ export function getLibraryPanelEnabledPref(): boolean {
   return getBoolPref(LIBRARY_PANEL_ENABLED_PREF_KEY, false);
 }
 
+// ── Reader chat panel (reader tab bottom panel) preferences ────────────────
+
+const READER_PANEL_HEIGHT_PREF_KEY = "readerPanelHeight";
+const READER_PANEL_ENABLED_PREF_KEY = "readerPanelEnabled";
+const READER_PANEL_DEFAULT_HEIGHT_PX = 320;
+const READER_PANEL_MIN_HEIGHT_PX = 200;
+const READER_PANEL_MAX_HEIGHT_PX = 2000;
+
+function clampReaderPanelPreferredHeight(value: number): number {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return READER_PANEL_DEFAULT_HEIGHT_PX;
+  return Math.max(
+    READER_PANEL_MIN_HEIGHT_PX,
+    Math.min(parsed, READER_PANEL_MAX_HEIGHT_PX),
+  );
+}
+
+export function getReaderPanelHeightPref(): number {
+  const raw = getZoteroPrefs()?.get?.(
+    `${config.prefsPrefix}.${READER_PANEL_HEIGHT_PREF_KEY}`,
+    true,
+  );
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return READER_PANEL_DEFAULT_HEIGHT_PX;
+  return clampReaderPanelPreferredHeight(parsed);
+}
+
+export function setReaderPanelHeightPref(value: number): void {
+  getZoteroPrefs()?.set?.(
+    `${config.prefsPrefix}.${READER_PANEL_HEIGHT_PREF_KEY}`,
+    clampReaderPanelPreferredHeight(value),
+    true,
+  );
+}
+
+export function getReaderPanelEnabledPref(): boolean {
+  return getBoolPref(READER_PANEL_ENABLED_PREF_KEY, false);
+}
+
+export function setReaderPanelEnabledPref(value: boolean): void {
+  getZoteroPrefs()?.set?.(
+    `${config.prefsPrefix}.${READER_PANEL_ENABLED_PREF_KEY}`,
+    value === true,
+    true,
+  );
+}
+
 // ── Library chat ambient context preferences ───────────────────────────────
 
 const LIBRARY_CHAT_AMBIENT_CONTEXT_PREF_KEY = "libraryChatAmbientContext";

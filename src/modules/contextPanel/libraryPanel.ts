@@ -32,7 +32,9 @@ import {
   applyPanelFontScale,
 } from "./prefHelpers";
 import { buildUI } from "./buildUI";
+import { persistPendingChatScrollRestoreFromBody } from "./chatScrollSnapshots";
 import { getFirstSelectedLibraryContextItem } from "./ambientContext";
+import { notifyEmbeddedItemChange } from "./itemChangeBus";
 import { setupHandlers, disposeSetupHandlers } from "./setupHandlers";
 import { ensureConversationLoaded, refreshChat } from "./chat";
 import { renderShortcuts } from "./shortcuts";
@@ -147,6 +149,7 @@ function notifyLibraryPanelSelectionChanged(win: Window): void {
   }
   // Anchor holds: only the context follows the selection.
   activeContextPanelRawItems.set(body, rawItem);
+  notifyEmbeddedItemChange(rawItem);
   const llmMain = body.querySelector("#llm-main") as HTMLElement | null;
   if (llmMain) {
     llmMain.dataset.rawContextItemId = String(Number(rawItem.id || 0) || "");
@@ -180,6 +183,7 @@ async function mountLibraryPanelConversation(
     return;
   }
   try {
+    persistPendingChatScrollRestoreFromBody(body);
     buildUI(body, pinnedItem);
     const llmMain = body.querySelector("#llm-main") as HTMLElement | null;
     if (llmMain) {

@@ -27,35 +27,12 @@ function getDeckChildren(deck: Element): Element[] {
   );
 }
 
-/**
- * Zotero retains one item-details pane per reader tab inside a XUL deck.
- * Inactive deck children remain connected and can still report client rects,
- * so tab identity is the only reliable way to select the active reader pane.
- */
-export function getReaderContextPanelForTab(
-  doc: Document,
-  tabID: ReaderTabID,
-): Element | null {
-  const deck = doc.getElementById(
-    "zotero-context-pane-item-deck",
-  ) as ZoteroDeckElement | null;
-  if (!deck) return null;
-
-  const children = getDeckChildren(deck);
-  const normalizedTabID = normalizeReaderTabID(tabID);
-  if (normalizedTabID) {
-    const matchingTab = children.find(
-      (child) => child.getAttribute("data-tab-id") === normalizedTabID,
-    );
-    if (matchingTab) return matchingTab;
-    return null;
-  }
-
+function getDeckSelectedChild(deck: ZoteroDeckElement): Element | null {
   const selectedPanel = deck.selectedPanel;
   if (selectedPanel && deck.contains(selectedPanel)) {
     return selectedPanel;
   }
-
+  const children = getDeckChildren(deck);
   const selectedIndex = Number(deck.selectedIndex);
   if (
     Number.isInteger(selectedIndex) &&
@@ -67,13 +44,43 @@ export function getReaderContextPanelForTab(
   return null;
 }
 
+function getPanelRootIn(container: Element | null): HTMLDivElement | null {
+  if (!container) return null;
+  return (
+    container.matches?.("#llm-main")
+      ? container
+      : container.querySelector?.("#llm-main")
+  ) as HTMLDivElement | null;
+}
+
+/**
+ * Each reader tab hosts its chat panel at the bottom of its tab-content
+ * container (see readerPanel.ts); the container id embeds the tab ID.
+ * Inactive tabs stay connected and can still report client rects, so tab
+ * identity is the only reliable way to select the active reader panel.
+ */
+export function getReaderPanelContainerForTab(
+  doc: Document,
+  tabID: ReaderTabID,
+): Element | null {
+  const normalizedTabID = normalizeReaderTabID(tabID);
+  if (normalizedTabID) {
+    return doc.getElementById(`llmforzotero-reader-panel-${normalizedTabID}`);
+  }
+  // No tab ID: fall back to the panel inside the currently selected tab.
+  const deck = doc.getElementById("tabs-deck") as ZoteroDeckElement | null;
+  if (!deck) return null;
+  const selected = getDeckSelectedChild(deck);
+  return selected?.querySelector?.(".llm-reader-panel") || null;
+}
+
 export function isPanelInReaderContextForTab(
   root: Element,
   tabID: ReaderTabID,
 ): boolean {
-  const readerPanel = getReaderContextPanelForTab(root.ownerDocument, tabID);
+  const container = getReaderPanelContainerForTab(root.ownerDocument, tabID);
   return Boolean(
-    readerPanel && (readerPanel === root || readerPanel.contains(root)),
+    container && (container === root || container.contains(root)),
   );
 }
 
@@ -81,13 +88,8 @@ function getPanelTarget(
   doc: Document,
   tabID: ReaderTabID,
 ): ReaderPopupPanelTarget | null {
-  const readerPanel = getReaderContextPanelForTab(doc, tabID);
-  if (!readerPanel) return null;
-  const root = (
-    readerPanel.matches?.("#llm-main")
-      ? readerPanel
-      : readerPanel.querySelector?.("#llm-main")
-  ) as HTMLDivElement | null;
+  const container = getReaderPanelContainerForTab(doc, tabID);
+  const root = getPanelRootIn(container);
   if (!root) return null;
   return {
     body: root.parentElement || root,

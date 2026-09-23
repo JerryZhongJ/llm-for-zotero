@@ -26,6 +26,13 @@ page="7"`) so "this page" resolves without a tool call.
 
 ### Changed
 
+- **Agent turns no longer hoard their own narration.** Assistant text that
+  rides on a tool-call step ("Let me read more of the paper…") is
+  non-critical by contract: the live agent trace still shows it, but it is
+  no longer persisted into the reusable cross-turn transcript and can no
+  longer ride semantic-compaction checkpoints into later turns. Only the
+  turn's final answer stays verbatim; tool calls stay paired with their
+  results.
 - **BREAKING: `paper_read` takes structured coordinates, not a mode enum.**
   The `mode` parameter is gone — the presence of `sections`/`pages`/
   `labels`/`images`/`readFullReason` selects the path, and a call with no

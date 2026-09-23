@@ -1,8 +1,12 @@
 /**
  * Context Panel Module
  *
- * This is the main entry point for the LLM context panel, which provides
- * a chat interface in Zotero's reader/library side panel.
+ * This is the main entry point for the LLM context panel. Chat surfaces are
+ * the library-tab bottom panel (libraryPanel.ts), the reader-tab bottom
+ * panel (readerPanel.ts), and the standalone window (standaloneWindow.ts);
+ * the former item-pane sidebar section has been retired. This module keeps
+ * the shared registrations that live in the main window: styles, the reader
+ * text-selection popup ("Add Text"), and note-editing selection tracking.
  *
  * The module is split into focused sub-modules:
  * - constants.ts   – shared constants
@@ -22,18 +26,14 @@
  * - textUtils.ts   – text sanitization, formatting
  */
 
-import { getLocaleID } from "../../utils/locale";
-import { config, PANE_ID } from "./constants";
+import { config } from "./constants";
 import type { Message } from "./types";
 import type { ConversationSystem } from "../../shared/types";
 import {
   activeContextPanels,
-  activeContextPanelRawItems,
   activeContextPanelStateSync,
   chatHistory,
   loadedConversationKeys,
-  readerContextPanelRegistered,
-  setReaderContextPanelRegistered,
   recentReaderSelectionCache,
 } from "./state";
 import { clearConversation as clearStoredConversation } from "../../utils/chatStore";
@@ -42,27 +42,10 @@ import {
   clearOwnerAttachmentRefs,
   collectAndDeleteUnreferencedBlobs,
 } from "../../utils/attachmentRefStore";
-import { normalizeSelectedText, setStatus } from "./textUtils";
-import { buildUI } from "./buildUI";
-import { setupHandlers } from "./setupHandlers";
-import { ensureConversationLoaded, getConversationKey } from "./chat";
-import { renderShortcuts } from "./shortcuts";
-import { refreshChat } from "./chat";
-import {
-  beginChatRenderCycle,
-  claimAsyncChatRender,
-  claimDeferredChatRender,
-  currentChatRenderCycle,
-  setPanelRenderClaim,
-  takePanelRenderClaim,
-} from "./chatRenderCycle";
-import { persistPendingChatScrollRestoreFromBody } from "./chatScrollSnapshots";
+import { normalizeSelectedText } from "./textUtils";
 import {
   getActiveContextAttachmentFromTabs,
-  getActiveReaderForSelectedTab,
-  refreshLastKnownSelectedTabId,
   getItemSelectionCacheKeys,
-  resolvePanelContextLifecycleState,
   applySelectedTextPreview,
   getSelectedTextContextEntries,
   type SelectedTextPageLocation,
@@ -76,7 +59,6 @@ import {
   createNoteEditingSelectionTrackingLifecycle,
   type NoteEditingSelectionTrackingLifecycle,
 } from "./noteEditing/selectionTrackingLifecycle";
-import { ensurePDFTextCached, ensureNoteTextCached } from "./pdfContext";
 import { getPageLabelForIndex } from "./livePdfSelectionLocator";
 import {
   getFirstSelectionFromReader,
@@ -97,35 +79,10 @@ import {
   includeReaderSelectedText,
   type IncludeReaderSelectedTextResult,
 } from "./readerTextInclusion";
-import {
-  resolveInitialPanelItemState,
-  resolveShortcutMode,
-  resolveConversationSystemForItem,
-  resolveDisplayConversationKind,
-} from "./portalScope";
 import { getEditableSelectionFromDocument } from "./noteSelection";
-import {
-  clearCompletedPanelLifecycleSignature,
-  hasCompletedPanelLifecycleSignature,
-  markCompletedPanelLifecycleSignature,
-  type PanelLifecycleSignature,
-} from "./panelLifecycleSignature";
-import {
-  hasPanelContextOwnerChanged,
-  shouldKeepDisplayedConversationWithoutRebuild,
-  shouldRefreshContextSourceWithoutPanelRebuild,
-} from "./panelContextLifecycle";
-import {
-  retainClaudeRuntimeForBody,
-  releaseClaudeRuntimeForBody,
-} from "../../claudeCode/runtimeRetention";
 
 export { openStandaloneChat } from "./standaloneWindow";
-import {
-  isStandaloneWindowActive,
-  notifyStandaloneItemChanged,
-  renderStandalonePlaceholder,
-} from "./standaloneWindow";
+import { isStandaloneWindowActive } from "./standaloneWindow";
 
 // =============================================================================
 // Public API
@@ -150,413 +107,6 @@ export function registerLLMStyles(win: _ZoteroTypes.MainWindow) {
   katexLink.type = "text/css";
   katexLink.href = `chrome://${config.addonRef}/content/vendor/katex/katex.min.css`;
   doc.documentElement?.appendChild(katexLink);
-}
-
-function getPanelItemIdKey(item: Zotero.Item | null | undefined): string {
-  const id = Math.floor(Number((item as any)?.id || 0));
-  return Number.isFinite(id) && id > 0 ? `${id}` : "";
-}
-
-function getPanelContextItemIdKey(
-  item: Zotero.Item | null | undefined,
-): string {
-  const state = resolvePanelContextLifecycleState(item);
-  const id = state?.requiresAsyncResolution ? 0 : state?.contextItemId || 0;
-  return id > 0 ? `${id}` : "";
-}
-
-function getPanelContextOwnerItemIdKey(
-  item: Zotero.Item | null | undefined,
-): string {
-  const id = resolvePanelContextLifecycleState(item)?.ownerItemId || 0;
-  return id > 0 ? `${id}` : "";
-}
-
-function getPanelContextSourceStateKey(
-  item: Zotero.Item | null | undefined,
-): string {
-  const state = resolvePanelContextLifecycleState(item);
-  if (!state) return "";
-  const contextItemId = state.requiresAsyncResolution ? 0 : state.contextItemId;
-  return [
-    state.sourceKind,
-    contextItemId > 0 ? `${contextItemId}` : "",
-    state.supportKind || "",
-    state.contentSourceMode || "",
-    state.requiresAsyncResolution ? "async" : "sync",
-  ].join(":");
-}
-
-function writePanelContextDataset(
-  panelRoot: HTMLElement | null | undefined,
-  rawItem: Zotero.Item | null | undefined,
-) {
-  if (!panelRoot) return;
-  const rawContextItemKey = rawItem
-    ? String(Number(rawItem.id || 0) || "")
-    : "";
-  panelRoot.dataset.contextItemId = getPanelContextItemIdKey(rawItem);
-  panelRoot.dataset.contextOwnerItemId = getPanelContextOwnerItemIdKey(rawItem);
-  panelRoot.dataset.contextSourceStateKey =
-    getPanelContextSourceStateKey(rawItem);
-  panelRoot.dataset.rawContextItemId = rawContextItemKey;
-}
-
-function buildPanelLifecycleSignature(
-  rawItem: Zotero.Item | null | undefined,
-  resolvedItem: Zotero.Item | null | undefined,
-): PanelLifecycleSignature {
-  const rawContextItem = rawItem || resolvedItem;
-  return {
-    conversationKey: resolvedItem ? `${getConversationKey(resolvedItem)}` : "0",
-    rawContextItemId: getPanelContextOwnerItemIdKey(rawContextItem),
-    contextItemId: "",
-    conversationSystem:
-      resolveConversationSystemForItem(resolvedItem) || "upstream",
-    conversationKind: resolveDisplayConversationKind(resolvedItem) || "",
-    shortcutMode: resolveShortcutMode(resolvedItem),
-  };
-}
-
-function isPanelRootInitialized(
-  panelRoot: HTMLElement | null | undefined,
-): boolean {
-  return Boolean(panelRoot?.dataset?.handlersInitialized);
-}
-
-function isPanelBodyInitialized(body: Element): boolean {
-  return isPanelRootInitialized(
-    body.querySelector("#llm-main") as HTMLElement | null,
-  );
-}
-
-function isPanelConversationLoaded(
-  resolvedItem: Zotero.Item | null | undefined,
-): boolean {
-  return (
-    !resolvedItem ||
-    loadedConversationKeys.has(getConversationKey(resolvedItem))
-  );
-}
-
-export function registerReaderContextPanel() {
-  if (readerContextPanelRegistered) return;
-  setReaderContextPanelRegistered(true);
-  // Generation counter: incremented on every onAsyncRender call so stale
-  // (superseded) renders can bail out at each await point.
-  let renderGeneration = 0;
-  let lastItemChangeSignature = "";
-  const setupEmbeddedPanelHandlers = (
-    body: Element,
-    rawItem: Zotero.Item | null | undefined,
-  ) => {
-    setupHandlers(body, rawItem);
-  };
-  Zotero.ItemPaneManager.registerSection({
-    paneID: PANE_ID,
-    pluginID: config.addonID,
-    header: {
-      l10nID: getLocaleID("llm-panel-head"),
-      icon: `chrome://${config.addonRef}/content/icons/icon-sidebar.svg`,
-    },
-    sidenav: {
-      l10nID: getLocaleID("llm-panel-sidenav-tooltip"),
-      icon: `chrome://${config.addonRef}/content/icons/icon-sidebar.svg`,
-    },
-    onInit: ({ setEnabled, tabType }) => {
-      // The library tab hosts the bottom library chat panel instead of the
-      // item pane section; reader/note tabs keep the sidebar section.
-      setEnabled(tabType !== "library");
-      ztoolkit.log(`LLM: panel init tabType=${tabType}`);
-    },
-    onItemChange: ({ setEnabled, tabType, item }) => {
-      setEnabled(tabType !== "library");
-      const selectedTabId = refreshLastKnownSelectedTabId();
-      const itemChangeSignature = [
-        tabType || "",
-        selectedTabId ?? "",
-        getPanelItemIdKey(item || null),
-      ].join("|");
-      if (itemChangeSignature === lastItemChangeSignature) {
-        return true;
-      }
-      lastItemChangeSignature = itemChangeSignature;
-      if (isStandaloneWindowActive()) {
-        notifyStandaloneItemChanged(item || null);
-      }
-      return true;
-    },
-    onRender: ({ body, item }) => {
-      // When standalone window is open, show placeholder instead of full UI
-      if (isStandaloneWindowActive()) {
-        clearCompletedPanelLifecycleSignature(body);
-        void releaseClaudeRuntimeForBody(body);
-        renderStandalonePlaceholder(body);
-        const resolvedState = resolveInitialPanelItemState(item);
-        activeContextPanels.set(body, () => resolvedState.item);
-        activeContextPanelRawItems.set(body, item || null);
-        setPanelRenderClaim(body, {
-          kind: "sync-rendered",
-          itemKey: getPanelItemIdKey(item || null),
-          cycle: currentChatRenderCycle(body),
-        });
-        return;
-      }
-      try {
-        const panelRoot = body.querySelector("#llm-main") as HTMLElement | null;
-        // Treat missing panel root as needing a full render — the body may
-        // belong to a tab that onAsyncRender never fired for.
-        // Also treat an uninitialized shell as incomplete.  Zotero can fire a
-        // superseded async render after buildUI() but before setupHandlers();
-        // that leaves a blank chat box and default "Model: ..." controls.
-        const needsFullRender =
-          !activeContextPanels.has(body) ||
-          !panelRoot ||
-          !isPanelRootInitialized(panelRoot);
-
-        const resolvedState = resolveInitialPanelItemState(item, {
-          conversationMode: "paper",
-        });
-        const expectedSystem =
-          resolveConversationSystemForItem(resolvedState.item) || "upstream";
-
-        const currentKind = panelRoot?.dataset?.conversationKind;
-        const currentSystem = panelRoot?.dataset?.conversationSystem || "";
-        const currentContextItemKey = panelRoot?.dataset?.contextItemId || "";
-        const currentRawContextItemKey =
-          panelRoot?.dataset?.rawContextItemId || "";
-        const currentContextOwnerItemKey =
-          panelRoot?.dataset?.contextOwnerItemId || "";
-        const currentContextSourceStateKey =
-          panelRoot?.dataset?.contextSourceStateKey || "";
-        // Detect if the active item has changed (e.g. user switched reader tabs).
-        // If so, the panel must fully re-render to switch conversations.
-        const storedItemKey = panelRoot?.dataset?.itemId;
-        const newItemKey = resolvedState.item
-          ? String(getConversationKey(resolvedState.item))
-          : "0";
-        const rawContextItem = item || resolvedState.item;
-        const rawContextItemKey = rawContextItem
-          ? String(Number(rawContextItem.id || 0) || "")
-          : "";
-        const newContextOwnerItemKey =
-          getPanelContextOwnerItemIdKey(rawContextItem);
-        const newContextSourceStateKey =
-          getPanelContextSourceStateKey(rawContextItem);
-        const itemChanged =
-          !needsFullRender &&
-          storedItemKey !== undefined &&
-          storedItemKey !== newItemKey;
-        const contextDecision = {
-          needsFullRender,
-          storedItemKey,
-          newItemKey,
-          currentKind,
-          currentRawContextItemKey,
-          rawContextItemKey,
-          currentContextOwnerItemKey,
-          newContextOwnerItemKey,
-          currentContextSourceStateKey:
-            currentContextSourceStateKey || currentContextItemKey,
-          newContextSourceStateKey,
-        };
-        const contextOwnerChanged =
-          hasPanelContextOwnerChanged(contextDecision);
-        const sameOwnerContextSourceChanged =
-          shouldRefreshContextSourceWithoutPanelRebuild(contextDecision);
-        const systemChanged =
-          !needsFullRender && currentSystem !== expectedSystem;
-        // Anchored-conversation guard: the resolved conversation key drifted
-        // but the raw anchor item did not change — keep the displayed
-        // conversation instead of rebuilding.
-        const keepDisplayedConversation =
-          shouldKeepDisplayedConversationWithoutRebuild({
-            needsFullRender,
-            storedItemKey,
-            newItemKey,
-            currentRawContextItemKey,
-            rawContextItemKey,
-          });
-
-        if (
-          needsFullRender ||
-          (!keepDisplayedConversation &&
-            (itemChanged || contextOwnerChanged)) ||
-          systemChanged
-        ) {
-          clearCompletedPanelLifecycleSignature(body);
-          persistPendingChatScrollRestoreFromBody(body);
-          // Build UI synchronously so panel data attributes (basePaperItemId,
-          // conversationKind, etc.) are immediately correct.  The reader popup
-          // "Add Text" path reads these attributes to decide paper-mismatch —
-          // if we defer buildUI, the stale panel from the previous tab wins.
-          buildUI(body, resolvedState.item);
-          const nextPanelRoot = body.querySelector(
-            "#llm-main",
-          ) as HTMLElement | null;
-          writePanelContextDataset(nextPanelRoot, rawContextItem);
-          activeContextPanels.set(body, () => resolvedState.item);
-          activeContextPanelRawItems.set(body, item || null);
-          void retainClaudeRuntimeForBody(body, resolvedState.item);
-          // Attach handlers synchronously so buttons are
-          // immediately interactive — don't gate on ensureConversationLoaded.
-          setupEmbeddedPanelHandlers(body, item);
-          // Defer conversation loading and chat rendering. The render claim is
-          // shared with onAsyncRender so the conversation is only built once
-          // per cycle, and skipped entirely if a newer cycle supersedes this.
-          const chatRenderCycle = beginChatRenderCycle(body);
-          // Tell onAsyncRender it can skip the duplicate buildUI +
-          // setupHandlers. The claim carries this item and cycle, so a stale
-          // async render for a previously shown item can neither consume it
-          // nor steal the render.
-          setPanelRenderClaim(body, {
-            kind: "sync-rendered",
-            itemKey: getPanelItemIdKey(item || null),
-            cycle: chatRenderCycle,
-          });
-          void (async () => {
-            try {
-              if (resolvedState.item)
-                await ensureConversationLoaded(resolvedState.item);
-              if (isStandaloneWindowActive()) return;
-              if (!claimDeferredChatRender(body, chatRenderCycle)) return;
-              refreshChat(body, resolvedState.item);
-            } catch (err) {
-              ztoolkit.log("LLM: onRender async setup failed", err);
-            }
-          })();
-        } else {
-          // Same item — keep item reference current so delegated handlers
-          // (e.g. Add Text) always resolve the active item. When the
-          // anchored-conversation guard kept the displayed conversation, keep
-          // pointing at it instead of the drifted resolution.
-          const effectiveItem = keepDisplayedConversation
-            ? (activeContextPanels.get(body)?.() ?? resolvedState.item)
-            : resolvedState.item;
-          activeContextPanels.set(body, () => effectiveItem);
-          activeContextPanelRawItems.set(body, item || null);
-          writePanelContextDataset(panelRoot, rawContextItem);
-          void retainClaudeRuntimeForBody(body, effectiveItem);
-          if (sameOwnerContextSourceChanged || keepDisplayedConversation) {
-            persistPendingChatScrollRestoreFromBody(body);
-            setPanelRenderClaim(body, {
-              kind: "context-refresh",
-              itemKey: getPanelItemIdKey(item || null),
-            });
-            const refreshContextSource = (body as any)
-              .__llmRefreshContextSourceForCurrentItem;
-            if (typeof refreshContextSource === "function") {
-              refreshContextSource();
-            } else {
-              activeContextPanelStateSync.get(body)?.();
-            }
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-    },
-    onAsyncRender: async ({ body, item, setEnabled }) => {
-      setEnabled(true);
-      // Skip full render when standalone window is active
-      if (isStandaloneWindowActive()) return;
-
-      const resolvedInitialState = resolveInitialPanelItemState(item, {
-        conversationMode: "paper",
-      });
-      const resolvedItem = resolvedInitialState.item;
-      const lifecycleSignature = buildPanelLifecycleSignature(
-        item || null,
-        resolvedItem,
-      );
-      if (
-        isPanelBodyInitialized(body) &&
-        hasCompletedPanelLifecycleSignature(body, lifecycleSignature, {
-          conversationLoaded: isPanelConversationLoaded(resolvedItem),
-        })
-      ) {
-        return;
-      }
-
-      // Take the latest onRender's claim in this synchronous prefix, before
-      // any await AND before bumping renderGeneration. Ownership is bound to
-      // the item whose onRender last ran: a mismatch means this async render
-      // has been superseded and must bail with zero side effects — bumping
-      // the generation first would cancel the rightful in-flight render, and
-      // consuming the newer render's claim is how a stale async render used
-      // to paint the previous item's conversation into the new panel.
-      const renderClaim = takePanelRenderClaim(
-        body,
-        getPanelItemIdKey(item || null),
-      );
-      if (renderClaim.outcome === "stale") return;
-
-      const thisGeneration = ++renderGeneration;
-      // If onRender already did the synchronous buildUI + setupHandlers for
-      // this render cycle, skip the duplicate work.  We still run the
-      // async-only steps: ensureConversationLoaded (properly awaited),
-      // renderShortcuts, refreshChat (after data ready), and content caching.
-      const syncAlreadyRendered = renderClaim.outcome === "sync-rendered";
-      // The cycle travels inside the claim, so it is exactly the cycle begun
-      // by the onRender that left it; claiming is affine to this cycle so a
-      // stale async render cannot steal a newer cycle's claim.
-      const sharedChatRenderCycle =
-        renderClaim.outcome === "sync-rendered" ? renderClaim.cycle : null;
-      const contextRefreshOnly =
-        renderClaim.outcome === "context-refresh" &&
-        Boolean(body.querySelector("#llm-main"));
-      if (contextRefreshOnly) {
-        // Keep the conversation anchor as-is: for a context-refresh claim the
-        // panel is already displaying the right conversation (onRender set it,
-        // or the anchored-conversation guard deliberately kept it).
-        activeContextPanelRawItems.set(body, item || null);
-      } else if (!syncAlreadyRendered) {
-        persistPendingChatScrollRestoreFromBody(body);
-        buildUI(body, resolvedItem);
-        const panelRoot = body.querySelector("#llm-main") as HTMLElement | null;
-        writePanelContextDataset(panelRoot, item || resolvedItem);
-        activeContextPanelRawItems.set(body, item || null);
-      }
-
-      if (resolvedItem) {
-        await ensureConversationLoaded(resolvedItem);
-      }
-      // Bail if a newer render has started while we were awaiting,
-      // or if the standalone window was opened during the await.
-      if (renderGeneration !== thisGeneration) return;
-      if (isStandaloneWindowActive()) return;
-      await renderShortcuts(
-        body,
-        resolvedItem,
-        resolveShortcutMode(resolvedItem),
-      );
-      if (renderGeneration !== thisGeneration) return;
-      if (isStandaloneWindowActive()) return;
-      if (!syncAlreadyRendered && !contextRefreshOnly) {
-        setupEmbeddedPanelHandlers(body, item);
-      }
-      if (contextRefreshOnly) {
-        const refreshContextSource = (body as any)
-          .__llmRefreshContextSourceForCurrentItem;
-        if (typeof refreshContextSource === "function") {
-          refreshContextSource();
-        } else {
-          activeContextPanelStateSync.get(body)?.();
-        }
-      }
-      if (claimAsyncChatRender(body, sharedChatRenderCycle)) {
-        refreshChat(body, resolvedItem);
-      }
-      markCompletedPanelLifecycleSignature(body, lifecycleSignature);
-      // Defer content extraction so the panel becomes interactive sooner.
-      const activeContextItem = getActiveContextAttachmentFromTabs();
-      if (activeContextItem) {
-        void ensurePDFTextCached(activeContextItem);
-      } else if (item && (item as any).isNote?.()) {
-        void ensureNoteTextCached(item);
-      }
-    },
-  });
 }
 
 type ReaderTextSelectionPopupHandler =

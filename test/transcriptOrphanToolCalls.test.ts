@@ -106,7 +106,54 @@ describe("transcript orphan tool_calls", function () {
     );
   });
 
-  it("keeps the text when an assistant said something and its calls went unanswered", async function () {
+});
+
+describe("transcript narration stripping", function () {
+  beforeEach(function () {
+    clearAgentTranscriptStore();
+  });
+
+  async function roundTrip(messages: AgentModelMessage[]) {
+    await appendAgentTranscriptMessages({
+      conversationKey: 4243,
+      compatibilityKey: "test",
+      messages,
+    });
+    const segment = await loadAgentTranscriptSegment({
+      conversationKey: 4243,
+      compatibilityKey: "test",
+    });
+    return segment.messages;
+  }
+
+  it("strips narration from a tool-call step but keeps its answered calls", async function () {
+    const stored = await roundTrip([
+      {
+        role: "assistant",
+        content: "Let me file those.",
+        tool_calls: [
+          {
+            id: "a",
+            type: "function",
+            function: { name: "t", arguments: "{}" },
+          },
+        ],
+      } as never,
+      { role: "tool", tool_call_id: "a", content: "ok" } as never,
+    ]);
+    const assistant = stored.find((m) => m.role === "assistant") as never as {
+      content?: string;
+      tool_calls?: unknown[];
+    };
+    assert.equal(
+      assistant?.content,
+      "",
+      "intra-turn narration must not persist into the reusable transcript",
+    );
+    assert.lengthOf(assistant?.tool_calls || [], 1);
+  });
+
+  it("drops an assistant turn whose narration was the only thing left", async function () {
     const stored = await roundTrip([
       {
         role: "assistant",
@@ -120,12 +167,20 @@ describe("transcript orphan tool_calls", function () {
         ],
       } as never,
     ]);
+    // Narration on a tool-call step is non-critical: stripped on persist, and
+    // with every call unanswered nothing worth keeping remains.
+    assert.isUndefined(stored.find((m) => m.role === "assistant"));
+  });
+
+  it("keeps a final answer verbatim (assistant text without tool_calls)", async function () {
+    const stored = await roundTrip([
+      { role: "user", content: "question" } as never,
+      { role: "assistant", content: "The final answer." } as never,
+    ]);
     const assistant = stored.find((m) => m.role === "assistant") as never as {
       content?: string;
-      tool_calls?: unknown[];
     };
-    assert.equal(assistant?.content, "Let me file those.");
-    assert.lengthOf(assistant?.tool_calls || [], 0);
+    assert.equal(assistant?.content, "The final answer.");
   });
 });
 

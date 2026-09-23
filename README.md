@@ -85,6 +85,11 @@ Documentation:
   a resizable chat panel below the item list. It anchors the library-wide
   conversation — selecting items only refreshes the attached context, never
   the conversation — and is available without selecting any item.
+- **Reader Chat Panel** docks a resizable chat panel at the bottom of each
+  PDF reader tab, toggled from a button in the reader toolbar. Each tab's
+  panel anchors that paper's conversation and owns its scrolling, so the
+  chat never scrolls away with the item pane. The previous item-pane sidebar
+  section is gone; note tabs and separate reader windows do not host chat.
 - **Library Chat Ambient Context** mirrors the collection you have open and
   the item you have highlighted into every library-chat turn as _ambient_
   context (metadata references only, clearly marked so the model never
@@ -92,10 +97,10 @@ Documentation:
   "which collection am I in?" or read the highlighted paper directly; expand
   the open collection with its library tools. Toggle it in
   `Preferences -> Agent -> Library Chat Ambient Context`.
-- **Surface-scoped conversations**: the reader sidebar hosts paper chat, the
-  library panel hosts library chat, and each keeps its conversation until you
-  switch explicitly via history or "new chat" (the old mode-toggle chip is
-  gone).
+- **Surface-scoped conversations**: the reader bottom panel hosts paper chat,
+  the library bottom panel hosts library chat, and each keeps its
+  conversation until you switch explicitly via history or "new chat" (the old
+  mode-toggle chip is gone).
 - **Standalone Window Mode** opens the assistant in a dedicated window with
   paper chat, library chat, and conversation history.
 - **File-Based Notes** save Markdown notes to local folders, including Obsidian,

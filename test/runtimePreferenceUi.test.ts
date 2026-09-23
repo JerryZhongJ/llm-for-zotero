@@ -80,7 +80,7 @@ describe("runtime preference UI", function () {
 
   it("uses the same dynamic Claude catalog path for embedded and standalone panels", function () {
     const setupHandlers = source("src/modules/contextPanel/setupHandlers.ts");
-    const embeddedPanel = source("src/modules/contextPanel/index.ts");
+    const embeddedPanel = source("src/modules/contextPanel/libraryPanel.ts");
     const standalonePanel = source(
       "src/modules/contextPanel/standaloneWindow.ts",
     );
@@ -116,7 +116,7 @@ describe("runtime preference UI", function () {
       "canReuseInFlight(force, inFlightForced)",
     );
     assert.include(setupHandlers, "!requestedForce || inFlightForce");
-    assert.include(embeddedPanel, "setupHandlers(body, rawItem)");
+    assert.include(embeddedPanel, "setupHandlers(body, pinnedItem)");
     assert.include(standalonePanel, "setupHandlers(contentArea, mountedItem");
   });
 });

@@ -234,6 +234,40 @@ describe("continuation checkpoint featured answer", function () {
     assert.notInclude(String(rootGoal), "Latest assistant answer:");
   });
 
+  it("excludes intra-turn narration from the semantic checkpoint", function () {
+    const { checkpoint } = buildAgentSemanticCheckpoint({
+      messages: [
+        { role: "user", content: "User request: check the library" },
+        {
+          role: "assistant",
+          content: "Let me search the library for that.",
+          tool_calls: [
+            {
+              id: "narrate-call",
+              name: "library_search",
+              arguments: { entity: "items" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: "narrate-call",
+          name: "library_search",
+          content: JSON.stringify({ totalCount: 1, results: [{ itemId: 1 }] }),
+        },
+        { role: "assistant", content: "Here is what I found." },
+      ],
+      summaryTokens: 800,
+      conversationKey: 46,
+    });
+    const content =
+      typeof checkpoint.content === "string" ? checkpoint.content : "";
+    // Narration riding a tool-call step is non-critical: it must not ride the
+    // checkpoint back into later turns either.
+    assert.notInclude(content, "Let me search the library");
+    assert.include(content, "Here is what I found.");
+  });
+
   it("drops the featured section and keeps tool handles under tiny budgets", function () {
     const messages: AgentModelMessage[] = [
       { role: "user", content: "User request: tiny budget" },

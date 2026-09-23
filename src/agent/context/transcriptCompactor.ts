@@ -198,6 +198,13 @@ function buildSummaryMessage(
         `- ${truncateText(text.replace(/^User request:\s*/i, ""), 220)}`,
       );
     } else if (message.role === "assistant") {
+      // Assistant text on a tool-call step is intra-turn narration —
+      // non-critical by contract, stripped by the transcript store. Skip it
+      // here too so it cannot ride a semantic checkpoint back into later
+      // turns; only final answers (no tool_calls) count as visible state.
+      if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
+        continue;
+      }
       latestAssistantText = text;
       assistantLines.push(`- ${truncateText(text, 260)}`);
     }

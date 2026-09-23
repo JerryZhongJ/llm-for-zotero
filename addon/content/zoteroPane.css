@@ -11430,6 +11430,7 @@ label.llm-search-results-item:hover {
   flex: 0 0 auto;
   min-width: 0;
   border-top: 1px solid var(--fill-quinary);
+  border-left: 1px solid var(--stroke-secondary, rgba(120, 120, 120, 0.3));
   background: var(--material-background);
   box-sizing: border-box;
 }
@@ -11458,6 +11459,65 @@ label.llm-search-results-item:hover {
 /* Override viewport-relative chat shell height: the panel owns its height,
    so the chat fills it and scrolling stays inside the panel. */
 [data-library-panel="true"] .llm-chat-shell {
+  height: auto;
+  flex: 1 1 0;
+  min-height: 120px;
+  resize: none;
+  overscroll-behavior: contain;
+}
+
+/* ── Reader chat panel (bottom of each PDF reader tab) ───────────────────── */
+
+/* Zotero's tab-content is a XUL container with no explicit orientation; the
+   host class turns it into a column flex box so the docked panel sits below
+   the reader browser and the browser yields the panel's height. */
+.llm-reader-host {
+  display: flex;
+  flex-direction: column;
+}
+
+.llm-reader-host > browser {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.llm-reader-panel {
+  display: flex;
+  flex-direction: column;
+  /* Match the main reading area's left and right edges inside the browser. */
+  width: auto;
+  align-self: stretch;
+  flex: 0 0 auto;
+  min-width: 0;
+  border-top: 1px solid var(--fill-quinary);
+  background: var(--material-background);
+  box-sizing: border-box;
+}
+
+.llm-reader-panel-resizer {
+  height: 4px;
+  width: 100%;
+  flex: 0 0 auto;
+  cursor: ns-resize;
+  background: transparent;
+}
+
+.llm-reader-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+[data-reader-panel="true"].llm-panel {
+  height: 100%;
+}
+
+/* Same shell override as the library panel: the panel owns its height, so
+   the chat fills it and scrolling stays inside the panel. */
+[data-reader-panel="true"] .llm-chat-shell {
   height: auto;
   flex: 1 1 0;
   min-height: 120px;

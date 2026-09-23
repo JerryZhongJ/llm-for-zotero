@@ -162,6 +162,22 @@ function sanitizeMessageForTranscript(
       content: stringifyTranscriptContent(message.content),
     };
   }
+  // Assistant text riding on a tool-call step is intra-turn narration ("Let me
+  // read more of the paper…") — non-critical by contract. The live agent trace
+  // shows it, but it must not persist into the reusable cross-turn transcript;
+  // only the turn's final answer (an assistant message without tool_calls)
+  // stays verbatim. The tool_calls themselves remain, paired with their
+  // role:"tool" replies.
+  if (
+    message.role === "assistant" &&
+    Array.isArray(message.tool_calls) &&
+    message.tool_calls.length
+  ) {
+    return {
+      ...message,
+      content: "",
+    };
+  }
   return {
     ...message,
     content: sanitizeContentForTranscript(message.content),

@@ -93,6 +93,10 @@ import { createHistorySearchPopupController } from "./setupHandlers/controllers/
 import { primeHistoryNavigationMode } from "./historyNavigationModeSync";
 import { resolveStandalonePaperTabLabel } from "./standaloneTabLabel";
 import { isLibraryPanelBody, remountLibraryPanelBody } from "./libraryPanel";
+import {
+  isReaderPanelBody,
+  remountReaderPanelBody,
+} from "./readerPanel";
 import { resolveFreshConversationDraft } from "./freshConversationDraft";
 import { collapseDuplicateReusableConversationDrafts } from "./standaloneConversationResolution";
 import {
@@ -341,6 +345,12 @@ function restoreEmbeddedPanelsAfterStandaloneClose(
     // it to a paper conversation.
     if (isLibraryPanelBody(body as Element)) {
       remountLibraryPanelBody(body as Element);
+      continue;
+    }
+    // Reader bottom panels anchor their tab's paper conversation; restore
+    // through their own controller so the anchor survives.
+    if (isReaderPanelBody(body as Element)) {
+      remountReaderPanelBody(body as Element);
       continue;
     }
     const resolved = resolveInitialPanelItemState(rawItem, {

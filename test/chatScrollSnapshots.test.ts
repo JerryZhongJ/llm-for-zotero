@@ -535,21 +535,20 @@ describe("chat scroll snapshots", function () {
     assert.equal(targetPending?.anchor?.quoteCitationId, "quote-once");
   });
 
-  it("captures sidebar scroll before full panel rebuild destroys the chat DOM", function () {
-    const source = readFileSync(
-      resolve(here, "../src/modules/contextPanel/index.ts"),
-      "utf8",
-    );
-    const capture = source.indexOf(
-      "persistPendingChatScrollRestoreFromBody(body)",
-    );
-    const rebuild = source.indexOf(
-      "buildUI(body, resolvedState.item)",
-      capture,
-    );
+  it("captures panel scroll before a bottom-panel remount rebuild destroys the chat DOM", function () {
+    for (const file of ["libraryPanel.ts", "readerPanel.ts"]) {
+      const source = readFileSync(
+        resolve(here, `../src/modules/contextPanel/${file}`),
+        "utf8",
+      );
+      const capture = source.indexOf(
+        "persistPendingChatScrollRestoreFromBody(body)",
+      );
+      const rebuild = source.indexOf("buildUI(body,", capture);
 
-    assert.isAtLeast(capture, 0);
-    assert.isAbove(rebuild, capture);
+      assert.isAtLeast(capture, 0, `${file} captures before rebuild`);
+      assert.isAbove(rebuild, capture, `${file} rebuilds after capture`);
+    }
   });
 
   it("captures chat scroll before citation navigation opens another reader", function () {
@@ -569,26 +568,29 @@ describe("chat scroll snapshots", function () {
     assert.isAbove(navigate, capture);
   });
 
-  it("captures pending restore before same-owner context refresh", function () {
+  it("refreshes context without rebuilding the library panel", function () {
     const source = readFileSync(
-      resolve(here, "../src/modules/contextPanel/index.ts"),
+      resolve(here, "../src/modules/contextPanel/libraryPanel.ts"),
       "utf8",
     );
-    const branch = source.indexOf(
-      "if (sameOwnerContextSourceChanged || keepDisplayedConversation)",
-    );
-    const capture = source.indexOf(
-      "persistPendingChatScrollRestoreFromBody(body)",
-      branch,
+    const notifyBranch = source.indexOf(
+      "function notifyLibraryPanelSelectionChanged",
     );
     const refresh = source.indexOf(
       "__llmRefreshContextSourceForCurrentItem",
-      branch,
+      notifyBranch,
+    );
+    const nextFunction = source.indexOf("\nfunction ", notifyBranch + 1);
+    const branchBody = source.slice(
+      notifyBranch,
+      nextFunction > 0 ? nextFunction : undefined,
     );
 
-    assert.isAtLeast(branch, 0);
-    assert.isAbove(capture, branch);
-    assert.isAbove(refresh, capture);
+    assert.isAtLeast(notifyBranch, 0);
+    assert.isAtLeast(refresh, notifyBranch);
+    // The selection-notify branch refreshes context and never rebuilds the
+    // chat DOM itself.
+    assert.notInclude(branchBody, "buildUI(");
   });
 
   it("refreshChat lets pending restores win before cached conversation snapshots", function () {

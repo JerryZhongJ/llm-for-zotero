@@ -391,6 +391,226 @@ function buildLibraryImportTraceSummary(content: unknown): string | null {
   return `Imported ${titleList}${suffix}`;
 }
 
+/**
+ * Trace row text for library_update: name the kind of change that landed
+ * (tags vs collections vs metadata…), with the tag or collection names when
+ * the call carried them.
+ */
+export function buildLibraryUpdateTraceSummaryForTests(
+  args: unknown,
+  content: unknown,
+  labels?: {
+    item?: (itemId: number) => string | null;
+    collection?: (collectionId: number) => string | null;
+  },
+): string | null {
+  return buildLibraryUpdateTraceSummary(args, content, labels);
+}
+
+function buildLibraryUpdateTraceSummary(
+  args: unknown,
+  content: unknown,
+  labels?: {
+    item?: (itemId: number) => string | null;
+    collection?: (collectionId: number) => string | null;
+  },
+): string | null {
+  // Only completed writes carry the success envelope {result}/{results} from
+  // executeAndRecordUndo; anything else — pending calls, errors, legacy
+  // shapes — falls back to the generic effect-based summary.
+  if (
+    !content ||
+    typeof content !== "object" ||
+    Array.isArray(content) ||
+    "error" in content ||
+    !("result" in content || "results" in content)
+  ) {
+    return null;
+  }
+  if (!args || typeof args !== "object" || Array.isArray(args)) return null;
+  const record = args as {
+    kind?: unknown;
+    action?: unknown;
+    mode?: unknown;
+    tags?: unknown;
+    operations?: unknown;
+    tag?: unknown;
+    newTag?: unknown;
+    targetCollectionId?: unknown;
+    targetCollectionName?: unknown;
+    collectionId?: unknown;
+    itemId?: unknown;
+    itemIds?: unknown;
+    relatedItemIds?: unknown;
+    assignments?: unknown;
+  };
+
+  const quoteTagList = (raw: unknown): string | null => {
+    if (!Array.isArray(raw) || !raw.length) return null;
+    const names = raw.filter(
+      (name): name is string =>
+        typeof name === "string" && name.trim().length > 0,
+    );
+    if (!names.length) return null;
+    const MAX_LISTED = 3;
+    const listed = names.slice(0, MAX_LISTED).map((name) => `"${name.trim()}"`);
+    const unlisted = names.length - listed.length;
+    return unlisted > 0 ? `${listed.join(", ")} +${unlisted} more` : listed.join(", ");
+  };
+  const collectionName = (): string | null => {
+    if (
+      typeof record.targetCollectionName === "string" &&
+      record.targetCollectionName.trim()
+    ) {
+      return record.targetCollectionName.trim();
+    }
+    for (const id of [record.targetCollectionId, record.collectionId]) {
+      if (typeof id === "number") {
+        const name = labels?.collection?.(id);
+        if (name) return name;
+      }
+    }
+    return null;
+  };
+  const affectedCount = (): number | null => {
+    if (Array.isArray(record.itemIds) && record.itemIds.length) {
+      return record.itemIds.length;
+    }
+    for (const key of ["assignments", "operations"] as const) {
+      const list = record[key];
+      if (Array.isArray(list) && list.length) return list.length;
+    }
+    return null;
+  };
+  const countSuffix = () => {
+    const count = affectedCount();
+    return count && count > 1 ? ` on ${count} items` : "";
+  };
+  // Titles of the affected papers, best-effort via the trace-side display-name
+  // resolver: itemIds, single itemId, or per-item assignments/operations.
+  const itemSubject = (): string | null => {
+    const ids: number[] = [];
+    const pushId = (raw: unknown) => {
+      if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) {
+        ids.push(raw);
+      }
+    };
+    if (Array.isArray(record.itemIds)) record.itemIds.forEach(pushId);
+    pushId(record.itemId);
+    if (Array.isArray(record.relatedItemIds)) {
+      record.relatedItemIds.forEach(pushId);
+    }
+    for (const key of ["assignments", "operations"] as const) {
+      const list = record[key];
+      if (!Array.isArray(list)) continue;
+      for (const raw of list) {
+        if (raw && typeof raw === "object") {
+          pushId((raw as { itemId?: unknown }).itemId);
+        }
+      }
+    }
+    if (!ids.length) return null;
+    const titles = ids
+      .map((id) => labels?.item?.(id))
+      .filter(
+        (title): title is string =>
+          typeof title === "string" && title.trim().length > 0,
+      )
+      .map((title) => title.trim());
+    if (!titles.length) return null;
+    const MAX_LISTED = 3;
+    const listed = titles.slice(0, MAX_LISTED).map((title) => `"${title}"`);
+    const unlisted = ids.length - listed.length;
+    return unlisted > 0
+      ? `${listed.join(", ")} +${unlisted} more`
+      : listed.join(", ");
+  };
+
+  if (record.kind === "tags") {
+    const tagList = quoteTagList(record.tags);
+    const subject = itemSubject();
+    if (record.action === "set") {
+      if (subject && tagList) return `Tags set on ${subject}: ${tagList}`;
+      if (tagList) return `Tags set to ${tagList}`;
+      if (subject) return `Tags replaced on ${subject}`;
+      return "Tags replaced";
+    }
+    if (record.action === "remove") {
+      if (subject && tagList) return `Tags removed from ${subject}: ${tagList}`;
+      if (tagList) return `Tags removed: ${tagList}`;
+      if (subject) return `Tags removed from ${subject}`;
+      return "Tags removed";
+    }
+    if (subject && tagList) return `Tags added to ${subject}: ${tagList}`;
+    if (tagList) return `Tags added: ${tagList}`;
+    if (subject) return `Tags added to ${subject}`;
+    return "Tags added";
+  }
+  if (record.kind === "tag") {
+    const tag =
+      typeof record.tag === "string" && record.tag.trim()
+        ? `"${record.tag.trim()}"`
+        : null;
+    const newTag =
+      typeof record.newTag === "string" && record.newTag.trim()
+        ? `"${record.newTag.trim()}"`
+        : null;
+    if (record.action === "rename") {
+      return tag && newTag ? `Tag renamed ${tag} → ${newTag}` : "Tag renamed";
+    }
+    if (record.action === "merge") {
+      return tag && newTag ? `Tags merged ${tag} → ${newTag}` : "Tags merged";
+    }
+    if (record.action === "delete") {
+      return tag ? `Tag deleted ${tag}` : "Tag deleted";
+    }
+    if (record.action === "setColor") {
+      return tag ? `Tag color set ${tag}` : "Tag color set";
+    }
+    return "Tag updated";
+  }
+  if (record.kind === "collections") {
+    const name = collectionName();
+    const subject = itemSubject();
+    if (record.action === "remove") {
+      if (subject) {
+        return `Removed ${subject} from collection${name ? ` "${name}"` : ""}`;
+      }
+      return name ? `Removed from collection "${name}"` : "Removed from collection";
+    }
+    if (record.mode === "move") {
+      if (subject && name) return `Moved ${subject} to collection "${name}"`;
+      if (subject) return `Moved ${subject} between collections`;
+      return name ? `Moved to collection "${name}"` : "Moved between collections";
+    }
+    if (subject && name) return `Added ${subject} to collection "${name}"`;
+    if (subject) return `Added ${subject} to collection`;
+    return name ? `Added to collection "${name}"` : "Added to collection";
+  }
+  if (record.kind === "metadata") {
+    const count = countSuffix();
+    const subject =
+      itemSubject() || (count ? count.replace(" on ", "") : null);
+    return subject ? `Metadata updated on ${subject}` : "Metadata updated";
+  }
+  if (record.kind === "parent") {
+    const count = countSuffix();
+    const subject =
+      itemSubject() || (count ? count.replace(" on ", "") : null);
+    return subject
+      ? `Parent item updated on ${subject}`
+      : "Parent item updated";
+  }
+  if (record.kind === "related") {
+    const subject = itemSubject();
+    const verb = record.action === "remove" ? "unlinked" : "linked";
+    return subject
+      ? `Related items ${verb}: ${subject}`
+      : `Related items ${verb}`;
+  }
+  return null;
+}
+
 function markToolTier<TInput, TResult>(
   tool: AgentToolDefinition<TInput, TResult>,
   tier: "normal" | "advanced",
@@ -518,6 +738,9 @@ function createLibraryUpdateTool(tools: {
       onPending: "Waiting for confirmation on library changes",
       onApproved: "Applying library changes",
       onDenied: "Library changes cancelled",
+      // Fallback for payloads the summary hook cannot read; a kind-specific
+      // outcome ("Tags added: …" / "Moved to collection …") owns the row
+      // whenever the call and result shapes are recognized.
       onSuccess: ({ effect }) =>
         effect === "none"
           ? "No library items changed"
@@ -525,6 +748,8 @@ function createLibraryUpdateTool(tools: {
             ? "Some library items updated"
             : "Library updated",
     },
+    buildTraceSummary: ({ args, content, labels }) =>
+      buildLibraryUpdateTraceSummary(args, content, labels),
     guidance: LIBRARY_UPDATE_GUIDANCE,
     chooseDelegate(args) {
       if (!validateObject<Record<string, unknown>>(args)) {

@@ -74,10 +74,6 @@ export const activeContextPanelRawItems = new Map<
 >();
 export const activeContextPanelStateSync = new Map<Element, () => void>();
 export const shortcutEscapeListenerAttached = new WeakSet<Document>();
-export let readerContextPanelRegistered = false;
-export function setReaderContextPanelRegistered(value: boolean) {
-  readerContextPanelRegistered = value;
-}
 
 export let currentRequestId = 0;
 export function nextRequestId(): number {

@@ -1,6 +1,6 @@
 import { assert } from "chai";
 import {
-  getReaderContextPanelForTab,
+  getReaderPanelContainerForTab,
   isPanelInReaderContextForTab,
   resolveReaderPopupPanelTarget,
   resolveStandalonePopupPanelTarget,
@@ -32,12 +32,25 @@ class FakeElement {
     return this.attributes.get(name) ?? null;
   }
 
+  private selectorMatches(selector: string): boolean {
+    if (selector.startsWith("#")) {
+      return this.getAttribute("id") === selector.slice(1);
+    }
+    if (selector.startsWith(".")) {
+      const token = selector.slice(1);
+      return (this.getAttribute("class") || "")
+        .split(/\s+/)
+        .includes(token);
+    }
+    return false;
+  }
+
   matches(selector: string): boolean {
-    return selector === "#llm-main" && this.getAttribute("id") === "llm-main";
+    return this.selectorMatches(selector);
   }
 
   querySelector(selector: string): FakeElement | null {
-    if (this.matches(selector)) return this;
+    if (this.selectorMatches(selector)) return this;
     for (const child of this.children) {
       const match = child.querySelector(selector);
       if (match) return match;
@@ -52,46 +65,61 @@ class FakeElement {
 }
 
 class FakeDocument {
-  constructor(private readonly deck: FakeElement) {}
+  private readonly byID = new Map<string, FakeElement>();
+
+  register(element: FakeElement, id: string) {
+    element.setAttribute("id", id);
+    this.byID.set(id, element);
+  }
 
   getElementById(id: string): FakeElement | null {
-    return id === "zotero-context-pane-item-deck" ? this.deck : null;
+    return this.byID.get(id) ?? null;
   }
 }
 
-function buildReaderDeck() {
+function buildReaderTabs() {
+  const doc = new FakeDocument();
   const deck = new FakeElement();
-  const doc = new FakeDocument(deck);
   deck.ownerDocument = doc;
-  const stalePanel = new FakeElement();
-  stalePanel.setAttribute("data-tab-id", "tab-stale");
-  const staleRoot = new FakeElement();
-  staleRoot.setAttribute("id", "llm-main");
-  const activePanel = new FakeElement();
-  activePanel.setAttribute("data-tab-id", "tab-active");
-  const activeRoot = new FakeElement();
-  activeRoot.setAttribute("id", "llm-main");
-  stalePanel.ownerDocument = doc;
-  activePanel.ownerDocument = doc;
-  stalePanel.append(staleRoot);
-  activePanel.append(activeRoot);
-  deck.append(stalePanel, activePanel);
-  deck.selectedPanel = activePanel;
+  doc.register(deck, "tabs-deck");
+
+  const buildTab = (tabID: string) => {
+    const tabContent = new FakeElement();
+    tabContent.ownerDocument = doc;
+    const panel = new FakeElement();
+    panel.ownerDocument = doc;
+    panel.setAttribute("class", "llm-reader-panel");
+    doc.register(panel, `llmforzotero-reader-panel-${tabID}`);
+    const root = new FakeElement();
+    root.ownerDocument = doc;
+    root.setAttribute("id", "llm-main");
+    panel.append(root);
+    tabContent.append(panel);
+    deck.append(tabContent);
+    return { tabContent, panel, root };
+  };
+
+  const stale = buildTab("tab-stale");
+  const active = buildTab("tab-active");
+  deck.selectedPanel = active.tabContent;
   return {
     doc: doc as unknown as Document,
-    staleRoot: staleRoot as unknown as Element,
-    activePanel: activePanel as unknown as Element,
-    activeRoot: activeRoot as unknown as Element,
+    stalePanel: stale.panel as unknown as Element,
+    staleRoot: stale.root as unknown as Element,
+    activePanel: active.panel as unknown as Element,
+    activeRoot: active.root as unknown as Element,
   };
 }
 
 function buildStandalonePanel() {
+  const doc = new FakeDocument();
   const deck = new FakeElement();
-  const doc = new FakeDocument(deck);
   deck.ownerDocument = doc;
+  doc.register(deck, "tabs-deck");
   const body = new FakeElement();
   const root = new FakeElement();
   body.ownerDocument = doc;
+  root.ownerDocument = doc;
   root.setAttribute("id", "llm-main");
   root.setAttribute("data-standalone", "true");
   body.append(root);
@@ -102,31 +130,31 @@ function buildStandalonePanel() {
 }
 
 describe("reader popup panel routing", function () {
-  it("selects the context pane owned by the reader tab", function () {
-    const { doc, activePanel, activeRoot, staleRoot } = buildReaderDeck();
+  it("selects the reader panel owned by the reader tab", function () {
+    const { doc, activePanel, activeRoot, staleRoot } = buildReaderTabs();
 
     assert.strictEqual(
-      getReaderContextPanelForTab(doc, "tab-active"),
+      getReaderPanelContainerForTab(doc, "tab-active"),
       activePanel,
     );
     assert.isTrue(isPanelInReaderContextForTab(activeRoot, "tab-active"));
     assert.isFalse(isPanelInReaderContextForTab(staleRoot, "tab-active"));
   });
 
-  it("uses the deck's selected panel when the reader tab ID is unavailable", function () {
-    const { doc, activePanel } = buildReaderDeck();
+  it("uses the selected tab's panel when the reader tab ID is unavailable", function () {
+    const { doc, activePanel } = buildReaderTabs();
 
-    assert.strictEqual(getReaderContextPanelForTab(doc, null), activePanel);
+    assert.strictEqual(getReaderPanelContainerForTab(doc, null), activePanel);
   });
 
-  it("does not fall back to another window's selected panel for a known tab ID", function () {
-    const { doc } = buildReaderDeck();
+  it("does not fall back to another window's panel for a known tab ID", function () {
+    const { doc } = buildReaderTabs();
 
-    assert.isNull(getReaderContextPanelForTab(doc, "tab-in-another-window"));
+    assert.isNull(getReaderPanelContainerForTab(doc, "tab-in-another-window"));
   });
 
-  it("does not mistake a connected panel outside the reader deck for active", function () {
-    const { doc } = buildReaderDeck();
+  it("does not mistake a connected panel outside the reader tabs for active", function () {
+    const { doc } = buildReaderTabs();
     const libraryPanelRoot = new FakeElement();
     libraryPanelRoot.ownerDocument = doc as unknown as FakeDocument;
 
@@ -139,7 +167,7 @@ describe("reader popup panel routing", function () {
   });
 
   it("returns the exact panel target for a known reader tab", function () {
-    const { doc, activePanel, activeRoot } = buildReaderDeck();
+    const { doc, activePanel, activeRoot } = buildReaderTabs();
 
     const target = resolveReaderPopupPanelTarget({
       preferredDocument: doc,
@@ -152,8 +180,8 @@ describe("reader popup panel routing", function () {
   });
 
   it("uses only the preferred window's selected panel without a tab ID", function () {
-    const preferred = buildReaderDeck();
-    const other = buildReaderDeck();
+    const preferred = buildReaderTabs();
+    const other = buildReaderTabs();
 
     const target = resolveReaderPopupPanelTarget({
       preferredDocument: preferred.doc,
@@ -165,9 +193,17 @@ describe("reader popup panel routing", function () {
   });
 
   it("finds a known tab in another Zotero window", function () {
-    const preferred = buildReaderDeck();
-    const other = buildReaderDeck();
-    other.activePanel.setAttribute("data-tab-id", "tab-other-window");
+    const preferred = buildReaderTabs();
+    const other = buildReaderTabs();
+    const otherDoc = other.doc as unknown as FakeDocument;
+    const otherPanel = new FakeElement();
+    otherPanel.ownerDocument = otherDoc;
+    otherPanel.setAttribute("class", "llm-reader-panel");
+    otherDoc.register(otherPanel, "llmforzotero-reader-panel-tab-other-window");
+    const otherRoot = new FakeElement();
+    otherRoot.ownerDocument = otherDoc;
+    otherRoot.setAttribute("id", "llm-main");
+    otherPanel.append(otherRoot);
 
     const target = resolveReaderPopupPanelTarget({
       preferredDocument: preferred.doc,
@@ -175,12 +211,12 @@ describe("reader popup panel routing", function () {
       tabID: "tab-other-window",
     });
 
-    assert.strictEqual(target?.root, other.activeRoot);
+    assert.strictEqual(target?.root, otherRoot as unknown as Element);
   });
 
   it("refuses an ambiguous known tab across multiple windows", function () {
-    const first = buildReaderDeck();
-    const second = buildReaderDeck();
+    const first = buildReaderTabs();
+    const second = buildReaderTabs();
 
     assert.isNull(
       resolveReaderPopupPanelTarget({
@@ -191,8 +227,8 @@ describe("reader popup panel routing", function () {
   });
 
   it("refuses multiple selected panels when no preferred window exists", function () {
-    const first = buildReaderDeck();
-    const second = buildReaderDeck();
+    const first = buildReaderTabs();
+    const second = buildReaderTabs();
 
     assert.isNull(
       resolveReaderPopupPanelTarget({
@@ -202,8 +238,8 @@ describe("reader popup panel routing", function () {
     );
   });
 
-  it("returns the standalone chat target outside the reader deck", function () {
-    const reader = buildReaderDeck();
+  it("returns the standalone chat target outside the reader tabs", function () {
+    const reader = buildReaderTabs();
     const standalone = buildStandalonePanel();
 
     const target = resolveStandalonePopupPanelTarget([

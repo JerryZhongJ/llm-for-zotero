@@ -107,7 +107,8 @@ import {
 } from "../../utils/modelProviders";
 import type { RuntimeConversationSystem } from "./runtimeSystemControls";
 import { collectReaderSelectionDocuments } from "./readerSelection";
-import { getReaderContextPanelForTab } from "./readerPopupPanelRouting";
+import { getReaderPanelContainerForTab } from "./readerPopupPanelRouting";
+import { syncReaderPanelsNow } from "./readerPanel";
 import type { ConversationSystem } from "../../shared/types";
 import { clearPaperRestoreTargetsForWorkflowTests } from "../../shared/paperConversationRestore";
 import { relayGetStateSnapshot } from "../../webchat/relayServer";
@@ -2942,11 +2943,12 @@ async function exerciseReaderPopupActiveTabRouting(input: {
       input.pageIndex,
     );
     const mainDocument = Zotero.getMainWindow?.()?.document || null;
+    syncReaderPanelsNow();
     const firstReaderPanel = mainDocument
-      ? getReaderContextPanelForTab(mainDocument, firstReader.tabID)
+      ? getReaderPanelContainerForTab(mainDocument, firstReader.tabID)
       : null;
     const secondReaderPanel = mainDocument
-      ? getReaderContextPanelForTab(mainDocument, secondReader.tabID)
+      ? getReaderPanelContainerForTab(mainDocument, secondReader.tabID)
       : null;
     if (!firstReaderPanel || !secondReaderPanel) {
       throw new Error("Workflow reader tabs do not expose distinct panels");
@@ -3064,8 +3066,9 @@ async function exerciseHighlightAwareContextRetrieval(input: {
   let selectionDoc: Document | null = null;
   try {
     const mainDocument = Zotero.getMainWindow?.()?.document || null;
+    syncReaderPanelsNow();
     const readerPanel = mainDocument
-      ? getReaderContextPanelForTab(mainDocument, reader.tabID)
+      ? getReaderPanelContainerForTab(mainDocument, reader.tabID)
       : null;
     if (!readerPanel) {
       throw new Error("Workflow reader tab does not expose a context panel");

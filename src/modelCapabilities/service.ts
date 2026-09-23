@@ -731,12 +731,10 @@ export function getRuntimeReasoningOptions(
   identity: ModelCapabilityIdentity,
 ): Array<{ level: string; label: string; enabled: boolean }> {
   const reasoning = getModelCapabilities(identity).reasoning;
-  const options = [...reasoning.options].sort((left, right) => {
-    if (left.id === reasoning.defaultOptionId) return -1;
-    if (right.id === reasoning.defaultOptionId) return 1;
-    return 0;
-  });
-  return options.map((option) => ({
+  // Declaration order is the display order: registry options are listed by
+  // ascending effort. The default level is resolved separately, so it must
+  // not reorder the menu (glm-5.3 defaults to max and would jump to the top).
+  return reasoning.options.map((option) => ({
     level: option.id,
     label: option.label,
     enabled: option.enabled !== false,
