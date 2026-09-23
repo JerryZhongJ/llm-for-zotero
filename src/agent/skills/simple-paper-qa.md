@@ -19,7 +19,7 @@ match: /\b(tldr|tl;dr|gist|overview|brief)\b/i
   this paper about?", "summarize this", "who are the authors?").
 
   You can customize:
-  - Reading strategy: change when `paper_read()` overview vs `paper_query` retrieval is used
+  - Reading strategy: change when `paper_read({sections:[...]})` section reads vs `paper_query` retrieval are used
   - Escalation rules: adjust when to do deeper retrieval
   - Answer style: modify how responses are structured
 
@@ -31,10 +31,10 @@ match: /\b(tldr|tl;dr|gist|overview|brief)\b/i
 
 Use Zotero paper tools as resources, not a ritual.
 
-- For broad questions like "what is this paper about?", "summarize this", or "main message", call `paper_read()` once, then answer.
-- If the user asks for a specific claim, method, result, table, or named section that overview cannot answer, make one focused `paper_query({ query:'<specific missing claim>' })` call (or `paper_read({ sections:['<named section>'] })` when the section is named).
-- If overview reports `contentStatus:'no_pdf_attachment'`, answer from Zotero metadata/abstract if sufficient; otherwise one external lookup is allowed and must be labeled as external.
-- If overview reports `contentStatus:'no_extractable_pdf_text'`, answer from metadata/abstract and state the limitation.
+- For broad questions like "what is this paper about?", "summarize this", or "main message", call `paper_read({ sections:['Abstract','Introduction','Conclusion'] })` once, then answer.
+- If the user asks for a specific claim, method, result, table, or named section that those sections cannot answer, make one focused `paper_query({ query:'<specific missing claim>' })` call (or `paper_read({ sections:['<named section>'] })` when the section is named).
+- If the paper reports `contentStatus:'no_pdf_attachment'`, answer from Zotero metadata/abstract if sufficient; otherwise one external lookup is allowed and must be labeled as external.
+- If the paper reports `contentStatus:'no_extractable_pdf_text'`, answer from metadata/abstract and state the limitation.
 - Apply the system citation contract to paper-specific claims and direct quotations.
   When useful, select 1–3 high-signal passages and explain what each establishes rather than quoting decoratively.
 - Do not call visual/page tools, `file_io`, or `run_command` just to improve citation anchors or page numbers.

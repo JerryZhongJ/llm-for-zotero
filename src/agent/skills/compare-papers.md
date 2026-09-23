@@ -31,7 +31,7 @@ match: /\bcompare\b.*\b(methods?|methodology|sections?|approach|results?|limitat
 Use Zotero paper tools as resources, not a ritual. Batch selected papers in `targets`.
 
 A selected Zotero collection/folder is also a valid comparison corpus. In collection/library chat, never rely on the active-reader paper as an implicit target. If explicit paper targets are not already selected, first use `library_retrieve` scoped to the selected collection/library to map the comparison evidence, then call `paper_read` only with explicit `targets` when close reading is needed.
-For bounded selected or collection-scoped comparison pools, overview is the answer style, not the read depth.
+For bounded selected or collection-scoped comparison pools, a high-level answer is the answer style, not the read depth.
 Prefer body-evidence coverage and the returned paper synthesis digest before writing the comparison.
 
 - If the user names a comparison dimension such as methods, results, limitations, theory, data, or figures, start with one batched targeted read:
@@ -39,7 +39,7 @@ Prefer body-evidence coverage and the returned paper synthesis digest before wri
 - If the corpus is a selected collection/folder and the dimension is known, prefer one scoped `library_retrieve({ query:'methods methodology method section', intent:'summarize', depth:'evidence' })` before selecting explicit paper targets for deeper comparison.
 - For broad requests like "compare these papers" with no dimension, use bounded evidence coverage first: `library_retrieve({ query:'compare these papers', intent:'summarize', depth:'evidence' })` for collection/library chat, or the selected-paper evidence ledger when it is already supplied.
   Then synthesize from the paper digest and snippets.
-- For method-section requests, do not call overview first unless the targeted result is clearly insufficient.
+- For method-section requests, do not read broad sections first unless the targeted result is clearly insufficient.
 - Apply the system citation contract to paper-specific claims and any direct quotations.
   Keep the comparison readable and use only high-signal evidence that supports a concrete contrast.
 - Stop after the evidence ledger covers the selected papers at the needed depth, or explicitly report the coverage frontier. Make follow-up `paper_query({ ... })` calls only for concrete missing dimensions or papers that the ledger marks as insufficient.

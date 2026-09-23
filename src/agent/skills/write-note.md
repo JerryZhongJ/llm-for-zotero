@@ -55,11 +55,11 @@ If unclear, default to Zotero note.
 ### Step 1 — Read content
 
 - If `mineruCacheDir` is available: use `file_io({ action:'read', filePath:'{mineruCacheDir}/full.md' })`.
-- Otherwise: use `paper_read()` for the overview, then optionally one `paper_query({ query:'...' })` call for key results/methods if the user wants detail beyond the abstract.
+- Otherwise: use `paper_read({ sections:['Abstract','Introduction','Conclusion'] })` for the broad picture, then optionally one `paper_query({ query:'...' })` call for key results/methods if the user wants detail beyond the abstract.
 - For multi-paper notes (reviews, comparisons): use `library_retrieve` with the right intent (`enumerate` for comprehensive evidence search, `summarize` for taxonomies/themes/commonality/comparison, or `verify` for exact presence/absence) to search the scoped library/collection resource pool and gather snippets, then use `paper_read` only for papers that the ledger marks as needing close reading.
 - For bounded selected multi-paper notes, prefer body-evidence coverage and the paper synthesis digest before writing.
 - For free-form notes: use whatever the user provides or requests.
-- For one-paper notes, keep the read phase compact: 1 call (overview) or 1–2 calls (overview/targeted).
+- For one-paper notes, keep the read phase compact: 1 call (broad sections) or 1–2 calls (sections/targeted).
   For bounded multi-paper notes, answer quality takes priority over a fixed call count.
 
 ### Step 2 — Compose the note

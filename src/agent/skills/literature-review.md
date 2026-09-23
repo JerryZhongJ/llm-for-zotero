@@ -50,7 +50,7 @@ Use `library_retrieve({ query:'<review focus>', intent:'summarize', depth:'evide
 For newly discovered or large corpora, deep-read the most relevant papers and use the `library_retrieve` frontier to report what remains sampled.
 If `library_retrieve` already returned good evidence snippets, use those before calling `paper_read`.
 
-1. Use `paper_read({ target:[...] })` for selected papers.
+1. Use `paper_read({ target:[...], sections:['Abstract','Introduction','Conclusion'] })` for selected papers.
 2. For targeted claims: `paper_query({ query:'...', target:[...] })` with focused questions (e.g., "What methods were used?", "What were the key findings?").
 3. Use `paper_read({ labels:[...], images:true })` only when figures are directly relevant; reserve `paper_read({ pages:[...], images:true })` for explicit page/layout inspection.
 

@@ -36,19 +36,11 @@ export type {
   PaperReadFigureExtractionService,
   PaperReadFullResult,
 } from "./paperReadTypes";
-export { resolveMetadataOverviewTitleForTests } from "./paperReadOverview";
-import {
-  buildMetadataOverview,
-  tryReadMineruOverview,
-} from "./paperReadOverview";
 import { executeSectionsRead } from "./paperReadSections";
 import {
-  buildOverviewQuoteCitationPack,
   buildTargetedPaperGroups,
-  combineWarnings,
   countGroupedPassages,
   dedupePaperContexts,
-  extractWarningText,
   formatSourcePhrase,
   getUniqueSourceLabels,
   hydrateFigureTargetsWithMineruMetadata,
@@ -56,11 +48,10 @@ import {
   normalizeStringArray,
 } from "./paperReadShared";
 
-const MAX_OVERVIEW_TARGETS = 5;
 const MAX_TARGETS = 10;
 const MAX_FULL_TARGETS = Number.MAX_SAFE_INTEGER;
 const LEGACY_MODE_MESSAGE =
-  "paper_read no longer takes 'mode'. Coordinates select the path instead: sections:[...] for section text, pages:[...] for exact pages (add images:true for rendered pages), labels:[...] with images:true for figure crops, readFullReason for an exhaustive whole-document read, or no locator arguments for an overview. For relevance-ranked evidence use paper_query({query}).";
+  "paper_read no longer takes 'mode'. Coordinates select the path instead: sections:[...] for section text, pages:[...] for exact pages (add images:true for rendered pages), labels:[...] with images:true for figure crops, readFullReason for an exhaustive whole-document read. For relevance-ranked evidence use paper_query({query}).";
 
 function normalizePages(value: unknown): number[] | undefined {
   // Bare page syntax ("16-18") is documented in the schema; the shared
@@ -165,7 +156,7 @@ export function createPaperReadTool(
     spec: {
       name: "paper_read",
       description:
-        "Read content from the active or targeted papers by structured coordinate. sections:['Methods'] returns whole sections; pages:[16,17] ('16-20' also works) returns exact page text; labels:['Figure 3'] with images:true returns precise figure crops; images:true with pages returns rendered PDF pages; images:true alone returns all figures; readFullReason:'...' triggers an exhaustive whole-document read; no arguments at all returns a bounded overview (abstract/introduction/conclusion with Zotero-metadata fallback). To find passages by what they say instead of where they are, use paper_query.",
+        "Read content from the active or targeted papers by structured coordinate. sections:['Methods'] returns whole sections (combine ['Abstract','Introduction','Conclusion'] for a broad picture); pages:[16,17] ('16-20' also works) returns exact page text; labels:['Figure 3'] with images:true returns precise figure crops; images:true with pages returns rendered PDF pages; images:true alone returns all figures; readFullReason:'...' triggers an exhaustive whole-document read; a call without a locator is rejected. To find passages by what they say instead of where they are, use paper_query.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -285,7 +276,7 @@ export function createPaperReadTool(
               : "";
             return `Reading sections: ${sections}`;
           }
-          return "Reading paper overview";
+          return "Reading paper";
         },
         onPending: "Waiting for your approval before sending document content",
         onApproved: "Approval received - sending document content",
@@ -316,16 +307,6 @@ export function createPaperReadTool(
               | { processedChunks?: number; totalChunks?: number }
               | undefined;
             return `Read ${receipt?.processedChunks || 0}/${receipt?.totalChunks || 0} full-text chunks`;
-          }
-          if (mode === "overview" && results?.length) {
-            const sourcePhrase = formatSourcePhrase(
-              getUniqueSourceLabels(results),
-            );
-            if (sourcePhrase) {
-              const overviewLabel =
-                results.length === 1 ? "paper overview" : "paper overviews";
-              return `Read ${overviewLabel} from ${sourcePhrase}`;
-            }
           }
           if (mode === "figures") {
             const figures = Array.isArray(c?.figures) ? c.figures : [];
@@ -369,6 +350,13 @@ export function createPaperReadTool(
       const images = args.images === true;
       const sections = normalizeStringArray(args.sections);
       const pages = normalizePages(args.pages);
+      // An unparseable pages value must fail loudly: silently dropping it
+      // would degrade the call to an overview read the model never asked for.
+      if (hasArg(args, "pages") && !pages?.length) {
+        return fail(
+          "Could not parse pages. Pass exact PDF pages as numbers (17), an array ([16,17,18]), or a bare range string ('16-20').",
+        );
+      }
       const labels = normalizeStringArray(args.labels);
       const readFullReason = normalizeString(args.readFullReason);
 
@@ -397,6 +385,11 @@ export function createPaperReadTool(
           "readFullReason triggers an exhaustive whole-document read; sections/pages/labels/images are redundant with it. Drop the locators or drop readFullReason.",
         );
       }
+      if (!sections && !pages?.length && !labels && !images && !readFullReason) {
+        return fail(
+          "paper_read requires a locator: sections (e.g. ['Abstract', 'Introduction', 'Conclusion'] for a broad picture), pages, labels with images:true, or readFullReason. For relevance-ranked passages use paper_query({query}).",
+        );
+      }
 
       const isTargetArray = Array.isArray(args.target);
       const targetSyntax = normalizeExplicitTargetSyntax({
@@ -409,11 +402,7 @@ export function createPaperReadTool(
           ? MAX_FULL_TARGETS
           : images
             ? 1
-            : sections
-              ? MAX_TARGETS
-              : pages?.length
-                ? MAX_TARGETS
-                : MAX_OVERVIEW_TARGETS,
+            : MAX_TARGETS,
       });
       if (targetSyntax.kind === "invalid") {
         return fail(`${targetSyntax.code}: ${targetSyntax.message}`);
@@ -584,12 +573,9 @@ export function createPaperReadTool(
           pdfPageService,
         });
       }
-      return executeOverviewRead({
-        input,
-        context,
-        pdfService,
-        zoteroGateway,
-      });
+      throw new Error(
+        "paper_read requires a locator (sections, pages, labels with images:true, or readFullReason); validate should have rejected this call.",
+      );
     },
   };
 }
@@ -679,63 +665,3 @@ async function executeFullRead(params: {
   return output;
 }
 
-async function executeOverviewRead(params: {
-  input: PaperReadInput;
-  context: AgentToolContext;
-  pdfService: PdfService;
-  zoteroGateway: ZoteroGateway;
-}): Promise<Record<string, unknown>> {
-  const { input, context } = params;
-  const targets = resolveDefaultTargets(
-    input.target,
-    input.targets,
-    context,
-    params.zoteroGateway,
-    MAX_OVERVIEW_TARGETS,
-  );
-  if (!targets.length) {
-    throw new Error(describeNoDefaultPaperTarget(context.request));
-  }
-  const maxChars = 6000;
-  const results = [];
-  const metadataResolver = createZoteroMetadataResolver({
-    getItem: (itemId) => params.zoteroGateway.getItem(itemId),
-  });
-  for (const paperContext of targets) {
-    const mineru = await tryReadMineruOverview(paperContext, maxChars);
-    if (mineru && (mineru as { ok?: boolean }).ok !== false) {
-      results.push(mineru);
-      continue;
-    }
-    try {
-      results.push(
-        await params.pdfService.getOverviewExcerpt({ paperContext, maxChars }),
-      );
-    } catch (error) {
-      const warning = combineWarnings(
-        extractWarningText(mineru),
-        error instanceof Error ? error.message : String(error),
-      );
-      const metadataOverview = buildMetadataOverview({
-        paperContext,
-        metadataResolver,
-        warning,
-      });
-      if (metadataOverview) {
-        results.push(metadataOverview);
-      } else if (mineru) {
-        results.push(mineru);
-      } else {
-        throw error;
-      }
-    }
-  }
-  const overviewQuotePack = buildOverviewQuoteCitationPack(
-    results as Array<Record<string, unknown>>,
-  );
-  return {
-    mode: "overview",
-    results: overviewQuotePack.results,
-    quoteCitations: overviewQuotePack.quoteCitations,
-  };
-}

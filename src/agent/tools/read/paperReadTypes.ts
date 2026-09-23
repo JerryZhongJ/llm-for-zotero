@@ -8,7 +8,7 @@ import type { PdfTarget } from "./pdfToolUtils";
 /**
  * paper_read takes structured coordinates instead of a mode enum: the
  * presence of sections/pages/labels/readFullReason selects the path, and a
- * call with no locator at all is the overview preset.
+ * call with no locator at all is rejected.
  */
 export type PaperReadInput = {
   target?: PdfTarget;
