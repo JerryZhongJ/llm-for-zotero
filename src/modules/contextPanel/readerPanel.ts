@@ -186,7 +186,6 @@ function ensurePanelContainer(controller: ReaderPanelController): boolean {
   }
   applyPanelInset(controller);
   ensureSidebarInsetObserver(controller);
-  ensureSidebarInsetTimer();
   return true;
 }
 
@@ -253,11 +252,13 @@ function remountReaderPanel(controller: ReaderPanelController): void {
 // ── Sidebar inset (keep the panel inside the reading area) ─────────────────
 
 // The reader's own sidebar (outline/thumbnails) lives INSIDE the reader
-// iframe, so from the main window the tab container has no left rail. Observe
-// the main view's size for immediate updates and poll to catch layout changes
-// that do not resize it, or to reconnect after Zotero replaces the view.
-const READER_SIDEBAR_INSET_POLL_MS = 400;
-let sidebarInsetTimer: ReturnType<typeof setInterval> | null = null;
+// iframe, so from the main window the tab container has no left rail. The
+// inset is fully event-driven: a ResizeObserver on the reader's pages area
+// (plus the iframe and the context-pane splitter's parent) recomputes it,
+// and observer attachment is retried at controller creation and on every
+// renderToolbar event — the reader UI mounts .split-view and fires
+// renderToolbar in the same React commit, so the element is always
+// reachable by the time the event arrives.
 
 function getReaderViewContainer(
   controller: ReaderPanelController,
@@ -387,28 +388,11 @@ function ensureSidebarInsetObserver(controller: ReaderPanelController): void {
     try {
       observer.observe(splitterParent);
     } catch {
-      // The periodic layout check still covers changes to the context pane.
+      // Cross-document XUL elements are not accepted on every Zotero version.
     }
   }
   controller.sidebarResizeObserver = observer;
   controller.sidebarResizeTarget = target;
-}
-
-function ensureSidebarInsetTimer(): void {
-  if (sidebarInsetTimer !== null) return;
-  sidebarInsetTimer = setInterval(() => {
-    if (controllers.size === 0) return;
-    for (const controller of controllers.values()) {
-      ensureSidebarInsetObserver(controller);
-      applyPanelInset(controller);
-    }
-  }, READER_SIDEBAR_INSET_POLL_MS);
-}
-
-function stopSidebarInsetTimer(): void {
-  if (sidebarInsetTimer === null) return;
-  clearInterval(sidebarInsetTimer);
-  sidebarInsetTimer = null;
 }
 
 function attachResizer(controller: ReaderPanelController): void {
@@ -638,9 +622,6 @@ function createController(
         tabContainer.classList.remove(READER_HOST_CLASS);
       }
       controllers.delete(controller.tabID);
-      if (controllers.size === 0) {
-        stopSidebarInsetTimer();
-      }
     },
   };
   controllers.set(tabID, controller);
