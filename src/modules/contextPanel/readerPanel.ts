@@ -115,6 +115,10 @@ type ReaderPanelController = {
   open: boolean;
   sidebarResizeObserver: ResizeObserver | null;
   sidebarResizeTarget: Element | null;
+  sidebarMutationObserver: MutationObserver | null;
+  sidebarMutationBody: HTMLElement | null;
+  readerLoadTarget: Element | null;
+  readerLoadListener: EventListener | null;
   dispose: () => void;
 };
 
@@ -189,6 +193,7 @@ function ensurePanelContainer(controller: ReaderPanelController): boolean {
   if (!controller.open) {
     container.style.display = "none";
   }
+  ensureReaderDocumentLoadListener(controller);
   applyPanelInset(controller);
   ensureSidebarInsetObserver(controller);
   scheduleToolbarButtonSweep(controller);
@@ -259,12 +264,10 @@ function remountReaderPanel(controller: ReaderPanelController): void {
 
 // The reader's own sidebar (outline/thumbnails) lives INSIDE the reader
 // iframe, so from the main window the tab container has no left rail. The
-// inset is fully event-driven: a ResizeObserver on the reader's pages area
-// (plus the iframe and the context-pane splitter's parent) recomputes it,
-// and observer attachment is retried at controller creation and on every
-// renderToolbar event — the reader UI mounts .split-view and fires
-// renderToolbar in the same React commit, so the element is always
-// reachable by the time the event arrives.
+// inset is event-driven: the reader UI's class and sidebar-width style
+// signal sidebar changes, while a ResizeObserver follows the pages area,
+// iframe, and context-pane splitter. Observer attachment is retried during
+// toolbar startup because a restored reader can mount its UI later.
 
 function getReaderViewContainer(
   controller: ReaderPanelController,
@@ -291,22 +294,28 @@ function getReaderSplitViewElement(reader: ReaderLike): Element | null {
   }
 }
 
-// The outline sidebar itself: React mounts #sidebarContainer only while the
-// sidebar is open (left: 0, width: --sidebar-width), so its presence IS the
-// open/closed signal and its right edge is exactly where the pages area
-// starts. Deriving "closed" from the element's absence collapses the panel
-// inset to exactly 0 — measuring .split-view's left instead left a small
-// frame-offset residue that drifted the panel right after closing.
+// The body class is Zotero's immediate open/closed signal. React can mount
+// #sidebarContainer a moment after that class changes, so use the live CSS
+// width until its rectangle is available. On close, the class clears first
+// and the inset must collapse to zero even if the old element still exists.
 function getReaderSidebarRect(reader: ReaderLike): RectLike | null {
   try {
-    const sidebar =
-      getReaderContentDoc(reader)?.getElementById("sidebarContainer");
-    if (!sidebar) return null;
-    const rect = sidebar.getBoundingClientRect();
-    // The hidden state parks the element at left: -width; only a visible
-    // sidebar occupies the rail.
-    if (rect.width <= 0 || rect.left < 0) return null;
-    return rect;
+    const doc = getReaderContentDoc(reader);
+    if (!doc?.body?.classList.contains("sidebar-open")) return null;
+    const rect = doc
+      .getElementById("sidebarContainer")
+      ?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.left >= 0) return rect;
+    const cssWidth = Number.parseFloat(
+      doc.documentElement.style.getPropertyValue("--sidebar-width"),
+    );
+    const state = reader._internalReader?._state;
+    const width =
+      Number.isFinite(cssWidth) && cssWidth > 0
+        ? cssWidth
+        : Number(reader._sidebarWidth ?? state?.sidebarWidth);
+    if (!Number.isFinite(width) || width <= 0) return null;
+    return { left: 0, right: width, width, height: 1 };
   } catch {
     return null;
   }
@@ -334,8 +343,8 @@ function getReaderPanelInsets(controller: ReaderPanelController): {
       ? splitter.getBoundingClientRect()
       : undefined;
     const hostRect = host.getBoundingClientRect();
-    // Live DOM measurement of the rail occupants: the left inset is the
-    // sidebar's right edge when mounted, exactly 0 when it is not.
+    // Measure the sidebar rail, including the brief interval before React
+    // mounts its element after the open class is set.
     if (iframe) {
       return computeSidebarRailInsets({
         hostRect,
@@ -376,7 +385,47 @@ function applyPanelInset(controller: ReaderPanelController): void {
   }
 }
 
+function disconnectSidebarObserver(
+  observer: MutationObserver | ResizeObserver | null,
+): void {
+  try {
+    observer?.disconnect();
+  } catch {
+    // A browser navigation can invalidate an observer's old document.
+  }
+}
+
 function ensureSidebarInsetObserver(controller: ReaderPanelController): void {
+  // Zotero toggles body.sidebar-open and writes --sidebar-width on the UI
+  // document root. Observe those signals directly because an early
+  // ResizeObserver may be attached before the reader view has mounted.
+  let uiDoc: Document | null = null;
+  try {
+    uiDoc = getReaderContentDoc(controller.reader);
+  } catch {
+    // The browser may be navigating while a restored reader initializes.
+  }
+  if (uiDoc?.body && controller.sidebarMutationBody !== uiDoc.body) {
+    disconnectSidebarObserver(controller.sidebarMutationObserver);
+    controller.sidebarMutationObserver = null;
+    controller.sidebarMutationBody = null;
+    const MutationObserverCtor = uiDoc.defaultView?.MutationObserver;
+    if (MutationObserverCtor) {
+      const observer = new MutationObserverCtor(() => {
+        applyPanelInset(controller);
+      });
+      observer.observe(uiDoc.body, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+      observer.observe(uiDoc.documentElement, {
+        attributes: true,
+        attributeFilter: ["style"],
+      });
+      controller.sidebarMutationObserver = observer;
+      controller.sidebarMutationBody = uiDoc.body;
+    }
+  }
   // The live pages area is the best observation target: it resizes when the
   // sidebar toggles (width grows as the sidebar unmounts) and while it is
   // dragged, so both paths update the inset immediately.
@@ -390,7 +439,7 @@ function ensureSidebarInsetObserver(controller: ReaderPanelController): void {
   ) {
     return;
   }
-  controller.sidebarResizeObserver?.disconnect();
+  disconnectSidebarObserver(controller.sidebarResizeObserver);
   controller.sidebarResizeObserver = null;
   controller.sidebarResizeTarget = null;
   if (!target) return;
@@ -419,6 +468,40 @@ function ensureSidebarInsetObserver(controller: ReaderPanelController): void {
   }
   controller.sidebarResizeObserver = observer;
   controller.sidebarResizeTarget = target;
+}
+
+function ensureReaderDocumentLoadListener(
+  controller: ReaderPanelController,
+): void {
+  const frame = controller.reader._iframe;
+  if (!frame || controller.readerLoadTarget === frame) return;
+  if (controller.readerLoadTarget && controller.readerLoadListener) {
+    controller.readerLoadTarget.removeEventListener(
+      "load",
+      controller.readerLoadListener,
+      true,
+    );
+  }
+  const listener: EventListener = () => {
+    if (controller.cancelled) return;
+    // A capturing load event can arrive before Reader._iframeWindow points
+    // at the new document. Rebind on the following task.
+    void Zotero.Promise.delay(0).then(() => {
+      if (controller.cancelled) return;
+      disconnectSidebarObserver(controller.sidebarMutationObserver);
+      controller.sidebarMutationObserver = null;
+      controller.sidebarMutationBody = null;
+      disconnectSidebarObserver(controller.sidebarResizeObserver);
+      controller.sidebarResizeObserver = null;
+      controller.sidebarResizeTarget = null;
+      ensureSidebarInsetObserver(controller);
+      applyPanelInset(controller);
+      scheduleToolbarButtonSweep(controller);
+    });
+  };
+  frame.addEventListener("load", listener, true);
+  controller.readerLoadTarget = frame;
+  controller.readerLoadListener = listener;
 }
 
 function attachResizer(controller: ReaderPanelController): void {
@@ -565,6 +648,8 @@ function scheduleToolbarButtonSweep(
   attempt = 0,
 ): void {
   if (controller.cancelled) return;
+  ensureSidebarInsetObserver(controller);
+  applyPanelInset(controller);
   if (injectToolbarButtonIfMissing(controller)) return;
   if (attempt >= TOOLBAR_SWEEP_MAX_ATTEMPTS) return;
   void Zotero.Promise.delay(TOOLBAR_SWEEP_INTERVAL_MS).then(() =>
@@ -674,11 +759,27 @@ function createController(
     open: false,
     sidebarResizeObserver: null,
     sidebarResizeTarget: null,
+    sidebarMutationObserver: null,
+    sidebarMutationBody: null,
+    readerLoadTarget: null,
+    readerLoadListener: null,
     dispose: () => {
       controller.cancelled = true;
-      controller.sidebarResizeObserver?.disconnect();
+      disconnectSidebarObserver(controller.sidebarResizeObserver);
       controller.sidebarResizeObserver = null;
       controller.sidebarResizeTarget = null;
+      disconnectSidebarObserver(controller.sidebarMutationObserver);
+      controller.sidebarMutationObserver = null;
+      controller.sidebarMutationBody = null;
+      if (controller.readerLoadTarget && controller.readerLoadListener) {
+        controller.readerLoadTarget.removeEventListener(
+          "load",
+          controller.readerLoadListener,
+          true,
+        );
+      }
+      controller.readerLoadTarget = null;
+      controller.readerLoadListener = null;
       // A drag interrupted by tab teardown must not leave the reader
       // browser with pointer events disabled.
       (controller.reader._iframe as HTMLElement | null)?.style.removeProperty(
