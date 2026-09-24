@@ -614,7 +614,7 @@ describe("semantic tool surface", function () {
       {} as never,
     );
 
-    for (const badPages of ["PDF 11-12", "", [], [0], [-2], "abc"]) {
+    for (const badPages of ["PDF 11-12", "", [], [0], [-2], "abc", '["a"]']) {
       const validated = tool.validate({ pages: badPages });
       assert.equal(
         validated.ok,
@@ -626,11 +626,17 @@ describe("semantic tool surface", function () {
       }
     }
 
-    // Parseable forms keep validating: bare range, prefixed range, array.
+    // Parseable forms keep validating: bare range, prefixed range, array,
+    // and the JSON-stringified array some models emit.
     assert.equal(tool.validate({ pages: "11-12" }).ok, true);
     assert.equal(tool.validate({ pages: "pp. 11-12" }).ok, true);
     assert.equal(tool.validate({ pages: [11, 12] }).ok, true);
     assert.equal(tool.validate({ pages: 11 }).ok, true);
+    const jsonPages = tool.validate({ pages: "[11, 12]" });
+    assert.equal(jsonPages.ok, true);
+    if (jsonPages.ok) {
+      assert.deepEqual(jsonPages.value.pages, [10, 11]);
+    }
   });
 
   it("paper_read fails loudly when called without a locator", function () {

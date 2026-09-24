@@ -27,6 +27,7 @@ import {
 } from "./portalScope";
 import { getConversationKey } from "./conversationIdentity";
 import { createRuntimeSystemControls } from "./runtimeSystemControls";
+import { attachMineruParseButton } from "./mineruPanelButton";
 
 function createActionDropdown(doc: Document, spec: ActionDropdownSpec) {
   const slot = createElement(
@@ -999,6 +1000,7 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   composeArea.appendChild(actionsRow);
   container.appendChild(inputSection);
   container.appendChild(statusBar);
+  attachMineruParseButton(container, item);
   body.appendChild(container);
 }
 

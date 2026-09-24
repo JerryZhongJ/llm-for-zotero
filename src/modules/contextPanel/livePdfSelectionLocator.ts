@@ -1025,7 +1025,7 @@ function resolveGeckoMethodOwner(value: any, methodName: string): any | null {
   return null;
 }
 
-function getPdfViewerApplication(reader: any): any | null {
+export function getPdfViewerApplication(reader: any): any | null {
   const candidates = [
     reader?._internalReader?._lastView,
     reader?._internalReader?._primaryView,

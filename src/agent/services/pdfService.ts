@@ -1,4 +1,7 @@
-import { ensurePDFTextCached } from "../../modules/contextPanel/pdfContext";
+import {
+  ensurePDFTextCached,
+  upgradePlainPdfCacheWithOutline,
+} from "../../modules/contextPanel/pdfContext";
 import { pdfTextCache } from "../../modules/contextPanel/state";
 import {
   isPdfContextAttachment,
@@ -53,7 +56,16 @@ export class PdfService {
     await ensurePDFTextCached(contextItem, {
       sourceMode: paperContext.contentSourceMode,
     });
-    return pdfTextCache.get(contextItem.id);
+    const cached = pdfTextCache.get(contextItem.id);
+    // A plain-PDF context cached before its reader opened lacks a section
+    // index; a cheap check upgrades it when the outline is now reachable.
+    if (cached && !cached.sectionIndex?.length) {
+      await upgradePlainPdfCacheWithOutline(contextItem, {
+        sourceMode: paperContext.contentSourceMode,
+      });
+      return pdfTextCache.get(contextItem.id) ?? cached;
+    }
+    return cached;
   }
 
   async getChunkExcerpt(params: {
