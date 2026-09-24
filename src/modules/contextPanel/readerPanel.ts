@@ -92,6 +92,8 @@ type ReaderLike = {
   _sidebarWidth?: number;
   _internalReader?: {
     _splitViewContainer?: HTMLElement;
+    _lastView?: { _iframeWindow?: Window };
+    _primaryView?: { _iframeWindow?: Window };
     _state?: { sidebarOpen?: boolean; sidebarWidth?: number };
   };
 };
@@ -365,6 +367,7 @@ function ensureSidebarInsetTimer(): void {
     for (const controller of controllers.values()) {
       ensureSidebarInsetObserver(controller);
       applyPanelInset(controller);
+      injectToolbarButtonIfMissing(controller);
     }
   }, READER_SIDEBAR_INSET_POLL_MS);
 }
@@ -419,6 +422,54 @@ function attachResizer(controller: ReaderPanelController): void {
 }
 
 // ── Toolbar button (Zotero.Reader renderToolbar hook) ──────────────────────
+
+// The reader toolbar's CustomSections component re-fires "renderToolbar" on
+// every React render — but a session-restored reader renders its toolbar
+// before this plugin registers the listener, so the chat toggle is missing
+// until the tab is reopened. The 400ms panel sweep calls this fallback: it
+// re-uses the shared toolbar handler and mirrors the reader's own append
+// (a div.section inside .custom-sections). The next toolbar re-render wipes
+// and re-adds the button through the official event, so both paths converge.
+function getReaderToolbarDoc(reader: ReaderLike): Document | null {
+  const view =
+    reader._internalReader?._lastView ?? reader._internalReader?._primaryView;
+  const win =
+    view?._iframeWindow ??
+    (reader as { _iframe?: { contentWindow?: Window } })._iframe
+      ?.contentWindow ??
+    (reader as { _window?: Window })._window ??
+    null;
+  const doc = win?.document ?? null;
+  return doc ? (doc as Document) : null;
+}
+
+function injectToolbarButtonIfMissing(controller: ReaderPanelController): void {
+  if (!controller.container) return;
+  let doc: Document | null = null;
+  try {
+    doc = getReaderToolbarDoc(controller.reader);
+  } catch {
+    return;
+  }
+  if (!doc) return;
+  try {
+    if (doc.getElementById(READER_PANEL_TOGGLE_ID)) return;
+    const customSections = doc.querySelector(".toolbar .custom-sections");
+    if (!customSections) return;
+    getToolbarHandler()({
+      reader: controller.reader,
+      doc,
+      append: (el) => {
+        const section = doc.createElement("div");
+        section.className = "section";
+        section.append(el);
+        customSections.append(section);
+      },
+    });
+  } catch (err) {
+    ztoolkit.log("LLM: reader toolbar button sweep failed", err);
+  }
+}
 
 function toggleReaderPanel(tabID: string): void {
   const controller = controllers.get(tabID);
