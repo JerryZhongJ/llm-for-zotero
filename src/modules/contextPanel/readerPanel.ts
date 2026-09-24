@@ -1,13 +1,23 @@
 /**
  * Reader Chat Panel
  *
- * A per-reader-tab chat surface docked at the bottom of the reader tab
+ * A per-reader-tab chat surface overlaid at the bottom of the reader tab
  * container (reader._tabContainer in the main window's #tabs-deck), toggled
  * by a toolbar button injected through the Zotero.Reader "renderToolbar"
  * hook. Each panel anchors the paper conversation of its reader tab's
  * attachment. Like the library bottom panel it owns its scrolling: the
  * container has a fixed height and only .llm-messages scrolls, so the chat
  * never joins any other scroll context.
+ *
+ * The panel is absolutely positioned instead of shrinking the reader
+ * browser: the iframe keeps full height, so the reader's own sidebar
+ * (outline, bottom:0 inside the iframe) keeps full height alongside the
+ * panel, and the opaque panel simply overlays the bottom of the pages
+ * area. Writing the reader's internal "bottom placeholder" state instead
+ * was tried and abandoned: reads of the content-side React state from
+ * chrome are unreliable, which made the re-assert guard misfire and sent
+ * the reader into an unbounded re-render loop (100% CPU, toolbar buttons
+ * flickering away).
  *
  * Controllers are keyed by reader tabID (one panel per reader tab); tab
  * lifecycle is driven by a Zotero.Notifier observer on 'tab' events.
@@ -45,7 +55,7 @@ const READER_PANEL_CONTAINER_CLASS = "llm-reader-panel";
 const READER_PANEL_BODY_CLASS = "llm-reader-panel-body";
 const READER_PANEL_RESIZER_CLASS = "llm-reader-panel-resizer";
 // Marks a Zotero tab-content element as hosting a docked reader panel; CSS
-// turns it into a column flex box so the reader browser yields panel height.
+// makes it the positioning context for the absolutely-positioned panel.
 const READER_HOST_CLASS = "llm-reader-host";
 const READER_PANEL_TOGGLE_ID = "llmforzotero-reader-chat-toggle";
 // Inline copy of the addon logo (addon/content/icons/icon.svg body): the
@@ -141,9 +151,9 @@ function ensurePanelContainer(controller: ReaderPanelController): boolean {
   const tabContainer = controller.reader._tabContainer;
   if (!tabContainer || !(tabContainer as Element).isConnected) return false;
   const doc = controller.doc;
-  // The tab content is a XUL container with no explicit orientation; the
-  // host class forces a column flex box so the panel docks below the reader
-  // browser (and the browser shrinks — CSS gives it flex:1).
+  // The host class gives the absolutely-positioned panel a positioning
+  // context; the reader browser keeps filling the tab and the reader is told
+  // to reserve the panel's height inside its own layout.
   tabContainer.classList.add(READER_HOST_CLASS);
   const container = doc.createElementNS(
     "http://www.w3.org/1999/xhtml",
@@ -298,12 +308,12 @@ function applyPanelInset(controller: ReaderPanelController): void {
     ? getReaderPanelInsets(controller)
     : { left: 0, right: 0 };
   for (const [side, inset] of [
-    ["marginLeft", insets.left],
-    ["marginRight", insets.right],
+    ["left", insets.left],
+    ["right", insets.right],
   ] as const) {
-    const margin = inset > 0 ? `${inset}px` : "";
-    if (controller.container.style[side] !== margin) {
-      controller.container.style[side] = margin;
+    const value = inset > 0 ? `${inset}px` : "";
+    if (controller.container.style[side] !== value) {
+      controller.container.style[side] = value;
     }
   }
 }
@@ -382,6 +392,17 @@ function attachResizer(controller: ReaderPanelController): void {
       if (!Number.isFinite(parsed)) return startHeight;
       return Math.max(200, Math.min(parsed, 2000));
     };
+    // While dragging, the cursor leads the panel's top edge and hovers over
+    // the reader browser — without this, the iframe swallows the mousemoves
+    // and the edge jitters as it keeps falling behind and catching up.
+    // Disabling pointer events on the browser for the duration of the drag
+    // keeps every event in the main window; only the 4px resizer separates
+    // the panel from the browser anyway.
+    const frame = controller.reader._iframe as HTMLElement | null;
+    const restoreFrameEvents = (): void => {
+      if (frame) frame.style.pointerEvents = "";
+    };
+    if (frame) frame.style.pointerEvents = "none";
     const onMouseMove = (moveEvent: Event) => {
       const dy = (moveEvent as MouseEvent).clientY - startY;
       container.style.height = `${clamp(startHeight - dy)}px`;
@@ -389,6 +410,7 @@ function attachResizer(controller: ReaderPanelController): void {
     const onMouseUp = () => {
       doc.removeEventListener("mousemove", onMouseMove);
       doc.removeEventListener("mouseup", onMouseUp);
+      restoreFrameEvents();
       setReaderPanelHeightPref(clamp(container.getBoundingClientRect().height));
     };
     doc.addEventListener("mousemove", onMouseMove);
@@ -505,6 +527,11 @@ function createController(
       controller.sidebarResizeObserver?.disconnect();
       controller.sidebarResizeObserver = null;
       controller.sidebarResizeTarget = null;
+      // A drag interrupted by tab teardown must not leave the reader
+      // browser with pointer events disabled.
+      (controller.reader._iframe as HTMLElement | null)?.style.removeProperty(
+        "pointer-events",
+      );
       if (controller.body) {
         disposeSetupHandlers(controller.body);
         void releaseClaudeRuntimeForBody(controller.body);

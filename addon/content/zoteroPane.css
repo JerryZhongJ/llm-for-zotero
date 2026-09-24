@@ -11468,26 +11468,25 @@ label.llm-search-results-item:hover {
 
 /* ── Reader chat panel (bottom of each PDF reader tab) ───────────────────── */
 
-/* Zotero's tab-content is a XUL container with no explicit orientation; the
-   host class turns it into a column flex box so the docked panel sits below
-   the reader browser and the browser yields the panel's height. */
+/* Zotero's tab-content is a XUL container whose reader browser fills it
+   entirely; the host class only gives the absolutely-positioned panel a
+   containing block. The panel overlays the bottom of the tab, and the reader
+   is told to reserve that height via setBottomPlaceholderHeight — only the
+   pages area shrinks, the reader's sidebar keeps full height alongside the
+   panel. */
 .llm-reader-host {
-  display: flex;
-  flex-direction: column;
-}
-
-.llm-reader-host > browser {
-  flex: 1 1 0;
-  min-height: 0;
+  position: relative;
 }
 
 .llm-reader-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Match the main reading area's left and right edges inside the browser;
+     both insets are set inline from the geometry module. */
   display: flex;
   flex-direction: column;
-  /* Match the main reading area's left and right edges inside the browser. */
-  width: auto;
-  align-self: stretch;
-  flex: 0 0 auto;
   min-width: 0;
   border-top: 1px solid var(--fill-quinary);
   background: var(--material-background);

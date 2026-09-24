@@ -65,13 +65,18 @@ export default defineConfig({
   },
 
   test: {
-    entries: agentLiveTestsEnabled
-      ? "test-live-agent"
-      : webChatLiveTestsEnabled
-        ? "test-live-workflows"
-        : workflowTestsEnabled
-          ? "test-workflows"
-          : "test",
+    // LLM_FOR_ZOTERO_TEST_ENTRY pins an entries DIRECTORY (the scaffold
+    // always appends "/**/*.test.js"), so a scratch dir with one probe file
+    // runs alone instead of paying for the whole workflow suite.
+    entries:
+      process.env.LLM_FOR_ZOTERO_TEST_ENTRY ||
+      (agentLiveTestsEnabled
+        ? "test-live-agent"
+        : webChatLiveTestsEnabled
+          ? "test-live-workflows"
+          : workflowTestsEnabled
+            ? "test-workflows"
+            : "test"),
     // The workflow tests assert English UI labels (e.g. the reader popup
     // "Add Text" button), so pin the locale regardless of the host OS
     // language — a Chinese-locale machine otherwise localizes the plugin UI
