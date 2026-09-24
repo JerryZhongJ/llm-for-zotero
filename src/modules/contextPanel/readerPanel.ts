@@ -503,14 +503,18 @@ export function registerReaderToolbarListenerWhenReady(attempt = 0): void {
   );
 }
 
+// The reader UI document: toolbar, outline sidebar, and .split-view all live
+// in the OUTER browser element's document (the chrome-side Reader instance
+// exposes it as _iframeWindow — verified against Zotero 9.0.6's xpcom code,
+// which itself queries this document via getElementById). Do NOT reach for
+// _internalReader._primaryView._iframeWindow: those are the NESTED pdf.js
+// view iframes (one per split-view pane) — querying them for .toolbar,
+// #sidebarContainer, or .custom-sections silently finds nothing.
 function getReaderContentDoc(reader: ReaderLike): Document | null {
-  const view =
-    reader._internalReader?._lastView ?? reader._internalReader?._primaryView;
   const win =
-    view?._iframeWindow ??
+    (reader as { _iframeWindow?: Window })._iframeWindow ??
     (reader as { _iframe?: { contentWindow?: Window } })._iframe
       ?.contentWindow ??
-    (reader as { _window?: Window })._window ??
     null;
   const doc = win?.document ?? null;
   return doc ? (doc as Document) : null;
