@@ -163,6 +163,10 @@ export function attachMineruParseButton(
       showPanelToast(button, describeMineruFailure(state.lastFailedMessage));
       return;
     }
+    // Leave "running" BEFORE the async cache check — refreshCacheState
+    // refuses to overwrite a running state, so the button would otherwise
+    // stay on the last stage message ("Done…") forever.
+    render("checking");
     void refreshCacheState();
   });
 }
