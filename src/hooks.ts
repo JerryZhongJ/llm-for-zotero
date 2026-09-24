@@ -19,6 +19,7 @@ import {
 } from "./modules/contextPanel/libraryPanel";
 import {
   registerReaderChatPanel,
+  registerReaderToolbarListenerWhenReady,
   unregisterReaderChatPanelsForWindow,
   unregisterAllReaderChatPanels,
 } from "./modules/contextPanel/readerPanel";
@@ -318,6 +319,13 @@ function scheduleDeferredStartupWork(
 }
 
 async function onStartup() {
+  // Register the reader toolbar listener BEFORE awaiting Zotero readiness:
+  // onStartup resumes after uiReadyPromise, by which time session-restored
+  // readers have already rendered their toolbars and the renderToolbar
+  // event is gone. The listener itself only needs Zotero.Reader to exist,
+  // and retries briefly until it does.
+  registerReaderToolbarListenerWhenReady();
+
   await measureStartupPhase("Zotero readiness", () =>
     Promise.all([
       Zotero.initializationPromise,

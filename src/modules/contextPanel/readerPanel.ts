@@ -108,7 +108,6 @@ type ReaderPanelController = {
   mounted: boolean;
   cancelled: boolean;
   open: boolean;
-  toolbarButtonEstablished: boolean;
   sidebarResizeObserver: ResizeObserver | null;
   sidebarResizeTarget: Element | null;
   dispose: () => void;
@@ -402,7 +401,6 @@ function ensureSidebarInsetTimer(): void {
     for (const controller of controllers.values()) {
       ensureSidebarInsetObserver(controller);
       applyPanelInset(controller);
-      injectToolbarButtonIfMissing(controller);
     }
   }, READER_SIDEBAR_INSET_POLL_MS);
 }
@@ -459,13 +457,40 @@ function attachResizer(controller: ReaderPanelController): void {
 // ── Toolbar button (Zotero.Reader renderToolbar hook) ──────────────────────
 
 // The reader toolbar's CustomSections component re-fires "renderToolbar" on
-// every React render — but a session-restored reader renders its toolbar
-// before this plugin registers the listener, so the chat toggle is missing
-// until the tab is reopened. The 400ms panel sweep calls this fallback until
-// it succeeds ONCE: it re-uses the shared toolbar handler and mirrors the
-// reader's own append (a div.section inside .custom-sections). Every later
-// toolbar re-render re-adds the button through the official event, so after
-// the one shot the sweep stops looking at this reader entirely.
+// every React render, so a listener registered before a reader's FIRST
+// toolbar render keeps the button alive forever after. Registering at
+// onMainWindowLoad lost that race to session-restored readers (the toggle
+// was missing until the tab was reopened); hooks.ts now calls this at the
+// very top of startup, retrying briefly until the Zotero.Reader module
+// exists. No post-hoc sweep is needed — registration precedes any reader.
+export function registerReaderToolbarListenerWhenReady(attempt = 0): void {
+  const readerAPI = Zotero.Reader as
+    | {
+        registerEventListener?: (
+          type: string,
+          handler: ToolbarEventHandler,
+          pluginID?: string,
+        ) => void;
+      }
+    | undefined;
+  if (readerAPI?.registerEventListener && !toolbarHandler) {
+    readerAPI.registerEventListener(
+      "renderToolbar",
+      getToolbarHandler(),
+      config.addonID,
+    );
+    return;
+  }
+  if (toolbarHandler) return;
+  if (attempt >= 120) {
+    ztoolkit.log("LLM: Zotero.Reader never became ready; toolbar button off");
+    return;
+  }
+  void Zotero.Promise.delay(250).then(() =>
+    registerReaderToolbarListenerWhenReady(attempt + 1),
+  );
+}
+
 function getReaderContentDoc(reader: ReaderLike): Document | null {
   const view =
     reader._internalReader?._lastView ?? reader._internalReader?._primaryView;
@@ -477,42 +502,6 @@ function getReaderContentDoc(reader: ReaderLike): Document | null {
     null;
   const doc = win?.document ?? null;
   return doc ? (doc as Document) : null;
-}
-
-function injectToolbarButtonIfMissing(controller: ReaderPanelController): void {
-  // One-shot convergence: once the button is up, every later toolbar
-  // re-render re-adds it through the official renderToolbar event (the
-  // listener is registered before any controller exists), so the sweep
-  // never needs to look at this reader again.
-  if (!controller.container || controller.toolbarButtonEstablished) return;
-  let doc: Document | null = null;
-  try {
-    doc = getReaderContentDoc(controller.reader);
-  } catch {
-    return;
-  }
-  if (!doc) return;
-  try {
-    if (doc.getElementById(READER_PANEL_TOGGLE_ID)) {
-      controller.toolbarButtonEstablished = true;
-      return;
-    }
-    const customSections = doc.querySelector(".toolbar .custom-sections");
-    if (!customSections) return;
-    getToolbarHandler()({
-      reader: controller.reader,
-      doc,
-      append: (el) => {
-        const section = doc.createElement("div");
-        section.className = "section";
-        section.append(el);
-        customSections.append(section);
-      },
-    });
-    controller.toolbarButtonEstablished = true;
-  } catch (err) {
-    ztoolkit.log("LLM: reader toolbar button sweep failed", err);
-  }
 }
 
 function toggleReaderPanel(tabID: string): void {
@@ -592,12 +581,6 @@ function getToolbarHandler(): ToolbarEventHandler {
         : "";
     });
     event.append(button);
-    // The official event path delivered the button — the sweep fallback can
-    // stop checking this reader.
-    const establishedController = controllers.get(tabID);
-    if (establishedController) {
-      establishedController.toolbarButtonEstablished = true;
-    }
   };
   return toolbarHandler;
 }
@@ -621,7 +604,6 @@ function createController(
     mounted: false,
     cancelled: false,
     open: false,
-    toolbarButtonEstablished: false,
     sidebarResizeObserver: null,
     sidebarResizeTarget: null,
     dispose: () => {
