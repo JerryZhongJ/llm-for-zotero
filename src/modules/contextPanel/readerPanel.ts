@@ -44,7 +44,10 @@ import { ensureConversationLoaded, refreshChat } from "./chat";
 import { renderShortcuts } from "./shortcuts";
 import { getFirstSelectedLibraryContextItem } from "./ambientContext";
 import { notifyEmbeddedItemChange } from "./itemChangeBus";
-import { computeReaderPanelInsets } from "./readerPanelGeometry";
+import {
+  computeReaderPanelInsets,
+  computeSidebarRailInsets,
+} from "./readerPanelGeometry";
 import {
   retainClaudeRuntimeForBody,
   releaseClaudeRuntimeForBody,
@@ -97,6 +100,8 @@ type ReaderLike = {
     _state?: { sidebarOpen?: boolean; sidebarWidth?: number };
   };
 };
+
+type RectLike = Pick<DOMRectReadOnly, "left" | "right" | "width" | "height">;
 
 type ReaderPanelController = {
   win: _ZoteroTypes.MainWindow;
@@ -186,6 +191,7 @@ function ensurePanelContainer(controller: ReaderPanelController): boolean {
   }
   applyPanelInset(controller);
   ensureSidebarInsetObserver(controller);
+  scheduleToolbarButtonSweep(controller);
   return true;
 }
 
@@ -285,6 +291,27 @@ function getReaderSplitViewElement(reader: ReaderLike): Element | null {
   }
 }
 
+// The outline sidebar itself: React mounts #sidebarContainer only while the
+// sidebar is open (left: 0, width: --sidebar-width), so its presence IS the
+// open/closed signal and its right edge is exactly where the pages area
+// starts. Deriving "closed" from the element's absence collapses the panel
+// inset to exactly 0 — measuring .split-view's left instead left a small
+// frame-offset residue that drifted the panel right after closing.
+function getReaderSidebarRect(reader: ReaderLike): RectLike | null {
+  try {
+    const sidebar =
+      getReaderContentDoc(reader)?.getElementById("sidebarContainer");
+    if (!sidebar) return null;
+    const rect = sidebar.getBoundingClientRect();
+    // The hidden state parks the element at left: -width; only a visible
+    // sidebar occupies the rail.
+    if (rect.width <= 0 || rect.left < 0) return null;
+    return rect;
+  } catch {
+    return null;
+  }
+}
+
 function getReaderPanelInsets(controller: ReaderPanelController): {
   left: number;
   right: number;
@@ -307,24 +334,23 @@ function getReaderPanelInsets(controller: ReaderPanelController): {
       ? splitter.getBoundingClientRect()
       : undefined;
     const hostRect = host.getBoundingClientRect();
-    // Prefer the live pages-area measurement — trusted, so a closed sidebar
-    // collapses the inset even when the state-based fallback is stale.
-    const splitView = getReaderSplitViewElement(reader);
-    if (splitView && iframe) {
-      return computeReaderPanelInsets({
+    // Live DOM measurement of the rail occupants: the left inset is the
+    // sidebar's right edge when mounted, exactly 0 when it is not.
+    if (iframe) {
+      return computeSidebarRailInsets({
         hostRect,
         frameRect: iframe.getBoundingClientRect(),
-        viewRect: splitView.getBoundingClientRect(),
+        sidebarRect: getReaderSidebarRect(reader) ?? undefined,
+        splitViewRect:
+          getReaderSplitViewElement(reader)?.getBoundingClientRect(),
         splitterRect,
-        fallbackLeft,
-        trusted: true,
       });
     }
+    // No iframe to anchor on: fall back to the legacy view-container
+    // measurement (left comes from the state-based fallback).
     const viewContainer = getReaderViewContainer(controller);
     return computeReaderPanelInsets({
       hostRect,
-      frameRect:
-        viewContainer && iframe ? iframe.getBoundingClientRect() : undefined,
       viewRect: viewContainer?.getBoundingClientRect(),
       splitterRect,
       fallbackLeft,
@@ -446,7 +472,9 @@ function attachResizer(controller: ReaderPanelController): void {
 // onMainWindowLoad lost that race to session-restored readers (the toggle
 // was missing until the tab was reopened); hooks.ts now calls this at the
 // very top of startup, retrying briefly until the Zotero.Reader module
-// exists. No post-hoc sweep is needed — registration precedes any reader.
+// exists. Session restore can STILL render a toolbar before the plugin
+// loads at all, so ensurePanelContainer also starts the bounded
+// scheduleToolbarButtonSweep as the belt to these suspenders.
 export function registerReaderToolbarListenerWhenReady(attempt = 0): void {
   const readerAPI = Zotero.Reader as
     | {
@@ -486,6 +514,58 @@ function getReaderContentDoc(reader: ReaderLike): Document | null {
     null;
   const doc = win?.document ?? null;
   return doc ? (doc as Document) : null;
+}
+
+// Belt to the early-registration suspenders: on this machine even a
+// startup-registered renderToolbar listener can lose to session-restored
+// readers (the toolbar rendered before the plugin loaded at all). Retry
+// injecting the toggle until it sticks, then stop — the official event
+// maintains it afterwards. Returns true once the button exists.
+function injectToolbarButtonIfMissing(
+  controller: ReaderPanelController,
+): boolean {
+  if (!controller.container || controller.cancelled) return false;
+  let doc: Document | null = null;
+  try {
+    doc = getReaderContentDoc(controller.reader);
+  } catch {
+    return false;
+  }
+  if (!doc) return false;
+  try {
+    if (doc.getElementById(READER_PANEL_TOGGLE_ID)) return true;
+    const customSections = doc.querySelector(".toolbar .custom-sections");
+    if (!customSections) return false;
+    getToolbarHandler()({
+      reader: controller.reader,
+      doc,
+      append: (el) => {
+        const section = doc.createElement("div");
+        section.className = "section";
+        section.append(el);
+        customSections.append(section);
+      },
+    });
+    return true;
+  } catch (err) {
+    ztoolkit.log("LLM: reader toolbar button sweep failed", err);
+    return false;
+  }
+}
+
+const TOOLBAR_SWEEP_INTERVAL_MS = 400;
+const TOOLBAR_SWEEP_MAX_ATTEMPTS = 75; // ~30s covers slow startup restores
+
+function scheduleToolbarButtonSweep(
+  controller: ReaderPanelController,
+  attempt = 0,
+): void {
+  if (controller.cancelled) return;
+  if (injectToolbarButtonIfMissing(controller)) return;
+  if (attempt >= TOOLBAR_SWEEP_MAX_ATTEMPTS) return;
+  void Zotero.Promise.delay(TOOLBAR_SWEEP_INTERVAL_MS).then(() =>
+    scheduleToolbarButtonSweep(controller, attempt + 1),
+  );
 }
 
 function toggleReaderPanel(tabID: string): void {
