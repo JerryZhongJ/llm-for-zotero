@@ -284,39 +284,60 @@
   flex: 0 0 auto;
 }
 
-/* MinerU parse trigger in the paper panel header. Reads as a quiet text
-   action while unparsed; the parsed state is a subdued static label. */
+/* MinerU parse trigger in the paper panel header — same pill language as
+   .llm-history-undo-btn while actionable; the parsed state drops the pill
+   chrome and reads as a subdued ✓ status label. */
 .llm-mineru-btn {
+  appearance: none;
+  -moz-appearance: none;
   display: inline-flex;
   align-items: center;
-  height: 24px;
-  padding: 0 8px;
+  gap: 4px;
+  flex: 0 0 auto;
   margin-right: 4px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  font-size: var(--llm-fs-12, 12px);
-  line-height: 1;
-  color: var(--fill-secondary);
+  padding: 3px 10px;
+  border: 1px solid var(--stroke-secondary);
+  border-radius: 999px;
+  background: var(--fill-quinary);
+  color: var(--fill-primary);
+  font-size: var(--llm-fs-10);
+  font-weight: 600;
+  line-height: 1.2;
   cursor: pointer;
-  opacity: 0.85;
   transition:
-    opacity 0.15s,
-    background 0.15s;
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
 }
 
-.llm-mineru-btn:hover:not(:disabled) {
-  opacity: 1;
-  background: var(--fill-quinary);
+.llm-mineru-btn:hover:not(:disabled),
+.llm-mineru-btn:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-accent);
 }
 
 .llm-mineru-btn:disabled {
   cursor: default;
 }
 
+.llm-mineru-btn[data-mineru-state="running"] {
+  color: var(--fill-secondary);
+  opacity: 0.75;
+}
+
 .llm-mineru-btn[data-mineru-state="done"] {
+  border-color: transparent;
+  background: none;
   color: var(--fill-tertiary);
-  opacity: 0.8;
+  font-weight: 500;
+  padding: 3px 4px;
+}
+
+.llm-mineru-btn[data-mineru-state="done"]::before {
+  content: "✓";
+  font-weight: 600;
+  color: var(--color-accent);
 }
 
 .llm-header-icon {

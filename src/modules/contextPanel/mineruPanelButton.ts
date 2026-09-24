@@ -5,9 +5,9 @@
  * MinerU, so their sections only match via the reader-outline index (or the
  * canonical chunk labels). This button runs the shared single-item MinerU
  * pipeline from the panel itself; once a cache exists the spot turns into a
- * static "MinerU Parsed" label. The button renders only when MinerU is
- * enabled and the conversation resolves to a PDF attachment — library chats
- * and note sessions never see it.
+ * quiet "MinerU Parsed" status label. The button renders only when MinerU
+ * is enabled and the conversation resolves to a PDF attachment — library
+ * chats and note sessions never see it.
  */
 
 import { isMineruEnabled } from "../../utils/mineruConfig";
@@ -26,6 +26,8 @@ import {
 } from "./portalScope";
 
 type MineruButtonState = "checking" | "idle" | "running" | "done";
+
+const TOP_TOAST_TIMEOUT_MS = 6000;
 
 function renderMineruButton(
   button: HTMLButtonElement,
@@ -56,6 +58,37 @@ function renderMineruButton(
   // of the re-enabled button so the reason stays one hover away.
   button.title = detail || t("Parse this paper with MinerU");
   button.disabled = false;
+}
+
+// Same reveal/auto-hide dance the history lifecycle controller uses for
+// #llm-top-toast; failure reasons must be seen, not hunted for in a tooltip.
+function showPanelToast(button: HTMLButtonElement, message: string): void {
+  const toast = button.closest(".llm-panel")?.querySelector("#llm-top-toast");
+  if (!(toast instanceof HTMLElement)) return;
+  const win = button.ownerDocument?.defaultView;
+  toast.textContent = message;
+  toast.style.display = "flex";
+  toast.setAttribute("aria-hidden", "false");
+  const reveal = () => toast.classList.add("llm-top-toast-visible");
+  if (win?.requestAnimationFrame) {
+    win.requestAnimationFrame(reveal);
+  } else {
+    reveal();
+  }
+  win?.setTimeout(() => {
+    toast.classList.remove("llm-top-toast-visible");
+    toast.setAttribute("aria-hidden", "true");
+    toast.style.display = "none";
+  }, TOP_TOAST_TIMEOUT_MS);
+}
+
+function describeMineruFailure(message: string): string {
+  if (/\bHTTP 40[13]\b/.test(message)) {
+    return t(
+      "MinerU authentication failed — check the API key in Settings",
+    ).concat(" (", message, ")");
+  }
+  return message;
 }
 
 export function attachMineruParseButton(
@@ -123,9 +156,11 @@ export function attachMineruParseButton(
     }
     if (current !== "running") return;
     // Our item left the running slot: success flips to the parsed label,
-    // failure re-enables the button with the reason in its tooltip.
+    // failure re-enables the button and announces the reason via the
+    // panel toast (a bare tooltip hid the 401 for too long).
     if (state.lastFailedItemId === pdfItem.id && state.lastFailedMessage) {
       render("idle", state.lastFailedMessage);
+      showPanelToast(button, describeMineruFailure(state.lastFailedMessage));
       return;
     }
     void refreshCacheState();

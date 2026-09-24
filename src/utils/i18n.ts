@@ -38,6 +38,8 @@ const zhCN: Record<string, string> = {
   "Parsing this paper with MinerU": "正在用 MinerU 解析这篇论文",
   "Parse this paper with MinerU": "用 MinerU 解析这篇论文",
   "A MinerU batch is already running": "MinerU 批处理正在运行",
+  "MinerU authentication failed — check the API key in Settings":
+    "MinerU 认证失败——请检查设置中的 API Key",
   "Item note": "条目笔记",
   "Standalone note": "独立笔记",
   "Library chat": "文献库对话",
