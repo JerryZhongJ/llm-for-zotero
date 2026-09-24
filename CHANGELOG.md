@@ -4,7 +4,17 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
-## Unreleased
+## 3.11.3 - 2026-09-24
+
+### Fixed
+
+- Reader chat toolbar button appears in session-restored readers at startup;
+  the docked panel tracks sidebar open/close and width changes without
+  intermittently covering the outline.
+- `paper_read` accepts JSON-stringified page arrays, and plain PDFs expose
+  their real outline sections to section-based reading.
+- The manual MinerU parsing button reports completion and failures instead
+  of remaining in the running state.
 
 ### Added
 
