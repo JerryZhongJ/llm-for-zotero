@@ -271,13 +271,26 @@ function getReaderViewContainer(
   return candidate?.isConnected ? candidate : null;
 }
 
+// The reader's pages area: a .split-view element that sits right of the
+// outline sidebar inside the reader iframe. Because the sidebar is
+// conditionally mounted by React, this element's left edge tracks BOTH
+// sidebar toggling and sidebar drags — DOM geometry reads are reliable from
+// chrome, unlike the content-side React state (see the overlay-docking
+// lesson in this file's header).
+function getReaderSplitViewElement(reader: ReaderLike): Element | null {
+  try {
+    return getReaderContentDoc(reader)?.querySelector(".split-view") ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function getReaderPanelInsets(controller: ReaderPanelController): {
   left: number;
   right: number;
 } {
   try {
     const reader = controller.reader;
-    const viewContainer = getReaderViewContainer(controller);
     const iframe = reader._iframe;
     const host = reader._tabContainer;
     const state = reader._internalReader?._state;
@@ -290,14 +303,30 @@ function getReaderPanelInsets(controller: ReaderPanelController): {
     if (!host) return { left: fallbackLeft, right: 0 };
 
     const splitter = controller.win.ZoteroContextPane?.splitter;
+    const splitterRect = splitter?.isConnected
+      ? splitter.getBoundingClientRect()
+      : undefined;
+    const hostRect = host.getBoundingClientRect();
+    // Prefer the live pages-area measurement — trusted, so a closed sidebar
+    // collapses the inset even when the state-based fallback is stale.
+    const splitView = getReaderSplitViewElement(reader);
+    if (splitView && iframe) {
+      return computeReaderPanelInsets({
+        hostRect,
+        frameRect: iframe.getBoundingClientRect(),
+        viewRect: splitView.getBoundingClientRect(),
+        splitterRect,
+        fallbackLeft,
+        trusted: true,
+      });
+    }
+    const viewContainer = getReaderViewContainer(controller);
     return computeReaderPanelInsets({
-      hostRect: host.getBoundingClientRect(),
+      hostRect,
       frameRect:
         viewContainer && iframe ? iframe.getBoundingClientRect() : undefined,
       viewRect: viewContainer?.getBoundingClientRect(),
-      splitterRect: splitter?.isConnected
-        ? splitter.getBoundingClientRect()
-        : undefined,
+      splitterRect,
       fallbackLeft,
     });
   } catch {
@@ -322,7 +351,12 @@ function applyPanelInset(controller: ReaderPanelController): void {
 }
 
 function ensureSidebarInsetObserver(controller: ReaderPanelController): void {
-  const target = getReaderViewContainer(controller);
+  // The live pages area is the best observation target: it resizes when the
+  // sidebar toggles (width grows as the sidebar unmounts) and while it is
+  // dragged, so both paths update the inset immediately.
+  const target =
+    getReaderSplitViewElement(controller.reader) ??
+    getReaderViewContainer(controller);
   if (
     target &&
     controller.sidebarResizeTarget === target &&
@@ -432,7 +466,7 @@ function attachResizer(controller: ReaderPanelController): void {
 // reader's own append (a div.section inside .custom-sections). Every later
 // toolbar re-render re-adds the button through the official event, so after
 // the one shot the sweep stops looking at this reader entirely.
-function getReaderToolbarDoc(reader: ReaderLike): Document | null {
+function getReaderContentDoc(reader: ReaderLike): Document | null {
   const view =
     reader._internalReader?._lastView ?? reader._internalReader?._primaryView;
   const win =
@@ -453,7 +487,7 @@ function injectToolbarButtonIfMissing(controller: ReaderPanelController): void {
   if (!controller.container || controller.toolbarButtonEstablished) return;
   let doc: Document | null = null;
   try {
-    doc = getReaderToolbarDoc(controller.reader);
+    doc = getReaderContentDoc(controller.reader);
   } catch {
     return;
   }
