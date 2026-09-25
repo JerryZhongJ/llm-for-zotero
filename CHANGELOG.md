@@ -4,6 +4,15 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
+## 3.11.5 - 2026-09-25
+
+### Fixed
+
+- Reader chat toolbar toggle: re-rendered toolbars no longer stack duplicate
+  buttons (exactly one toggle per reader tab now), and the toggle in a
+  session-restored reader tab responds to its first click instead of silently
+  doing nothing.
+
 ## 3.11.4 - 2026-09-25
 
 ### Fixed
