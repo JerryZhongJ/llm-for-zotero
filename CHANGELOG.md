@@ -4,6 +4,27 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
+## 3.12.0 - 2026-09-25
+
+### Added
+
+- Desktop-side PDF download for paywalled papers: after importing by
+  identifier, a background pass now tries a publisher resolver chain
+  (open-access sources, then ACM/IEEE directly). Anti-bot walls are cleared
+  through Zotero's hidden browser (challenge JavaScript runs in an isolated
+  cookie jar and the PDF is fetched as a document navigation), so
+  closed-access ACM/IEEE papers land as attachments on an
+  institution-subscribed connection — no browser extension involved.
+- A panel toast reports the background fetch outcome ("PDF downloaded: …" /
+  "PDF download failed: …"), and the import receipt notes that the PDF fetch
+  runs in the background.
+
+### Fixed
+
+- The background find-PDF pass could hang forever when Zotero's built-in
+  lookup stalled behind an anti-bot challenge; it is now guarded by a
+  timeout and falls through to the publisher chain.
+
 ## 3.11.5 - 2026-09-25
 
 ### Fixed
