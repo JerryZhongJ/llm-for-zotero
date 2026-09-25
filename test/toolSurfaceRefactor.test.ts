@@ -8,16 +8,9 @@ import {
   setUserSkills,
 } from "../src/agent/skills";
 import { AgentToolRegistry } from "../src/agent/tools/registry";
-import {
-  createPaperReadTool as createResolvedPaperReadTool,
-} from "../src/agent/tools/read/paperRead";
-import {
-  createPaperQueryTool as createResolvedPaperQueryTool,
-} from "../src/agent/tools/read/paperQuery";
-import type {
-  AgentToolContext,
-  AgentToolDefinition,
-} from "../src/agent/types";
+import { createPaperReadTool as createResolvedPaperReadTool } from "../src/agent/tools/read/paperRead";
+import { createPaperQueryTool as createResolvedPaperQueryTool } from "../src/agent/tools/read/paperQuery";
+import type { AgentToolContext, AgentToolDefinition } from "../src/agent/types";
 import { resolveAgentRuntimeRequest } from "../src/agent/context/resolvedAgentRequest";
 import {
   PDF_FIGURE_CROP_ALGORITHM_VERSION,
@@ -756,6 +749,14 @@ describe("semantic tool surface", function () {
               paperContext,
             },
           ],
+          sectionIndex: [
+            {
+              heading: "Abstract",
+              charStart: 0,
+              charEnd: "active paper abstract".length,
+            },
+          ],
+          sourceText: "active paper abstract",
         }),
       } as never,
       {} as never,
@@ -803,6 +804,14 @@ describe("semantic tool surface", function () {
               chunkKind: "abstract",
             },
           ],
+          sectionIndex: [
+            {
+              heading: "Abstract",
+              charStart: 0,
+              charEnd: "collection paper abstract".length,
+            },
+          ],
+          sourceText: "collection paper abstract",
         }),
       } as never,
       {} as never,
@@ -844,7 +853,10 @@ describe("semantic tool surface", function () {
     const validated = tool.validate({ labels: ["Figure 3"] });
     assert.equal(validated.ok, false);
     if (!validated.ok) return;
-    assert.include(validated.error, "labels select extracted figure/table crops");
+    assert.include(
+      validated.error,
+      "labels select extracted figure/table crops",
+    );
     assert.include(validated.error, "Add images:true");
   });
 
@@ -2291,7 +2303,7 @@ describe("semantic tool surface", function () {
     }
   });
 
-  it("paper_read sections returns only the matched section text", async function () {
+  it("paper_read sections without a section index reports no_section_index", async function () {
     const paperContext = {
       itemId: 11,
       contextItemId: 22,
@@ -2301,6 +2313,9 @@ describe("semantic tool surface", function () {
     };
     const tool = createPaperReadTool(
       {
+        // Chunk metadata (even with section labels) is no longer a sections
+        // source: without a real sectionIndex the call must fail explicitly
+        // instead of returning chunk-sized fragments.
         ensurePaperContext: async () => ({
           chunks: ["abstract text", "intro text", "related work text"],
           chunkMeta: [
@@ -2347,18 +2362,14 @@ describe("semantic tool surface", function () {
         status?: string;
         passages?: Array<{ text?: string }>;
       }>;
+      guidance?: string;
     };
 
     assert.equal(output.mode, "sections");
-    assert.equal(output.status, "matched");
-    assert.lengthOf(output.results || [], 1);
-    assert.equal(output.results?.[0]?.text, "related work text");
-    assert.equal(output.results?.[0]?.sectionLabel, "2 Related Work");
-    assert.equal(output.results?.[0]?.chunkIndex, 2);
-    assert.deepEqual(
-      (output.papers?.[0]?.passages || []).map((passage) => passage.text),
-      ["related work text"],
-    );
+    assert.equal(output.status, "no_section_index");
+    assert.lengthOf(output.results || [], 0);
+    assert.equal(output.papers?.[0]?.status, "no_section_index");
+    assert.include(output.guidance || "", "no section index");
   });
 
   it("paper_read sections slices whole sections from a real section index", async function () {
@@ -2456,30 +2467,32 @@ describe("semantic tool surface", function () {
       firstCreator: "Miller",
       year: "2025",
     };
+    const sourceText =
+      "Abstract\nabstract text\n\n1 Introduction\nintro text\n\n2 Related Work\nrelated work text\n";
+    const heading = (title: string) => sourceText.indexOf(title);
     const tool = createPaperReadTool(
       {
         ensurePaperContext: async () => ({
-          chunks: ["abstract text", "intro text", "related work text"],
-          chunkMeta: [
+          chunks: [],
+          chunkMeta: [],
+          sectionIndex: [
             {
-              chunkIndex: 0,
-              text: "abstract text",
-              sectionLabel: "Abstract",
-              chunkKind: "abstract",
+              heading: "Abstract",
+              charStart: heading("Abstract"),
+              charEnd: heading("1 Introduction"),
             },
             {
-              chunkIndex: 1,
-              text: "intro text",
-              sectionLabel: "1 Introduction",
-              chunkKind: "introduction",
+              heading: "1 Introduction",
+              charStart: heading("1 Introduction"),
+              charEnd: heading("2 Related Work"),
             },
             {
-              chunkIndex: 2,
-              text: "related work text",
-              sectionLabel: "2 Related Work",
-              chunkKind: "introduction",
+              heading: "2 Related Work",
+              charStart: heading("2 Related Work"),
+              charEnd: sourceText.length,
             },
           ],
+          sourceText,
         }),
       } as never,
       {} as never,

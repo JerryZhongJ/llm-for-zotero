@@ -4,13 +4,8 @@ import {
   formatPaperCitationLabel,
   formatPaperSourceLabel,
 } from "../../../modules/contextPanel/paperAttribution";
-import {
-  postprocessSectionSlice,
-} from "../../../modules/contextPanel/pdfContext";
-import type {
-  PaperSectionIndexEntry,
-  PdfChunkMeta,
-} from "../../../modules/contextPanel/types";
+import { postprocessSectionSlice } from "../../../modules/contextPanel/pdfContext";
+import type { PaperSectionIndexEntry } from "../../../modules/contextPanel/types";
 import type { QuoteCitation } from "../../../shared/types";
 import { mergeQuoteCitations } from "../../../modules/contextPanel/quoteCitations";
 import { buildTargetedPaperGroups } from "./paperReadShared";
@@ -18,96 +13,21 @@ import { matchSectionName, suggestSections } from "./sectionMatcher";
 
 const MAX_AVAILABLE_SECTION_NAMES = 20;
 
-// chunkKind aliases let canonical names ("abstract", "methods") keep working
-// on plain-PDF papers whose chunkMeta only carries the nine canonical labels
-// — or no label at all.
-const SECTION_KIND_ALIASES: Record<string, string> = {
-  abstract: "abstract",
-  introduction: "introduction",
-  methods: "methods",
-  results: "results",
-  discussion: "discussion",
-  conclusion: "conclusion",
-  references: "references",
-  appendix: "appendix",
-};
-
 type UnmatchedSectionPaper = {
   paperContext: NonNullable<PdfTarget["paperContext"]>;
-  status: "no_matching_sections";
-  requested: string[];
-  suggestions: string[];
-  availableSections: string[];
+  status: "no_matching_sections" | "no_section_index";
+  requested?: string[];
+  suggestions?: string[];
+  availableSections?: string[];
 };
 
-function collectSectionCandidates(chunkMeta: PdfChunkMeta[]): {
-  labels: string[];
-  kindAliases: string[];
-} {
-  const labels: string[] = [];
-  const seenLabels = new Set<string>();
-  const kinds: string[] = [];
-  const seenKinds = new Set<string>();
-  for (const meta of chunkMeta) {
-    if (meta.sectionLabel && !seenLabels.has(meta.sectionLabel)) {
-      seenLabels.add(meta.sectionLabel);
-      labels.push(meta.sectionLabel);
-    }
-    if (
-      meta.chunkKind &&
-      SECTION_KIND_ALIASES[meta.chunkKind] &&
-      !seenKinds.has(meta.chunkKind)
-    ) {
-      seenKinds.add(meta.chunkKind);
-      kinds.push(meta.chunkKind);
-    }
-  }
-  return { labels, kindAliases: kinds };
-}
-
-function selectSectionChunks(
-  chunkMeta: PdfChunkMeta[],
-  matchedLabels: Set<string>,
-  matchedKinds: Set<string>,
-): PdfChunkMeta[] {
-  return chunkMeta.filter((meta) => {
-    if (meta.sectionLabel && matchedLabels.has(meta.sectionLabel)) return true;
-    // Kind-alias selection only applies to unlabeled chunks so a canonical
-    // name never sweeps a labeled paper's unrelated sections.
-    if (!meta.sectionLabel && matchedKinds.has(meta.chunkKind || "")) {
-      return true;
-    }
-    return false;
-  });
-}
-
-function toResultRows(
-  paperContext: NonNullable<PdfTarget["paperContext"]>,
-  chunkMeta: PdfChunkMeta[],
-  chunkTexts: string[],
-): Array<Record<string, unknown>> {
-  return chunkMeta.map((meta) => ({
-    paperContext,
-    chunkIndex: meta.chunkIndex,
-    text: chunkTexts[meta.chunkIndex] ?? meta.text ?? "",
-    sectionLabel: meta.sectionLabel,
-    chunkKind: meta.chunkKind,
-    score: 1,
-    ...(meta.sourceFingerprint
-      ? { sourceFingerprint: meta.sourceFingerprint }
-      : {}),
-    ...(meta.pageStart !== undefined ? { pageStart: meta.pageStart } : {}),
-    ...(meta.pageEnd !== undefined ? { pageEnd: meta.pageEnd } : {}),
-    citationLabel: formatPaperCitationLabel(paperContext),
-    sourceLabel: formatPaperSourceLabel(paperContext),
-  }));
-}
-
 /**
- * Structural section read: when the paper carries a real section index
- * (MinerU manifest headings), match requested names against actual document
- * headings and return each section's whole contiguous text sliced from the
- * source. Falls back to chunk-label matching when no index exists.
+ * Structural section read: match requested names against the paper's real
+ * section index (MinerU manifest headings or a reader-outline index for plain
+ * PDFs) and return each section's whole contiguous text sliced from the
+ * source. There is deliberately no chunk-label fallback — a paper without a
+ * section index reports no_section_index instead of silently returning
+ * chunk-sized fragments.
  */
 function readSectionsFromIndex(params: {
   paperContext: NonNullable<PdfTarget["paperContext"]>;
@@ -165,11 +85,10 @@ function readSectionsFromIndex(params: {
 }
 
 /**
- * Deterministic section read: prefer the paper's real section index (whole
- * contiguous section text); without one, match requested section names
- * against the chunk section labels and return the matched chunks' full text.
- * Unmatched names are reported with near-miss suggestions instead of failing
- * silently.
+ * Deterministic section read: the paper's real section index is the only
+ * source of structural sections. Names that do not match are reported with
+ * near-miss suggestions; papers without an index report no_section_index —
+ * both instead of failing silently.
  */
 export async function executeSectionsRead(params: {
   targets: NonNullable<PdfTarget["paperContext"]>[];
@@ -193,63 +112,29 @@ export async function executeSectionsRead(params: {
       });
       continue;
     }
-    const chunkMeta = pdfContext?.chunkMeta ?? [];
-    const chunkTexts = pdfContext?.chunks ?? [];
-    const { labels, kindAliases } = collectSectionCandidates(chunkMeta);
-    const candidates = [...labels, ...kindAliases];
-
-    const matchedLabels = new Set<string>();
-    const matchedKinds = new Set<string>();
-    const unmatchedForPaper: string[] = [];
-    const suggestionsForPaper: string[] = [];
-
-    for (const requested of params.sectionNames) {
-      const match = matchSectionName(requested, candidates);
-      if (!match) {
-        unmatchedForPaper.push(requested);
-        for (const suggestion of suggestSections(requested, candidates)) {
-          if (!suggestionsForPaper.includes(suggestion)) {
-            suggestionsForPaper.push(suggestion);
-          }
-        }
-        continue;
-      }
-      if (labels.includes(match.candidate)) {
-        matchedLabels.add(match.candidate);
-      } else {
-        matchedKinds.add(match.candidate);
-      }
-    }
-
-    if (matchedLabels.size || matchedKinds.size) {
-      const selected = selectSectionChunks(
-        chunkMeta,
-        matchedLabels,
-        matchedKinds,
-      );
-      results.push(...toResultRows(paperContext, selected, chunkTexts));
-    }
-    if (unmatchedForPaper.length) {
-      unmatched.push({
-        paperContext,
-        status: "no_matching_sections",
-        requested: unmatchedForPaper,
-        suggestions: suggestionsForPaper,
-        availableSections: labels.slice(0, MAX_AVAILABLE_SECTION_NAMES),
-      });
-    }
+    unmatched.push({
+      paperContext,
+      status: "no_section_index",
+    });
   }
 
   if (!results.length) {
+    const missingIndex = unmatched.filter(
+      (entry) => entry.status === "no_section_index",
+    );
     return {
       mode: "sections",
-      status: "no_matching_sections",
-      papers: unmatched.map((entry) => ({
-        ...entry,
-        paperContext: entry.paperContext,
-      })),
-      guidance:
-        "No requested section matched this paper. Try a suggested name, use paper_query({query}) to find the passage by content, or paper_read({pages}) for known pages.",
+      status: missingIndex.length ? "no_section_index" : "no_matching_sections",
+      papers: unmatched,
+      ...(missingIndex.length
+        ? {
+            guidance:
+              "This paper has no section index to read sections from. Open it in a Zotero reader tab (its PDF outline becomes the section index) or parse it with MinerU, then retry; or use paper_query({query}) to find passages by content, paper_read({pages}) for known pages.",
+          }
+        : {
+            guidance:
+              "No requested section matched this paper. Try a suggested name, use paper_query({query}) to find the passage by content, or paper_read({pages}) for known pages.",
+          }),
     };
   }
 

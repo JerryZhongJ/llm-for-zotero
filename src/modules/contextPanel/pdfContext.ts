@@ -423,6 +423,20 @@ async function cacheTextAttachment(
   }
 }
 
+/**
+ * Zotero 9's pdf.getFulltext no longer returns pageChars — it emits the full
+ * text with one form feed (\f) between consecutive pages instead. Derive the
+ * per-page character counts (separator included with its preceding page) so
+ * page offsets stay aligned with the extracted text.
+ */
+function derivePageCharsFromFormFeeds(text: string): number[] | undefined {
+  if (!text.includes("\f")) return undefined;
+  const segments = text.split("\f");
+  return segments.map((segment, index) =>
+    index < segments.length - 1 ? segment.length + 1 : segment.length,
+  );
+}
+
 async function cachePDFText(
   item: Zotero.Item,
   options?: { sourceMode?: PaperContentSourceMode },
@@ -491,7 +505,7 @@ async function cachePDFText(
             (value: number) => Number.isFinite(value) && value >= 0,
           )
             ? rawPageChars
-            : undefined;
+            : derivePageCharsFromFormFeeds(pdfText);
         }
       } catch (e) {
         ztoolkit.log("PDF extraction failed:", e);

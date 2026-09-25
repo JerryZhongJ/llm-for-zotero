@@ -168,7 +168,7 @@ export function createPaperReadTool(
     spec: {
       name: "paper_read",
       description:
-        "Read content from the active or targeted papers by structured coordinate. sections:['Methods'] returns whole sections (combine ['Abstract','Introduction','Conclusion'] for a broad picture); pages:[16,17] ('16-20' also works) returns exact page text; labels:['Figure 3'] with images:true returns precise figure crops; images:true with pages returns rendered PDF pages; images:true alone returns all figures; readFullReason:'...' triggers an exhaustive whole-document read; a call without a locator is rejected. To find passages by what they say instead of where they are, use paper_query.",
+        "Read content from the active or targeted papers by structured coordinate. sections:['Methods'] returns whole sections (combine ['Abstract','Introduction','Conclusion'] for a broad picture); if the paper lacks structural sections the result says so and suggests alternatives; pages:[16,17] ('16-20' also works) returns exact page text; labels:['Figure 3'] with images:true returns precise figure crops; images:true with pages returns rendered PDF pages; images:true alone returns all figures; readFullReason:'...' triggers an exhaustive whole-document read; a call without a locator is rejected. To find passages by what they say instead of where they are, use paper_query.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -311,7 +311,19 @@ export function createPaperReadTool(
                 ? `Read ${passageCount} ${passageLabel} from ${sourcePhrase}`
                 : `Read ${passageCount} ${passageLabel}`;
             }
-            if (mode === "sections") return "No matching sections";
+            if (mode === "sections") {
+              const papersWithStatus = Array.isArray(c?.papers)
+                ? (c.papers as Array<{ status?: string }>)
+                : [];
+              if (
+                papersWithStatus.some(
+                  (paper) => paper.status === "no_section_index",
+                )
+              ) {
+                return "No section index available";
+              }
+              return "No matching sections";
+            }
             return "Read paper content";
           }
           if (mode === "full") {
@@ -397,7 +409,13 @@ export function createPaperReadTool(
           "readFullReason triggers an exhaustive whole-document read; sections/pages/labels/images are redundant with it. Drop the locators or drop readFullReason.",
         );
       }
-      if (!sections && !pages?.length && !labels && !images && !readFullReason) {
+      if (
+        !sections &&
+        !pages?.length &&
+        !labels &&
+        !images &&
+        !readFullReason
+      ) {
         return fail(
           "paper_read requires a locator: sections (e.g. ['Abstract', 'Introduction', 'Conclusion'] for a broad picture), pages, labels with images:true, or readFullReason. For relevance-ranked passages use paper_query({query}).",
         );
@@ -410,11 +428,7 @@ export function createPaperReadTool(
         targetsProvided: isTargetArray,
         targets: isTargetArray ? args.target : undefined,
         mode: images ? "visual" : "paper",
-        maxCount: readFullReason
-          ? MAX_FULL_TARGETS
-          : images
-            ? 1
-            : MAX_TARGETS,
+        maxCount: readFullReason ? MAX_FULL_TARGETS : images ? 1 : MAX_TARGETS,
       });
       if (targetSyntax.kind === "invalid") {
         return fail(`${targetSyntax.code}: ${targetSyntax.message}`);
@@ -676,4 +690,3 @@ async function executeFullRead(params: {
   };
   return output;
 }
-
