@@ -4,6 +4,23 @@ Notable user-facing changes to the LLM for Zotero plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions match
 `package.json`.
 
+## 3.11.4 - 2026-09-25
+
+### Fixed
+
+- Zotero 9 compatibility: `pdf.getFulltext` no longer returns per-page
+  character counts, so section reading through the reader outline never
+  engaged. Page offsets are now derived from the form-feed separators in the
+  extracted text.
+
+### Changed
+
+- `paper_read({ sections })` no longer falls back to chunk-label matching on
+  papers without a structural section index. Such papers now report
+  `no_section_index` with guidance to open the paper in a reader tab, parse it
+  with MinerU, or use `paper_query`/`pages` — instead of silently returning
+  chunk-sized fragments.
+
 ## 3.11.3 - 2026-09-24
 
 ### Fixed
