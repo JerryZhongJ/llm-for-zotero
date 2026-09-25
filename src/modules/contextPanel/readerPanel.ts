@@ -683,6 +683,12 @@ function getToolbarHandler(): ToolbarEventHandler {
     const reader = event.reader as ReaderLike | undefined;
     const tabID = getReaderTabID(reader);
     if (!tabID || !event.doc || typeof event.append !== "function") return;
+    // renderToolbar re-fires on toolbar re-renders without clearing our
+    // previous button, and the startup sweep can have injected one already.
+    // Duplicate ids hide from getElementById, so sweep by attribute selector.
+    event.doc
+      .querySelectorAll(`[id="${READER_PANEL_TOGGLE_ID}"]`)
+      .forEach((el) => el.remove());
     syncReaderPanels();
     const controller = controllers.get(tabID);
     if (controller) {
@@ -726,8 +732,17 @@ function getToolbarHandler(): ToolbarEventHandler {
     icon.append(iconBody);
     button.append(icon);
     button.addEventListener("click", () => {
-      toggleReaderPanel(tabID);
-      const nowOpen = controllers.get(tabID)?.open ?? false;
+      // Re-resolve at click time: a session-restored reader can render its
+      // toolbar before its controller exists, so a tabID captured at button
+      // creation may find nothing in the controllers map. Sync once, then
+      // toggle whichever tab the reader reports now.
+      let currentTabID = getReaderTabID(reader) || tabID;
+      if (!controllers.get(currentTabID)) {
+        syncReaderPanels();
+        currentTabID = getReaderTabID(reader) || tabID;
+      }
+      toggleReaderPanel(currentTabID);
+      const nowOpen = controllers.get(currentTabID)?.open ?? false;
       button.setAttribute("aria-pressed", nowOpen ? "true" : "false");
       button.style.background = nowOpen
         ? "var(--fill-quinary, rgba(128,128,128,0.25))"
