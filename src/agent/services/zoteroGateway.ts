@@ -23,6 +23,8 @@ import {
 import { resolvePaperContextRefFromAttachment } from "../../modules/contextPanel/paperAttribution";
 import { invalidateCachedContextText } from "../../modules/contextPanel/pdfContext";
 import { ensureMineruCacheDirForAttachment } from "../../modules/contextPanel/mineruSync";
+import { notifyPdfFetchOutcome } from "../../modules/contextPanel/pdfFetchNotice";
+import { fetchAndAttachPublisherPdf } from "./publisherPdfResolver";
 import {
   persistVerifiedNoteHtml,
   type CreatedZoteroNoteReceipt,
@@ -641,6 +643,35 @@ function resolveLibraryDisplayName(libraryID: number): string {
     void _error;
   }
   return "My Library";
+}
+
+/**
+ * Guard for the built-in find-PDF call: anti-bot challenges (IEEE/F5) can
+ * leave `addAvailableFile` unsettled forever; after this long we give up on
+ * it and let the publisher resolver chain take over.
+ */
+const BUILTIN_PDF_LOOKUP_TIMEOUT_MS = 60_000;
+let builtinPdfLookupTimeoutMs = BUILTIN_PDF_LOOKUP_TIMEOUT_MS;
+
+/** Test seam: shrink the built-in find-PDF guard so tests don't wait a minute. */
+export function setBuiltinPdfLookupTimeoutForTests(ms: number): void {
+  builtinPdfLookupTimeoutMs = ms;
+}
+
+function raceWithTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms}ms`)),
+        ms,
+      ),
+    ),
+  ]);
 }
 
 function getPdfChildAttachments(item: Zotero.Item): Zotero.Item[] {
@@ -6631,9 +6662,12 @@ export class ZoteroGateway {
    * Attach PDFs that Zotero's own "Find Available PDF" resolvers can locate —
    * the same machinery as the right-click menu entry (DOI landing pages,
    * Unpaywall mirror, custom resolvers). `addAvailableFile` is the Zotero 7
-   * name; `addAvailablePDF` is kept as a Zotero 6 fallback. Runs in the
-   * background after an import returns; best-effort per item: a failed lookup
-   * is logged, never thrown, so it cannot break the import that precedes it.
+   * name; `addAvailablePDF` is kept as a Zotero 6 fallback. When the built-in
+   * lookup comes up empty (typically behind a paywall), fall back to the
+   * publisher-specific resolver chain in publisherPdfResolver (ACM/IEEE
+   * direct, Unpaywall). Runs in the background after an import returns;
+   * best-effort per item: a failed lookup is logged, never thrown, so it
+   * cannot break the import that precedes it.
    */
   private async fetchMissingPdfAttachments(itemIds: number[]): Promise<number> {
     const attachmentsApi = (
@@ -6648,22 +6682,46 @@ export class ZoteroGateway {
     ).Attachments;
     const findAvailable =
       attachmentsApi?.addAvailableFile || attachmentsApi?.addAvailablePDF;
-    if (!attachmentsApi || !findAvailable) {
-      return 0;
-    }
     let fetched = 0;
+    const attemptedTitles: string[] = [];
+    const attachedTitles: string[] = [];
     for (const itemId of itemIds) {
       try {
         const item = this.getItem(itemId);
         if (!item || getPdfChildAttachments(item).length) {
           continue;
         }
+        const title = item.getDisplayTitle?.() || `item ${itemId}`;
+        attemptedTitles.push(title);
         Zotero.debug(
           `[llm-for-zotero] Fetching available PDF for imported item ${itemId}`,
         );
-        const attachment = await findAvailable.call(attachmentsApi, item);
+        // Zotero's built-in lookup can hang indefinitely behind an anti-bot
+        // challenge (observed on IEEE: addAvailableFile never settles), which
+        // would stall the whole background pass — race it with a timeout so
+        // the publisher chain below still gets its turn.
+        const attachment = findAvailable
+          ? await raceWithTimeout(
+              findAvailable.call(attachmentsApi, item),
+              builtinPdfLookupTimeoutMs,
+              `built-in findPDF for item ${itemId}`,
+            ).catch((error: unknown) => {
+              Zotero.debug(
+                `[llm-for-zotero] findPDF for item ${itemId} gave up: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+              return false as const;
+            })
+          : false;
         if (attachment) {
           fetched += 1;
+          attachedTitles.push(title);
+          continue;
+        }
+        if (await fetchAndAttachPublisherPdf(item)) {
+          fetched += 1;
+          attachedTitles.push(title);
         }
       } catch (error) {
         Zotero.debug(
@@ -6673,6 +6731,9 @@ export class ZoteroGateway {
         );
       }
     }
+    // The pass runs long after the import receipt landed — surface the
+    // outcome as a toast on every registered panel.
+    notifyPdfFetchOutcome({ attemptedTitles, attachedTitles });
     return fetched;
   }
 }

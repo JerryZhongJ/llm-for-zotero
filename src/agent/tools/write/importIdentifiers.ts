@@ -27,7 +27,7 @@ export function createImportIdentifiersTool(
     spec: {
       name: "import_identifiers",
       description:
-        "Import ONE paper into Zotero by DOI, ISBN, arXiv ID, or URL. One call per paper: each import is its own journalled action with its own undo.",
+        "Import ONE paper into Zotero by DOI, ISBN, arXiv ID, or URL. One call per paper: each import is its own journalled action with its own undo. After the import returns, a background pass automatically tries to fetch the PDF (open-access sources, then publisher resolvers) — it lands as an attachment later, and a popup reports the outcome; do not wait for it or report PDF status in your answer.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -79,8 +79,8 @@ export function createImportIdentifiersTool(
             : 0;
           if (outcome?.status === "imported") {
             return produced === 1
-              ? "Imported 1 paper"
-              : `Imported ${produced} papers`;
+              ? "Imported 1 paper · PDF fetch runs in background"
+              : `Imported ${produced} papers · PDF fetch runs in background`;
           }
           if (outcome?.status === "not_found") {
             return `Not imported — identifier not found${

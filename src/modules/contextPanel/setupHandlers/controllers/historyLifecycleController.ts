@@ -1,5 +1,6 @@
 import { createElement } from "../../../../utils/domHelpers";
 import { t } from "../../../../utils/i18n";
+import { createTopToastShower } from "../../topToast";
 import type { ConversationSystem } from "../../../../shared/types";
 import {
   loadTruncatedConversationIndexMatches,
@@ -582,25 +583,7 @@ export function createHistoryLifecycleController(
   >();
   const historySearchDocumentCacheLimit = Math.max(GLOBAL_HISTORY_LIMIT, 200);
   let globalHistoryLoadSeq = 0;
-  const TOP_TOAST_TIMEOUT_MS = 2600;
-  let topToastTimer: number | null = null;
-
-  const getWindowTimeout = (fn: () => void, delayMs: number): number => {
-    const win = body.ownerDocument?.defaultView;
-    if (win) return win.setTimeout(fn, delayMs);
-    return (setTimeout(fn, delayMs) as unknown as number) || 0;
-  };
-
-  const clearWindowTimeout = (timeoutId: number | null) => {
-    if (!Number.isFinite(timeoutId)) return;
-    const win = body.ownerDocument?.defaultView;
-    if (win) {
-      win.clearTimeout(timeoutId as number);
-      return;
-    }
-    clearTimeout(timeoutId as unknown as ReturnType<typeof setTimeout>);
-  };
-
+  const showTopToast = createTopToastShower(topToast);
   const hideHistoryUndoToast = () => {
     if (historyUndo) historyUndo.style.display = "none";
     if (historyUndoText) historyUndoText.textContent = "";
@@ -618,27 +601,6 @@ export function createHistoryLifecycleController(
     historyUndo.style.display = "flex";
   };
 
-  const showTopToast = (message: string): void => {
-    if (!topToast) return;
-    clearWindowTimeout(topToastTimer);
-    topToastTimer = null;
-    topToast.textContent = message;
-    topToast.style.display = "flex";
-    topToast.setAttribute("aria-hidden", "false");
-    const win = body.ownerDocument?.defaultView;
-    const reveal = () => topToast.classList.add("llm-top-toast-visible");
-    if (win?.requestAnimationFrame) {
-      win.requestAnimationFrame(reveal);
-    } else {
-      reveal();
-    }
-    topToastTimer = getWindowTimeout(() => {
-      topToast.classList.remove("llm-top-toast-visible");
-      topToast.setAttribute("aria-hidden", "true");
-      topToast.style.display = "none";
-      topToastTimer = null;
-    }, TOP_TOAST_TIMEOUT_MS);
-  };
 
   const isHistoryEntryActive = (
     entry: ConversationHistoryEntry,

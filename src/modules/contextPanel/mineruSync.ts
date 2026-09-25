@@ -308,7 +308,10 @@ async function readFileBytes(path: string): Promise<Uint8Array | null> {
   return null;
 }
 
-async function writeFileBytes(path: string, data: Uint8Array): Promise<void> {
+export async function writeFileBytes(
+  path: string,
+  data: Uint8Array,
+): Promise<void> {
   const io = getIOUtils();
   if (io?.write) {
     await io.write(path, data);
@@ -358,7 +361,7 @@ function computeCacheEntriesContentHash(
   return `fnv1a32-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
-async function removePath(path: string): Promise<void> {
+export async function removePath(path: string): Promise<void> {
   const io = getIOUtils();
   if (io?.remove) {
     try {
@@ -740,7 +743,7 @@ async function writeTempPackageFile(
   return filePath;
 }
 
-function pathToNsIFile(filePath: string): nsIFile | string {
+export function pathToNsIFile(filePath: string): nsIFile | string {
   const zoteroFile = (
     Zotero as unknown as {
       File?: { pathToFile?: (pathOrFile: string) => nsIFile };

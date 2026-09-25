@@ -1,5 +1,9 @@
 import { assert } from "chai";
 import { ZoteroGateway } from "../src/agent/services/zoteroGateway";
+import {
+  resetPdfResolverThrottlesForTests,
+} from "../src/agent/services/publisherPdfResolver";
+import { setBuiltinPdfLookupTimeoutForTests } from "../src/agent/services/zoteroGateway";
 
 /**
  * Handing `library_import kind:'files'` a `.ris` called
@@ -383,6 +387,138 @@ describe("PDF fetch after identifier import", function () {
 
     assert.equal(result.status, "imported");
     assert.lengthOf(result.items, 1);
+  });
+
+  it("falls back to the publisher resolvers when the built-in lookup finds nothing", async function () {
+    const imported: Array<Record<string, unknown>> = [];
+    installSearchTranslate(
+      {
+        11: {
+          id: 11,
+          isRegularItem: () => true,
+          isAttachment: () => false,
+          getAttachments: () => [],
+          getField: (name: string) =>
+            name === "DOI" ? "10.1145/3442188.3445922" : "",
+        },
+      },
+      {
+        Attachments: {
+          addAvailableFile: async () => false,
+          importFromFile: async (options: Record<string, unknown>) => {
+            imported.push(options);
+            return { id: 900 };
+          },
+        },
+        File: { pathToFile: (path: string) => ({ path }) },
+        getTempDirectory: () => ({ path: "/tmp" }),
+        HTTP: {
+          request: async () => ({
+            status: 200,
+            response: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 1]).buffer,
+          }),
+        },
+      },
+    );
+    resetPdfResolverThrottlesForTests();
+
+    const gateway = new ZoteroGateway();
+    const result = await gateway.importOnePaperByIdentifier(
+      "10.1145/3442188.3445922",
+    );
+    await gateway.waitForPdfFetches();
+
+    assert.equal(result.status, "imported");
+    assert.lengthOf(imported, 1, "publisher chain must attach the PDF");
+    assert.equal(imported[0].parentItemID, 11);
+    assert.equal(imported[0].contentType, "application/pdf");
+  });
+
+  it("gives up on a hung built-in lookup and falls through to the publisher chain", async function () {
+    const imported: Array<Record<string, unknown>> = [];
+    installSearchTranslate(
+      {
+        11: {
+          id: 11,
+          isRegularItem: () => true,
+          isAttachment: () => false,
+          getAttachments: () => [],
+          getField: (name: string) =>
+            name === "DOI" ? "10.1145/3442188.3445922" : "",
+        },
+      },
+      {
+        Attachments: {
+          // Never settles — mirrors the IEEE/F5 anti-bot hang.
+          addAvailableFile: () => new Promise(() => undefined),
+          importFromFile: async (options: Record<string, unknown>) => {
+            imported.push(options);
+            return { id: 900 };
+          },
+        },
+        File: { pathToFile: (path: string) => ({ path }) },
+        getTempDirectory: () => ({ path: "/tmp" }),
+        HTTP: {
+          request: async () => ({
+            status: 200,
+            response: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 1]).buffer,
+          }),
+        },
+      },
+    );
+    resetPdfResolverThrottlesForTests();
+    setBuiltinPdfLookupTimeoutForTests(10);
+
+    const gateway = new ZoteroGateway();
+    const result = await gateway.importOnePaperByIdentifier(
+      "10.1145/3442188.3445922",
+    );
+    await gateway.waitForPdfFetches();
+    setBuiltinPdfLookupTimeoutForTests(60_000);
+
+    assert.equal(result.status, "imported");
+    assert.lengthOf(imported, 1, "publisher chain must get its turn");
+  });
+
+  it("does not touch the publisher chain when the built-in lookup already attached a PDF", async function () {
+    const httpRequestUrls: string[] = [];
+    installSearchTranslate(
+      {
+        11: {
+          id: 11,
+          isRegularItem: () => true,
+          isAttachment: () => false,
+          getAttachments: () => [],
+          getField: (name: string) =>
+            name === "DOI" ? "10.1145/3442188.3445922" : "",
+        },
+      },
+      {
+        Attachments: {
+          addAvailableFile: async () => ({ id: 500 }),
+        },
+        HTTP: {
+          request: async (_method: string, url: string) => {
+            httpRequestUrls.push(url);
+            throw new Error("no download expected");
+          },
+        },
+      },
+    );
+    resetPdfResolverThrottlesForTests();
+
+    const gateway = new ZoteroGateway();
+    const result = await gateway.importOnePaperByIdentifier(
+      "10.1145/3442188.3445922",
+    );
+    await gateway.waitForPdfFetches();
+
+    assert.equal(result.status, "imported");
+    assert.deepEqual(
+      httpRequestUrls,
+      [],
+      "built-in success must short-circuit the publisher chain",
+    );
   });
 });
 

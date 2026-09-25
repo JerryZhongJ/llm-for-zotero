@@ -2,6 +2,7 @@ import { createElement } from "../../utils/domHelpers";
 import { t } from "../../utils/i18n";
 import { config } from "../../../package.json";
 import { normalizeAgentLibraryWriteMode } from "../../shared/agentLibraryWriteMode";
+import { registerPdfFetchOutcomeToast } from "./pdfFetchNotice";
 import {
   PREFERENCES_PANE_ID,
   getSelectTextExpandedLabel,
@@ -293,6 +294,8 @@ function buildUI(body: Element, item?: Zotero.Item | null) {
   topToast.setAttribute("aria-live", "polite");
   topToast.setAttribute("aria-hidden", "true");
   header.appendChild(topToast);
+  // Background PDF-fetch results land on this toast (see pdfFetchNotice).
+  registerPdfFetchOutcomeToast(topToast);
 
   container.appendChild(header);
 

@@ -154,7 +154,7 @@ const LIBRARY_IMPORT_GUIDANCE: ToolGuidance = {
     ),
   instruction:
     "Use library_import with kind:'files' to import local files from the user's filesystem into Zotero. First use run_command to list files when paths are unknown, then call library_import once per file with kind:'files' and filePath — each import is its own journalled action with its own undo, and multiple calls in one reply share a single batch confirmation. A bibliography file (.ris, .bib, .enw, .nbib, RDF) has its references imported as real items; other files are attached, and PDFs go through Zotero's metadata lookup so they arrive with a title and authors. Every import call must carry targetCollectionId: the collection currently open in the Zotero pane is listed in the turn context as 'ambient context (current collection)' — use its collectionId unless the user asks for another destination." +
-    "\n\nkind:'identifiers' resolves DOIs, ISBNs, PMIDs, arXiv IDs and ADS bibcodes. It cannot import from a page URL — Zotero has no translator path for that — so take the DOI or arXiv ID off the page instead.",
+    "\n\nkind:'identifiers' resolves DOIs, ISBNs, PMIDs, arXiv IDs and ADS bibcodes. It cannot import from a page URL — Zotero has no translator path for that — so take the DOI or arXiv ID off the page instead. The PDF is fetched by a background pass after the import returns; a popup reports the outcome, so answer without waiting for it.",
 };
 
 const LIBRARY_DELETE_GUIDANCE: ToolGuidance = {
@@ -816,7 +816,7 @@ function createLibraryImportTool(tools: {
     name: "library_import",
     label: "Import to Library",
     description:
-      "Add ONE item to Zotero per call. kind:'identifiers' with identifier:'<DOI/ISBN/arXiv/URL>' for lookups (one paper per call — each import is separately undoable), kind:'files' for local files, kind:'manual' to create items from scratch when neither applies (a book with no DOI, a thesis, a dataset).",
+      "Add ONE item to Zotero per call. kind:'identifiers' with identifier:'<DOI/ISBN/arXiv/URL>' for lookups (one paper per call — each import is separately undoable; a background pass fetches the PDF afterwards and reports via popup), kind:'files' for local files, kind:'manual' to create items from scratch when neither applies (a book with no DOI, a thesis, a dataset).",
     mutability: "write",
     requiresConfirmation: true,
     inputSchema: {
